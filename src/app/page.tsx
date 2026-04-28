@@ -1,64 +1,45 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Logo } from "@/components/Logo";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-green-50 px-6 py-10">
+      <main className="w-full max-w-4xl rounded-3xl border border-blue-200 bg-white p-10 shadow-2xl">
+        <section className="mb-10 text-center">
+          <div className="flex justify-center mb-6">
+            <Logo size="lg" />
+          </div>
+          <h1 className="mt-4 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
+            保護者と講師のための学習管理プラットフォーム</h1>
+          <p className="mx-auto mt-6 max-w-2xl text-base leading-8 text-slate-700 sm:text-lg">
+            まずはログインしてください。講師は生徒へのメッセージ送信、診断テストの作成、分析とカルテ作成、報告書作成、講師間連携を行えます。保護者はお子さまの学習状況を確認できます。</p>
+        </section>
+
+        <section className="grid gap-5 sm:grid-cols-2">
+          <Link
+            href="/login/parent"
+            className="rounded-3xl border-2 border-blue-600 bg-white px-8 py-8 text-center transition hover:bg-blue-50 hover:shadow-lg"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            <div className="inline-flex items-center justify-center rounded-full bg-blue-100 p-3 mb-3">
+              <p className="text-lg">👨‍👩‍👧</p>
+            </div>
+            <p className="text-sm font-semibold text-blue-600">保護者ログイン</p>
+            <p className="mt-4 text-xl font-semibold text-slate-900">お子さまの学習状況を確認</p>
+            <p className="mt-3 text-sm leading-6 text-slate-700">レポート・成績・連絡の確認ページへ進みます。</p>
+          </Link>
+
+          <Link
+            href="/login/teacher"
+            className="rounded-3xl border-2 border-green-600 bg-white px-8 py-8 text-center transition hover:bg-green-50 hover:shadow-lg"
           >
-            Documentation
-          </a>
-        </div>
+            <div className="inline-flex items-center justify-center rounded-full bg-green-100 p-3 mb-3">
+              <p className="text-lg">👨‍🏫</p>
+            </div>
+            <p className="text-sm font-semibold text-green-600">講師ログイン</p>
+            <p className="mt-4 text-xl font-semibold text-slate-900">生徒を管理・分析する</p>
+            <p className="mt-3 text-sm leading-6 text-slate-700">メッセージ、診断テスト、カルテ作成、連携機能を使います。</p>
+          </Link>
+        </section>
       </main>
     </div>
   );
