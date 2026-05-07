@@ -1,97 +1,139 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 
-const stats = [
-  { label: "担当生徒", value: "24", description: "進捗管理と指導状況を確認" },
-  { label: "診断テスト", value: "8", description: "作成済みテスト数" },
-  { label: "未読メッセージ", value: "12", description: "生徒・保護者からの連絡" },
-  { label: "カルテ", value: "5", description: "作成中の学習カルテ" },
-];
-
-const cards = [
-  { title: "メッセージ送信", description: "個別・全体へ連絡ができます。", href: "/teacher/dashboard/messages" },
-  { title: "診断テスト作成", description: "学力診断テストを作成・管理します。", href: "/teacher/dashboard/tests" },
-  { title: "多層診断システム", description: "学力・学習量・学習の質を多角的に診断しレポートを生成します。", href: "/teacher/dashboard/diagnosis" },
-  { title: "分析とカルテ", description: "テスト結果を分析し、カルテを作成します。", href: "/teacher/dashboard/analysis" },
-  { title: "報告書作成", description: "保護者向けの報告書を準備します。", href: "/teacher/dashboard/reports" },
-  { title: "講師連携", description: "講師同士で生徒指導の情報共有を行います。", href: "/teacher/dashboard/collaboration" },
-  { title: "校舎・講師管理", description: "新しい塾登録や講師の階層管理を行います。", href: "/teacher/dashboard/schools" },
+const QUICK_ACTIONS = [
+  {
+    title: "診断テスト作成",
+    desc: "AIで問題を自動生成し、URLで生徒に配布",
+    href: "/teacher/dashboard/tests",
+    color: "bg-blue-50 border-blue-200 hover:border-blue-400 hover:shadow-blue-100",
+    iconBg: "bg-blue-100",
+    iconColor: "text-blue-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    title: "多層診断システム",
+    desc: "学力・学習量・学習の質を多角的に診断しレポートを生成",
+    href: "/teacher/dashboard/diagnosis",
+    color: "bg-indigo-50 border-indigo-200 hover:border-indigo-400 hover:shadow-indigo-100",
+    iconBg: "bg-indigo-100",
+    iconColor: "text-indigo-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
+    title: "生徒・講師管理",
+    desc: "校舎・講師・生徒の登録と管理を一元化",
+    href: "/teacher/dashboard/schools",
+    color: "bg-emerald-50 border-emerald-200 hover:border-emerald-400 hover:shadow-emerald-100",
+    iconBg: "bg-emerald-100",
+    iconColor: "text-emerald-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+  {
+    title: "メッセージ送信",
+    desc: "生徒・保護者への個別・一括連絡",
+    href: "/teacher/dashboard/messages",
+    color: "bg-amber-50 border-amber-200 hover:border-amber-400 hover:shadow-amber-100",
+    iconBg: "bg-amber-100",
+    iconColor: "text-amber-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+      </svg>
+    ),
+  },
+  {
+    title: "分析とカルテ",
+    desc: "テスト結果を分析し、学習カルテを作成",
+    href: "/teacher/dashboard/analysis",
+    color: "bg-violet-50 border-violet-200 hover:border-violet-400 hover:shadow-violet-100",
+    iconBg: "bg-violet-100",
+    iconColor: "text-violet-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    title: "報告書作成",
+    desc: "保護者向けの報告書テンプレート管理",
+    href: "/teacher/dashboard/reports",
+    color: "bg-rose-50 border-rose-200 hover:border-rose-400 hover:shadow-rose-100",
+    iconBg: "bg-rose-100",
+    iconColor: "text-rose-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+      </svg>
+    ),
+  },
 ];
 
 export default function TeacherDashboardPage() {
-  const router = useRouter();
-  const logout = async () => {
-    await supabase.auth.signOut();
-    router.replace("/login");
-  };
+  const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
 
   return (
-    <div className="min-h-screen bg-white px-6 py-8 text-slate-900">
-      <div className="mx-auto flex max-w-6xl flex-col gap-8">
-        <header className="rounded-3xl border border-green-200 bg-gradient-to-r from-blue-50 to-green-50 p-8 shadow-sm">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.25em] text-green-600">講師ダッシュボード</p>
-              <h1 className="mt-3 text-4xl font-bold text-slate-900">生徒管理・診断・連携をここから</h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-700">
-                メッセージ送信、診断テスト、分析、カルテ、報告書、講師間連携を進めるための操作をまとめた画面です。
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <button
-                onClick={logout}
-                className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-              >
-                ログアウト
-              </button>
-            </div>
-          </div>
-        </header>
+    <div className="px-8 py-8">
+      {/* ヘッダー */}
+      <div className="mb-8">
+        <p className="text-sm text-slate-400">{today}</p>
+        <h1 className="mt-1 text-2xl font-bold text-slate-900">ダッシュボード</h1>
+        <p className="mt-1 text-sm text-slate-500">今日も生徒の成長をサポートしましょう。</p>
+      </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {stats.map((item, index) => (
-            <div key={item.label} className={`rounded-3xl border p-6 shadow-sm ${index % 2 === 0 ? 'border-blue-200 bg-gradient-to-br from-blue-50 to-white' : 'border-green-200 bg-gradient-to-br from-green-50 to-white'}`}>
-              <p className={`text-sm font-semibold ${index % 2 === 0 ? 'text-blue-600' : 'text-green-600'}`}>{item.label}</p>
-              <p className="mt-4 text-3xl font-bold text-slate-900">{item.value}</p>
-              <p className="mt-3 text-sm leading-6 text-slate-700">{item.description}</p>
-            </div>
-          ))}
-        </section>
-
-        <section className="grid gap-6 lg:grid-cols-2">
-          {cards.map((card, index) => (
-            <Link
-              key={card.title}
-              href={card.href}
-              className={`group rounded-3xl border p-6 transition ${index < 3 ? 'border-blue-300 bg-white hover:border-blue-400 hover:shadow-lg hover:shadow-blue-100' : 'border-green-300 bg-white hover:border-green-400 hover:shadow-lg hover:shadow-green-100'}`}
-            >
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className={`text-lg font-semibold ${index < 3 ? 'text-blue-900' : 'text-green-900'}`}>{card.title}</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">{card.description}</p>
-                </div>
-                <span className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition ${index < 3 ? 'bg-blue-100 text-blue-600 group-hover:bg-blue-200' : 'bg-green-100 text-green-600 group-hover:bg-green-200'}`}>
-                  →
-                </span>
+      {/* クイックアクション */}
+      <section>
+        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-slate-400">クイックアクション</h2>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {QUICK_ACTIONS.map((item) => (
+            <Link key={item.title} href={item.href}
+              className={`group flex items-start gap-4 rounded-2xl border bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${item.color}`}>
+              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${item.iconBg}`}>
+                <span className={item.iconColor}>{item.icon}</span>
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-900">{item.title}</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">{item.desc}</p>
               </div>
             </Link>
           ))}
-        </section>
+        </div>
+      </section>
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <h2 className="text-2xl font-bold text-slate-950">今後の拡張</h2>
-          <ul className="mt-4 space-y-3 text-slate-600">
-            <li>・生徒個別ページで成績・提出物・指導メモを確認</li>
-            <li>・診断テストの詳細設計と自動集計</li>
-            <li>・保護者向け報告書のテンプレート管理</li>
-            <li>・講師の権限・校舎階層の管理画面</li>
-            <li>・チャット形式の講師連携コメント</li>
-          </ul>
-        </section>
-      </div>
+      {/* システム情報 */}
+      <section className="mt-8">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50">
+              <svg className="h-5 w-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900">システム稼働中</p>
+              <p className="text-xs text-slate-400">Supabase • Claude AI • OpenAI GPT-4o</p>
+            </div>
+            <div className="ml-auto flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              <span className="text-xs font-medium text-emerald-600">正常</span>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
