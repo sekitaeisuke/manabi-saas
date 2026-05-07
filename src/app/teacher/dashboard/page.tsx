@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 const stats = [
   { label: "担当生徒", value: "24", description: "進捗管理と指導状況を確認" },
@@ -10,6 +14,7 @@ const stats = [
 const cards = [
   { title: "メッセージ送信", description: "個別・全体へ連絡ができます。", href: "/teacher/dashboard/messages" },
   { title: "診断テスト作成", description: "学力診断テストを作成・管理します。", href: "/teacher/dashboard/tests" },
+  { title: "多層診断システム", description: "学力・学習量・学習の質を多角的に診断しレポートを生成します。", href: "/teacher/dashboard/diagnosis" },
   { title: "分析とカルテ", description: "テスト結果を分析し、カルテを作成します。", href: "/teacher/dashboard/analysis" },
   { title: "報告書作成", description: "保護者向けの報告書を準備します。", href: "/teacher/dashboard/reports" },
   { title: "講師連携", description: "講師同士で生徒指導の情報共有を行います。", href: "/teacher/dashboard/collaboration" },
@@ -17,6 +22,12 @@ const cards = [
 ];
 
 export default function TeacherDashboardPage() {
+  const router = useRouter();
+  const logout = async () => {
+    await supabase.auth.signOut();
+    router.replace("/login");
+  };
+
   return (
     <div className="min-h-screen bg-white px-6 py-8 text-slate-900">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
@@ -30,12 +41,12 @@ export default function TeacherDashboardPage() {
               </p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link
-                href="/"
-                className="rounded-full border border-green-300 bg-white px-5 py-3 text-sm font-semibold text-green-700 transition hover:bg-green-50"
+              <button
+                onClick={logout}
+                className="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
               >
-                トップに戻る
-              </Link>
+                ログアウト
+              </button>
             </div>
           </div>
         </header>

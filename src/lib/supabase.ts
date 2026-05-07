@@ -52,3 +52,73 @@ export type Result = {
   percentage: number;
   completed_at: string;
 };
+
+export type School = {
+  id: string;
+  name: string;
+  address: string | null;
+  phone: string | null;
+  admin_name: string | null;
+  created_at: string;
+};
+
+export type Teacher = {
+  id: string;
+  name: string;
+  email: string | null;
+  role: "admin" | "teacher" | "part-time";
+  school_id: string | null;
+  created_at: string;
+};
+
+export type Student = {
+  id: string;
+  name: string;
+  grade: string;
+  school_id: string | null;
+  created_at: string;
+};
+
+export type DiagnosisRating = 1 | 2 | 3 | 4; // ×=1 △=2 ○=3 ◎=4
+
+export type VolumeRatings = {
+  daily_completion: DiagnosisRating;
+  schedule_adherence: DiagnosisRating;
+  basic_fluency: DiagnosisRating;
+  weak_unit: DiagnosisRating;
+  practice_volume: DiagnosisRating;
+};
+
+export type QualityRatings = {
+  read_problem: DiagnosisRating;
+  read_solution: DiagnosisRating;
+  read_example: DiagnosisRating;
+  write_steps: DiagnosisRating;
+  write_notes: DiagnosisRating;
+  write_vocab: DiagnosisRating;
+  listen_teacher: DiagnosisRating;
+  listen_test_info: DiagnosisRating;
+  listen_until_understand: DiagnosisRating;
+  speak_error: DiagnosisRating;
+  speak_resolving: DiagnosisRating;
+  speak_balance: DiagnosisRating;
+};
+
+export type DifficultyResult = { score: number; total: number };
+
+export type Diagnosis = {
+  id: string;
+  student_id: string;
+  created_at: string;
+  test_score: number | null;
+  test_total: number | null;
+  test_rate: number | null;
+  test_subject: string | null;
+  weak_units: string[] | null;
+  difficulty_results: { basic: DifficultyResult; standard: DifficultyResult; advanced: DifficultyResult } | null;
+  volume_ratings: VolumeRatings;
+  quality_ratings: QualityRatings;
+  volume_score: number;
+  quality_score: number;
+  report_html: string | null;
+};
