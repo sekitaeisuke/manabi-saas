@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, Diagnosis, VolumeRatings, QualityRatings, DiagnosisRating } from "@/lib/supabase";
-import { GRADE_ORDER } from "@/lib/curriculum";
+import { GRADE_ORDER, getAdjacentGrades, getUnitsForGrade, SUBJECT_LIST } from "@/lib/curriculum";
 
 // ─── 定数 ────────────────────────────────────────────
 const RATING_OPTIONS: { value: DiagnosisRating; label: string; color: string }[] = [
@@ -27,7 +27,7 @@ const DEFAULT_QUALITY: QualityRatings = {
 
 // ─── メインページ ─────────────────────────────────────
 export default function DiagnosisPage() {
-  const [view, setView] = useState<"list" | "history" | "create" | "report" | "human-check">("list");
+  const [view, setView] = useState<"list" | "history" | "create" | "report" | "human-check" | "issue-test">("list");
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
@@ -68,6 +68,10 @@ export default function DiagnosisPage() {
 
   if (view === "human-check") {
     return <HumanCheckView onBack={() => setView("list")} />;
+  }
+
+  if (view === "issue-test") {
+    return <IssueTestView onBack={() => setView("list")} />;
   }
 
   if (view === "report" && selectedDiagnosis) {
@@ -111,16 +115,16 @@ export default function DiagnosisPage() {
             <h1 className="text-3xl font-bold text-slate-950">多層診断システム</h1>
             <p className="mt-1 text-slate-600">学力・学習量・学習の質を多角的に診断します</p>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => setView("issue-test")}
+              className="rounded-2xl bg-indigo-600 px-5 py-3 font-semibold text-white hover:bg-indigo-700">
+              + 多層診断テストを配布
+            </button>
             <button onClick={() => setView("human-check")}
               className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 font-semibold text-amber-800 hover:bg-amber-100">
               ヒューマンチェック
             </button>
             <NewStudentButton onCreated={(s) => { setStudents((prev) => [s, ...prev]); }} />
-            <Link href="/teacher/dashboard"
-              className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50">
-              ダッシュボード
-            </Link>
           </div>
         </div>
 
@@ -753,6 +757,267 @@ function TrendChart({ diagnoses }: { diagnoses: Diagnosis[] }) {
         <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded bg-indigo-500" />学習量</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded bg-emerald-500" />学習の質</span>
       </div>
+    </div>
+  );
+}
+
+// ─── 多層診断テスト作成・配布 ─────────────────────────────
+type GenStep = "idle" | "step1" | "step2" | "step3" | "saving" | "done";
+
+function IssueTestView({ onBack }: { onBack: () => void }) {
+  const [grade, setGrade] = useState("中1");
+  const [subject, setSubject] = useState("数学");
+  const [count, setCount] = useState(10);
+  const [difficulties, setDifficulties] = useState<string[]>(["basic", "standard"]);
+  const [selectedUnits, setSelectedUnits] = useState<{ grade: string; unit: string }[]>([]);
+  const [step, setStep] = useState<GenStep>("idle");
+  const [error, setError] = useState("");
+  const [publishedUrl, setPublishedUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const adjacentGrades = getAdjacentGrades(grade);
+
+  const toggleUnit = (g: string, unit: string) => {
+    setSelectedUnits((prev) => {
+      const exists = prev.some((u) => u.grade === g && u.unit === unit);
+      return exists ? prev.filter((u) => !(u.grade === g && u.unit === unit)) : [...prev, { grade: g, unit }];
+    });
+  };
+
+  const toggleDiff = (d: string) =>
+    setDifficulties((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]);
+
+  const generate = async () => {
+    if (difficulties.length === 0) { setError("難易度を1つ以上選択してください"); return; }
+    setError(""); setStep("step1");
+    const title = `多層診断テスト - ${grade}${subject} - ${new Date().toLocaleDateString("ja-JP")}`;
+    const body = { testType: "diagnostic", title, subject, grade, selectedUnits, difficulties, count, instructions: "" };
+
+    try {
+      // Step1: ChatGPT
+      const r1 = await fetch("/api/generate/chatgpt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d1 = await r1.json();
+      if (d1.error) throw new Error(`[Step1] ${d1.error}`);
+
+      // Step2: GPT-4o-mini
+      setStep("step2");
+      const r2 = await fetch("/api/generate/gemini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d1.questions, subject, grade, difficulties, instructions: "" }) });
+      const d2 = await r2.json();
+      if (d2.error) throw new Error(`[Step2] ${d2.error}`);
+
+      // Step3: Claude
+      setStep("step3");
+      const r3 = await fetch("/api/generate/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d2.questions ?? d1.questions, subject, grade, difficulties, instructions: "" }) });
+      const d3 = await r3.json();
+      if (d3.error) throw new Error(`[Step3] ${d3.error}`);
+
+      const finalQuestions: { type: string; text: string; options: string[] | null; correct_answer: string; points: number }[] = d3.questions ?? d2.questions ?? d1.questions;
+
+      // Supabaseに保存
+      setStep("saving");
+      const { data: test, error: testErr } = await supabase
+        .from("tests")
+        .insert({ title, subject, grade, difficulty: difficulties.join(","), status: "draft" })
+        .select().single();
+      if (testErr || !test) throw new Error("テストの保存に失敗しました");
+
+      const { error: qErr } = await supabase.from("questions").insert(
+        finalQuestions.map((q, i) => ({
+          test_id: test.id,
+          order_index: i,
+          type: q.type === "descriptive" ? "short-answer" : q.type,
+          text: q.text,
+          options: q.options ?? null,
+          correct_answer: q.correct_answer ?? null,
+          points: q.points ?? 1,
+        }))
+      );
+      if (qErr) throw new Error("問題の保存に失敗しました: " + qErr.message);
+
+      // URL発行
+      const pubRes = await fetch("/api/tests/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ test_id: test.id }) });
+      const pubData = await pubRes.json();
+      if (pubData.error) throw new Error("URL発行に失敗しました");
+
+      const origin = window.location.origin;
+      setPublishedUrl(`${origin}/test/${pubData.token}`);
+      setStep("done");
+    } catch (e) {
+      setError(String(e));
+      setStep("idle");
+    }
+  };
+
+  const copyUrl = () => {
+    navigator.clipboard.writeText(publishedUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const STEP_LABELS: Record<GenStep, string> = {
+    idle: "", step1: "Step 1 / 3　問題を生成中（ChatGPT）...",
+    step2: "Step 2 / 3　問題を精査中（GPT-4o-mini）...",
+    step3: "Step 3 / 3　最終仕上げ中（Claude）...",
+    saving: "Supabaseに保存中...", done: "",
+  };
+
+  if (step === "done" && publishedUrl) {
+    return (
+      <div className="min-h-screen bg-slate-100 px-6 py-10">
+        <main className="mx-auto max-w-2xl space-y-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-slate-950">テスト配布URLを発行しました</h1>
+            <button onClick={onBack} className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">一覧に戻る</button>
+          </div>
+
+          <div className="rounded-3xl border border-green-200 bg-green-50 p-8 shadow-sm text-center">
+            <div className="text-4xl mb-3">✅</div>
+            <p className="font-semibold text-green-800 text-lg">多層診断テストの準備ができました</p>
+            <p className="text-sm text-green-700 mt-1">このURLを生徒に共有してください。テスト完了後に学習アンケートも自動で実施されます。</p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="mb-3 text-sm font-semibold text-slate-700">配布URL</p>
+            <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-4">
+              <p className="flex-1 break-all text-sm text-indigo-700 font-mono">{publishedUrl}</p>
+              <button onClick={copyUrl}
+                className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition ${copied ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"}`}>
+                {copied ? "コピー済み ✓" : "コピー"}
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="mb-3 text-sm font-semibold text-slate-700">生徒の受験フロー</p>
+            <div className="space-y-2">
+              {[
+                "① 生徒がURLを開き、名前を入力してテスト開始",
+                "② 学力テスト（AI生成の問題）を回答",
+                "③ 学習習慣アンケート（8問）を回答",
+                "④ 学習法アンケート（8問）を回答",
+                "⑤ 学力スキル自己評価（7問）を回答",
+                "⑥ 送信完了 → 講師の「ヒューマンチェック」に届く",
+              ].map((s) => (
+                <p key={s} className="text-sm text-slate-600">{s}</p>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={() => { setStep("idle"); setPublishedUrl(""); setSelectedUnits([]); }}
+            className="w-full rounded-2xl border border-indigo-300 bg-indigo-50 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">
+            別のテストを作成する
+          </button>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-100 px-6 py-10">
+      <main className="mx-auto max-w-3xl space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-950">多層診断テストを作成・配布</h1>
+            <p className="mt-1 text-sm text-slate-500">学力テスト＋学習アンケートをセットにしたURLを発行します</p>
+          </div>
+          <button onClick={onBack} className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">キャンセル</button>
+        </div>
+
+        {error && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
+        )}
+
+        {/* 基本設定 */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-4 font-semibold text-slate-900">基本設定</h2>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm text-slate-700">
+              学年
+              <select value={grade} onChange={(e) => { setGrade(e.target.value); setSelectedUnits([]); }}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400">
+                {GRADE_ORDER.map((g) => <option key={g}>{g}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-slate-700">
+              教科
+              <select value={subject} onChange={(e) => { setSubject(e.target.value); setSelectedUnits([]); }}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400">
+                {SUBJECT_LIST.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-slate-700">
+              問題数
+              <select value={count} onChange={(e) => setCount(Number(e.target.value))}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400">
+                {[5, 8, 10, 12, 15].map((n) => <option key={n} value={n}>{n}問</option>)}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4">
+            <p className="mb-2 text-sm text-slate-700">難易度</p>
+            <div className="flex gap-3">
+              {[
+                { key: "basic", label: "基礎", color: "border-green-400 bg-green-100 text-green-700" },
+                { key: "standard", label: "標準", color: "border-blue-400 bg-blue-100 text-blue-700" },
+                { key: "advanced", label: "応用", color: "border-purple-400 bg-purple-100 text-purple-700" },
+              ].map((d) => (
+                <button key={d.key} onClick={() => toggleDiff(d.key)}
+                  className={`rounded-xl border-2 px-4 py-2 text-sm font-semibold transition ${difficulties.includes(d.key) ? d.color : "border-slate-200 bg-white text-slate-400"}`}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 単元選択 */}
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">出題単元（任意）</h2>
+            <span className="text-xs text-slate-400">未選択の場合はAIが自動選択します</span>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-3">
+            {adjacentGrades.map((g) => {
+              const units = getUnitsForGrade(subject, g);
+              if (!units || units.length === 0) return null;
+              return (
+                <div key={g}>
+                  <p className="mb-2 text-xs font-semibold text-slate-500">{g}</p>
+                  <div className="space-y-1">
+                    {units.slice(0, 8).map((u) => {
+                      const checked = selectedUnits.some((x) => x.grade === g && x.unit === u.name);
+                      return (
+                        <label key={u.name} className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                          <input type="checkbox" checked={checked} onChange={() => toggleUnit(g, u.name)}
+                            className="accent-indigo-600" />
+                          {u.name}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 生成ボタン */}
+        {step !== "idle" ? (
+          <div className="rounded-3xl border border-indigo-200 bg-indigo-50 p-8 text-center shadow-sm">
+            <div className="flex justify-center mb-4">
+              <span className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600" />
+            </div>
+            <p className="font-semibold text-indigo-700">{STEP_LABELS[step]}</p>
+            <p className="mt-1 text-sm text-indigo-500">AIが問題を生成しています。しばらくお待ちください...</p>
+          </div>
+        ) : (
+          <button onClick={generate}
+            className="w-full rounded-2xl bg-indigo-600 py-4 font-semibold text-white shadow-sm hover:bg-indigo-700 transition">
+            AIで多層診断テストを生成してURLを発行する →
+          </button>
+        )}
+      </main>
     </div>
   );
 }
