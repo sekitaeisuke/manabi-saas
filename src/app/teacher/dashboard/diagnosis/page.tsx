@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import type { Student, Diagnosis, VolumeRatings, QualityRatings, DiagnosisRating } from "@/lib/supabase";
+import type { Student, Diagnosis, TestSession, VolumeRatings, QualityRatings, DiagnosisRating } from "@/lib/supabase";
 import { GRADE_ORDER, getAdjacentGrades, getUnitsForGrade, SUBJECT_LIST } from "@/lib/curriculum";
 
 // ─── 定数 ────────────────────────────────────────────
@@ -27,7 +27,7 @@ const DEFAULT_QUALITY: QualityRatings = {
 
 // ─── メインページ ─────────────────────────────────────
 export default function DiagnosisPage() {
-  const [view, setView] = useState<"list" | "history" | "create" | "report" | "human-check" | "issue-test">("list");
+  const [view, setView] = useState<"list" | "history" | "create" | "report" | "human-check" | "issue-test" | "dist-list">("list");
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
@@ -72,6 +72,10 @@ export default function DiagnosisPage() {
 
   if (view === "issue-test") {
     return <IssueTestView onBack={() => setView("list")} />;
+  }
+
+  if (view === "dist-list") {
+    return <DistributionListView onBack={() => setView("list")} />;
   }
 
   if (view === "report" && selectedDiagnosis) {
@@ -119,6 +123,10 @@ export default function DiagnosisPage() {
             <button onClick={() => setView("issue-test")}
               className="rounded-2xl bg-indigo-600 px-5 py-3 font-semibold text-white hover:bg-indigo-700">
               + 多層診断テストを配布
+            </button>
+            <button onClick={() => setView("dist-list")}
+              className="rounded-2xl border border-indigo-300 bg-indigo-50 px-5 py-3 font-semibold text-indigo-700 hover:bg-indigo-100">
+              配布管理
             </button>
             <button onClick={() => setView("human-check")}
               className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 font-semibold text-amber-800 hover:bg-amber-100">
@@ -757,6 +765,266 @@ function TrendChart({ diagnoses }: { diagnoses: Diagnosis[] }) {
         <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded bg-indigo-500" />学習量</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2 w-4 rounded bg-emerald-500" />学習の質</span>
       </div>
+    </div>
+  );
+}
+
+// ─── 配布管理 ─────────────────────────────────────────────
+type SessionWithTest = TestSession & {
+  tests: { title: string; subject: string; grade: string; difficulty: string } | null;
+};
+type TestAssignment = {
+  id: string;
+  test_session_id: string;
+  student_id: string;
+  assigned_at: string;
+};
+
+function DistributionListView({ onBack }: { onBack: () => void }) {
+  const [sessions, setSessions] = useState<SessionWithTest[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [assignments, setAssignments] = useState<TestAssignment[]>([]);
+  const [responses, setResponses] = useState<{ session_id: string; student_name: string; status: string; test_percentage: number | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [assigning, setAssigning] = useState<string | null>(null);
+  const [selectingStudent, setSelectingStudent] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    const [sessRes, stuRes, asnRes, qrRes] = await Promise.all([
+      supabase.from("test_sessions").select("*, tests(title, subject, grade, difficulty)").order("created_at", { ascending: false }),
+      supabase.from("students").select("*").order("name"),
+      supabase.from("test_assignments").select("*"),
+      supabase.from("questionnaire_responses").select("session_id, student_name, status, test_percentage"),
+    ]);
+    setSessions((sessRes.data ?? []) as SessionWithTest[]);
+    setStudents(stuRes.data ?? []);
+    setAssignments(asnRes.data ?? []);
+    setResponses(qrRes.data ?? []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const assignStudent = async (sessionId: string) => {
+    if (!selectingStudent) return;
+    const { data, error } = await supabase.from("test_assignments")
+      .insert({ test_session_id: sessionId, student_id: selectingStudent })
+      .select().single();
+    if (!error && data) setAssignments((prev) => [...prev, data as TestAssignment]);
+    setAssigning(null);
+    setSelectingStudent("");
+  };
+
+  const removeAssignment = async (id: string) => {
+    await supabase.from("test_assignments").delete().eq("id", id);
+    setAssignments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const copyUrl = (token: string) => {
+    navigator.clipboard.writeText(`${window.location.origin}/test/${token}`);
+    setCopied(token);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const getResponsesForSession = (sessionId: string) =>
+    responses.filter((r) => r.session_id.startsWith(sessionId + ":"));
+
+  const getAssignedStudents = (sessionId: string) => {
+    const sessionResponses = getResponsesForSession(sessionId);
+    return assignments
+      .filter((a) => a.test_session_id === sessionId)
+      .map((a) => {
+        const student = students.find((s) => s.id === a.student_id);
+        const response = student ? sessionResponses.find((r) => r.student_name === student.name) : null;
+        return { assignment: a, student, completed: !!response, response };
+      });
+  };
+
+  const getUnassignedStudents = (sessionId: string) => {
+    const assignedIds = assignments.filter((a) => a.test_session_id === sessionId).map((a) => a.student_id);
+    return students.filter((s) => !assignedIds.includes(s.id));
+  };
+
+  if (loading) return (
+    <div className="min-h-screen bg-slate-100 px-6 py-10">
+      <div className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-500">読み込み中...</div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-100 px-6 py-10">
+      <main className="mx-auto max-w-3xl space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-950">配布済みテスト管理</h1>
+            <p className="mt-1 text-sm text-slate-500">発行したURLと生徒の受験状況を一覧で管理します</p>
+          </div>
+          <button onClick={onBack}
+            className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+            一覧に戻る
+          </button>
+        </div>
+
+        {sessions.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
+            配布済みのテストはありません。「+ 多層診断テストを配布」から作成してください。
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {sessions.map((session) => {
+              const url = `${typeof window !== "undefined" ? window.location.origin : ""}/test/${session.url_token}`;
+              const assignedStudents = getAssignedStudents(session.id);
+              const sessionResponses = getResponsesForSession(session.id);
+              const unassigned = getUnassignedStudents(session.id);
+              const isExpanded = expandedId === session.id;
+              const isAssigning = assigning === session.id;
+              const completedCount = assignedStudents.filter((a) => a.completed).length
+                + sessionResponses.filter((r) => !assignedStudents.some((a) => a.student?.name === r.student_name)).length;
+
+              return (
+                <div key={session.id} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                  {/* カードヘッダー */}
+                  <div className="p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900">{session.tests?.title ?? "テスト"}</p>
+                        <p className="mt-0.5 text-sm text-slate-500">
+                          {session.tests?.subject} ・ {session.tests?.grade}
+                          {session.tests?.difficulty && <> ・ {session.tests.difficulty}</>}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-400">発行: {session.created_at.slice(0, 10)}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-slate-900">{completedCount}名完了</p>
+                          <p className="text-xs text-slate-400">{assignedStudents.length}名割り当て済み</p>
+                        </div>
+                        <button onClick={() => setExpandedId(isExpanded ? null : session.id)}
+                          className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                            isExpanded ? "border-slate-400 bg-slate-100 text-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          }`}>
+                          {isExpanded ? "閉じる ▲" : "詳細 ▼"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* URL */}
+                    <div className="mt-4 flex items-center gap-2">
+                      <div className="flex-1 break-all rounded-xl bg-slate-50 px-3 py-2 text-xs font-mono text-indigo-700">{url}</div>
+                      <button onClick={() => copyUrl(session.url_token)}
+                        className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                          copied === session.url_token ? "bg-green-600 text-white" : "bg-indigo-600 text-white hover:bg-indigo-700"
+                        }`}>
+                        {copied === session.url_token ? "✓ コピー" : "コピー"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 展開パネル：生徒管理 */}
+                  {isExpanded && (
+                    <div className="border-t border-slate-100 bg-slate-50 p-6">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-slate-700">割り当て済み生徒</p>
+                        {!isAssigning && (
+                          <button onClick={() => { setAssigning(session.id); setSelectingStudent(""); }}
+                            className="rounded-xl border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-600 hover:bg-indigo-50">
+                            + 生徒を割り当て
+                          </button>
+                        )}
+                      </div>
+
+                      {/* 割り当てフォーム */}
+                      {isAssigning && (
+                        <div className="mb-3 flex items-center gap-2 rounded-2xl border border-indigo-200 bg-white p-3">
+                          <select value={selectingStudent} onChange={(e) => setSelectingStudent(e.target.value)}
+                            className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400">
+                            <option value="">生徒を選択...</option>
+                            {unassigned.map((s) => (
+                              <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>
+                            ))}
+                          </select>
+                          <button onClick={() => assignStudent(session.id)} disabled={!selectingStudent}
+                            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
+                            追加
+                          </button>
+                          <button onClick={() => setAssigning(null)}
+                            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                            キャンセル
+                          </button>
+                        </div>
+                      )}
+
+                      {/* 割り当て済み生徒リスト */}
+                      {assignedStudents.length === 0 && !isAssigning ? (
+                        <p className="text-sm text-slate-400">まだ生徒が割り当てられていません</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {assignedStudents.map(({ assignment, student, completed, response }) => (
+                            <div key={assignment.id} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
+                                {student?.name.slice(0, 1) ?? "?"}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-slate-900">{student?.name ?? "不明"}</p>
+                                <p className="text-xs text-slate-400">{student?.grade ?? ""}</p>
+                              </div>
+                              {completed ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">完了</span>
+                                  {response?.test_percentage != null && (
+                                    <span className="text-xs text-slate-500">{Math.round(response.test_percentage)}点</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-500">未受験</span>
+                              )}
+                              <button onClick={() => removeAssignment(assignment.id)} title="割り当てを解除"
+                                className="text-slate-300 transition hover:text-red-400">
+                                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 割り当て外で受験した生徒（名前でマッチ） */}
+                      {sessionResponses.filter((r) => !assignedStudents.some((a) => a.student?.name === r.student_name)).length > 0 && (
+                        <div className="mt-4">
+                          <p className="mb-2 text-xs font-semibold text-amber-700">割り当て外で受験した生徒</p>
+                          <div className="space-y-2">
+                            {sessionResponses
+                              .filter((r) => !assignedStudents.some((a) => a.student?.name === r.student_name))
+                              .map((r) => (
+                                <div key={r.session_id} className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">
+                                    {r.student_name.slice(0, 1)}
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-medium text-slate-900">{r.student_name}</p>
+                                    <p className="text-xs text-slate-400">未割り当て（名前で自動検出）</p>
+                                  </div>
+                                  <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">完了</span>
+                                  {r.test_percentage != null && (
+                                    <span className="text-xs text-slate-500">{Math.round(r.test_percentage)}点</span>
+                                  )}
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
