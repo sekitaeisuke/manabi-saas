@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import type { Test } from "@/lib/supabase";
+import type { Test, Student } from "@/lib/supabase";
 import {
   CURRICULUM, GRADE_ORDER, SUBJECT_LIST,
   getAdjacentGrades, getUnitsForGrade,
@@ -105,6 +105,22 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
 }) {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [publishedUrls, setPublishedUrls] = useState<Record<string, string>>({});
+  const [sessionTokens, setSessionTokens] = useState<Record<string, string>>({}); // test_id → url_token
+  const [students, setStudents] = useState<Student[]>([]);
+  const [startModal, setStartModal] = useState<Test | null>(null);
+  const [selectedStudent, setSelectedStudent] = useState("");
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    supabase.from("students").select("*").order("name").then(({ data }) => {
+      setStudents(data ?? []);
+    });
+    supabase.from("test_sessions").select("test_id, url_token").then(({ data }) => {
+      const map: Record<string, string> = {};
+      (data ?? []).forEach((s: { test_id: string; url_token: string }) => { map[s.test_id] = s.url_token; });
+      setSessionTokens(map);
+    });
+  }, []);
 
   const publish = async (testId: string) => {
     setPublishing(testId);
@@ -117,9 +133,33 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
     if (data.token) {
       const url = `${window.location.origin}/test/${data.token}`;
       setPublishedUrls((prev) => ({ ...prev, [testId]: url }));
+      setSessionTokens((prev) => ({ ...prev, [testId]: data.token }));
       onRefresh();
     }
     setPublishing(null);
+  };
+
+  const startTest = async () => {
+    if (!startModal || !selectedStudent) return;
+    setStarting(true);
+    let token = sessionTokens[startModal.id];
+    if (!token) {
+      const res = await fetch("/api/tests/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ test_id: startModal.id }),
+      });
+      const data = await res.json();
+      if (!data.token) { setStarting(false); return; }
+      token = data.token as string;
+      setSessionTokens((prev) => ({ ...prev, [startModal.id]: token }));
+      onRefresh();
+    }
+    const url = `/test/${token}?studentName=${encodeURIComponent(selectedStudent)}`;
+    window.open(url, "_blank");
+    setStarting(false);
+    setStartModal(null);
+    setSelectedStudent("");
   };
 
   if (loading) return (
@@ -138,47 +178,99 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   };
 
   return (
-    <div className="space-y-3">
-      {tests.map((test) => {
-        const st = statusLabel[test.status] ?? statusLabel.draft;
-        const url = publishedUrls[test.id];
-        return (
-          <div key={test.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <h2 className="font-semibold text-slate-950">{test.title}</h2>
-                  <span className={`rounded-full px-3 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
-                </div>
-                <p className="mt-1 text-sm text-slate-500">{test.subject} ・ {test.grade}</p>
-                {url && (
-                  <div className="mt-3 flex items-center gap-2">
-                    <input readOnly value={url}
-                      className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" />
-                    <button onClick={() => { navigator.clipboard.writeText(url); alert("URLをコピーしました"); }}
-                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                      コピー
-                    </button>
+    <>
+      <div className="space-y-3">
+        {tests.map((test) => {
+          const st = statusLabel[test.status] ?? statusLabel.draft;
+          const url = publishedUrls[test.id];
+          return (
+            <div key={test.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h2 className="font-semibold text-slate-950">{test.title}</h2>
+                    <span className={`rounded-full px-3 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
                   </div>
-                )}
-              </div>
-              <div className="flex gap-2 flex-wrap justify-end">
-                {test.status === "draft" && (
-                  <button onClick={() => publish(test.id)} disabled={publishing === test.id}
-                    className="rounded-xl border border-green-400 bg-green-50 px-4 py-2 text-sm text-green-700 transition hover:bg-green-100 disabled:opacity-50">
-                    {publishing === test.id ? "発行中..." : "配信する"}
+                  <p className="mt-1 text-sm text-slate-500">{test.subject} ・ {test.grade}</p>
+                  {url && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <input readOnly value={url}
+                        className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" />
+                      <button onClick={() => { navigator.clipboard.writeText(url); alert("URLをコピーしました"); }}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
+                        コピー
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap justify-end">
+                  <button onClick={() => { setStartModal(test); setSelectedStudent(""); }}
+                    className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">
+                    受験する
                   </button>
-                )}
-                <button onClick={() => onDelete(test.id)}
-                  className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm text-red-600 transition hover:bg-red-50">
-                  削除
-                </button>
+                  {test.status === "draft" && (
+                    <button onClick={() => publish(test.id)} disabled={publishing === test.id}
+                      className="rounded-xl border border-green-400 bg-green-50 px-4 py-2 text-sm text-green-700 transition hover:bg-green-100 disabled:opacity-50">
+                      {publishing === test.id ? "発行中..." : "配信する"}
+                    </button>
+                  )}
+                  <button onClick={() => onDelete(test.id)}
+                    className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm text-red-600 transition hover:bg-red-50">
+                    削除
+                  </button>
+                </div>
               </div>
             </div>
+          );
+        })}
+      </div>
+
+      {/* 生徒選択モーダル */}
+      {startModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-96 rounded-3xl bg-white p-8 shadow-xl">
+            <h3 className="mb-1 text-lg font-bold text-slate-900">生徒を選択して受験開始</h3>
+            <p className="mb-5 text-sm text-slate-500">{startModal.title}（{startModal.subject} ・ {startModal.grade}）</p>
+
+            {students.length === 0 ? (
+              <p className="mb-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                生徒が登録されていません。多層診断ページから生徒を追加してください。
+              </p>
+            ) : (
+              <div className="mb-5 space-y-2">
+                <label className="text-sm font-medium text-slate-700">生徒名</label>
+                <select
+                  value={selectedStudent}
+                  onChange={(e) => setSelectedStudent(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                >
+                  <option value="">生徒を選択してください...</option>
+                  {students.map((s) => (
+                    <option key={s.id} value={s.name}>{s.name}（{s.grade}）</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={startTest}
+                disabled={!selectedStudent || starting}
+                className="flex-1 rounded-xl bg-indigo-600 py-2.5 font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+              >
+                {starting ? "準備中..." : "受験を開始する →"}
+              </button>
+              <button
+                onClick={() => { setStartModal(null); setSelectedStudent(""); }}
+                className="flex-1 rounded-xl border border-slate-300 bg-white py-2.5 text-slate-700 hover:bg-slate-50"
+              >
+                キャンセル
+              </button>
+            </div>
           </div>
-        );
-      })}
-    </div>
+        </div>
+      )}
+    </>
   );
 }
 
