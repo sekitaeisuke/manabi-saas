@@ -32,6 +32,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [checking, setChecking] = useState(true);
   const [userEmail, setUserEmail] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -46,6 +47,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     });
     return () => subscription.unsubscribe();
   }, [router]);
+
+  useEffect(() => {
+    const fetchPending = async () => {
+      const { count } = await supabase
+        .from("questionnaire_responses")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "pending");
+      setPendingCount(count ?? 0);
+    };
+    fetchPending();
+    const timer = setInterval(fetchPending, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -66,7 +80,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isActive = (href: string) =>
     href === "/teacher/dashboard" ? pathname === href : pathname.startsWith(href);
 
-  const Sidebar = () => (
+  const Sidebar = ({ pending }: { pending: number }) => (
     <aside className="flex h-full flex-col bg-white">
       {/* ロゴ */}
       <div className="flex h-16 items-center gap-3 border-b border-slate-100 px-6">
@@ -79,6 +93,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">メニュー</p>
         {NAV.map((item) => {
           const active = isActive(item.href);
+          const isDiagnosis = item.href === "/teacher/dashboard/diagnosis";
           return (
             <Link key={item.href} href={item.href}
               onClick={() => setMobileOpen(false)}
@@ -89,7 +104,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               }`}>
               <span className={active ? "text-indigo-600" : "text-slate-400"}>{item.icon}</span>
               {item.label}
-              {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-600" />}
+              {isDiagnosis && pending > 0 && (
+                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
+                  {pending}
+                </span>
+              )}
+              {active && pending === 0 && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-600" />}
             </Link>
           );
         })}
@@ -120,7 +140,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen bg-slate-50">
       {/* PC サイドバー */}
       <div className="fixed inset-y-0 left-0 z-30 w-60 border-r border-slate-200 shadow-sm">
-        <Sidebar />
+        <Sidebar pending={pendingCount} />
       </div>
 
       {/* モバイル オーバーレイ */}
@@ -128,7 +148,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-60">
-            <Sidebar />
+            <Sidebar pending={pendingCount} />
           </div>
         </div>
       )}

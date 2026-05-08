@@ -33,6 +33,7 @@ export default function DiagnosisPage() {
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [selectedDiagnosis, setSelectedDiagnosis] = useState<Diagnosis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -41,13 +42,21 @@ export default function DiagnosisPage() {
     setLoading(false);
   }, []);
 
+  const fetchPendingCount = useCallback(async () => {
+    const { count } = await supabase
+      .from("questionnaire_responses")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "pending");
+    setPendingCount(count ?? 0);
+  }, []);
+
   const fetchDiagnoses = useCallback(async (studentId: string) => {
     const { data } = await supabase.from("diagnoses").select("*")
       .eq("student_id", studentId).order("created_at", { ascending: false });
     setDiagnoses(data ?? []);
   }, []);
 
-  useEffect(() => { fetchStudents(); }, [fetchStudents]);
+  useEffect(() => { fetchStudents(); fetchPendingCount(); }, [fetchStudents, fetchPendingCount]);
 
   const selectStudent = async (student: Student) => {
     setSelectedStudent(student);
@@ -114,7 +123,7 @@ export default function DiagnosisPage() {
   return (
     <div className="min-h-screen bg-slate-100 px-6 py-10 text-slate-900">
       <main className="mx-auto max-w-5xl">
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-slate-950">多層診断システム</h1>
             <p className="mt-1 text-slate-600">学力・学習量・学習の質を多角的に診断します</p>
@@ -128,13 +137,51 @@ export default function DiagnosisPage() {
               className="rounded-2xl border border-indigo-300 bg-indigo-50 px-5 py-3 font-semibold text-indigo-700 hover:bg-indigo-100">
               配布管理
             </button>
-            <button onClick={() => setView("human-check")}
-              className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 font-semibold text-amber-800 hover:bg-amber-100">
-              ヒューマンチェック
-            </button>
             <NewStudentButton onCreated={(s) => { setStudents((prev) => [s, ...prev]); }} />
           </div>
         </div>
+
+        {/* 未処理バナー：件数がある時だけ表示 */}
+        {pendingCount > 0 ? (
+          <button onClick={() => setView("human-check")}
+            className="mb-6 w-full rounded-2xl border-2 border-amber-400 bg-amber-50 px-6 py-4 text-left shadow-sm transition hover:bg-amber-100">
+            <div className="flex items-center gap-4">
+              <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xl font-bold text-white shadow">
+                {pendingCount}
+                <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-red-500">
+                  <span className="absolute inset-0 animate-ping rounded-full bg-red-400 opacity-75" />
+                </span>
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-amber-900">
+                  生徒から {pendingCount} 件の提出があります — ヒューマンチェックが必要です
+                </p>
+                <p className="mt-0.5 text-sm text-amber-700">
+                  ① 内容を確認　② AIで分析　③ 承認　の順に進めてください
+                </p>
+              </div>
+              <span className="shrink-0 rounded-xl bg-amber-500 px-4 py-2 font-semibold text-white shadow-sm">
+                今すぐ確認 →
+              </span>
+            </div>
+          </button>
+        ) : (
+          <button onClick={() => setView("human-check")}
+            className="mb-6 w-full rounded-2xl border border-slate-200 bg-white px-6 py-4 text-left shadow-sm transition hover:bg-slate-50">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-semibold text-slate-700">ヒューマンチェック</p>
+                <p className="text-xs text-slate-400">現在、未処理の提出はありません</p>
+              </div>
+              <span className="ml-auto text-xs text-slate-400">→</span>
+            </div>
+          </button>
+        )}
 
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-500">読み込み中...</div>
@@ -1359,28 +1406,47 @@ function HumanCheckView({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
+        {/* 3ステップガイド */}
+        <div className="mb-6 grid grid-cols-3 gap-3">
+          {[
+            { num: "①", title: "内容を確認", desc: "生徒の回答・テスト結果を開く", color: "bg-slate-100 text-slate-600 border-slate-200" },
+            { num: "②", title: "AIで分析", desc: "ボタンを押してレポートを自動生成", color: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+            { num: "③", title: "承認する", desc: "確認後に「承認」を押して完了", color: "bg-green-50 text-green-700 border-green-200" },
+          ].map((s) => (
+            <div key={s.num} className={`rounded-2xl border p-4 ${s.color}`}>
+              <p className="text-lg font-bold">{s.num} {s.title}</p>
+              <p className="mt-1 text-xs opacity-80">{s.desc}</p>
+            </div>
+          ))}
+        </div>
+
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-500">読み込み中...</div>
         ) : responses.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            提出されたアンケートはありません。生徒がテストURLからアンケートを提出すると、ここに表示されます。
+            提出されたアンケートはありません。生徒がテストを提出すると、ここに表示されます。
           </div>
         ) : (
           <div className="space-y-3">
             {responses.map((r) => (
-              <div key={r.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div key={r.id}
+                className={`rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md ${
+                  r.status === "pending" ? "border-amber-300" : "border-slate-200"
+                }`}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <span className="text-lg font-bold text-slate-900">{r.student_name}</span>
                       <span className="text-sm text-slate-500">{r.grade} / {r.subject}</span>
                       <span className={`rounded-full px-3 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>
                         {statusLabel(r.status)}
                       </span>
                     </div>
-                    <div className="mt-2 flex gap-4 text-sm text-slate-600">
+                    <div className="mt-2 flex flex-wrap gap-4 text-sm text-slate-600">
                       <span>提出日: {r.created_at.slice(0, 10)}</span>
-                      {r.test_percentage != null && <span>テスト正答率: {r.test_percentage}%</span>}
+                      {r.test_percentage != null && (
+                        <span className="font-semibold text-indigo-700">テスト正答率: {r.test_percentage}%</span>
+                      )}
                       {r.habit_score != null && (
                         <>
                           <ScorePill label="習慣" score={r.habit_score} />
@@ -1391,8 +1457,12 @@ function HumanCheckView({ onBack }: { onBack: () => void }) {
                     </div>
                   </div>
                   <button onClick={() => setSelected(r)}
-                    className="rounded-xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm text-indigo-700 hover:bg-indigo-100 whitespace-nowrap">
-                    {r.status === "pending" ? "分析・確認する" : "確認・編集する"}
+                    className={`rounded-xl px-5 py-2.5 text-sm font-semibold whitespace-nowrap transition shadow-sm ${
+                      r.status === "pending"
+                        ? "bg-amber-500 text-white hover:bg-amber-600"
+                        : "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    }`}>
+                    {r.status === "pending" ? "① 確認する →" : r.status === "analyzed" ? "③ 承認する →" : "確認・編集する"}
                   </button>
                 </div>
               </div>
