@@ -27,11 +27,12 @@ const DEFAULT_QUALITY: QualityRatings = {
 
 // ─── メインページ ─────────────────────────────────────
 export default function DiagnosisPage() {
-  const [view, setView] = useState<"list" | "history" | "create" | "report" | "human-check" | "issue-test" | "dist-list">("list");
+  const [view, setView] = useState<"list" | "history" | "create" | "report" | "human-check" | "issue-test" | "dist-list" | "q-report">("list");
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [diagnoses, setDiagnoses] = useState<Diagnosis[]>([]);
   const [selectedDiagnosis, setSelectedDiagnosis] = useState<Diagnosis | null>(null);
+  const [selectedQResponse, setSelectedQResponse] = useState<QResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
 
@@ -87,6 +88,15 @@ export default function DiagnosisPage() {
     return <DistributionListView onBack={() => setView("list")} />;
   }
 
+  if (view === "q-report" && selectedQResponse) {
+    return (
+      <QuestionnaireReportView
+        response={selectedQResponse}
+        onBack={() => { setSelectedQResponse(null); setView("history"); }}
+      />
+    );
+  }
+
   if (view === "report" && selectedDiagnosis) {
     return (
       <ReportView
@@ -115,6 +125,7 @@ export default function DiagnosisPage() {
         diagnoses={diagnoses}
         onNewDiagnosis={() => setView("create")}
         onOpenReport={openReport}
+        onOpenQReport={(r) => { setSelectedQResponse(r); setView("q-report"); }}
         onBack={() => { setView("list"); fetchStudents(); }}
       />
     );
@@ -264,20 +275,45 @@ function NewStudentButton({ onCreated }: { onCreated: (s: Student) => void }) {
 }
 
 // ─── 生徒の診断履歴 ──────────────────────────────────
-function StudentHistory({ student, diagnoses, onNewDiagnosis, onOpenReport, onBack }: {
+function StudentHistory({ student, diagnoses, onNewDiagnosis, onOpenReport, onOpenQReport, onBack }: {
   student: Student;
   diagnoses: Diagnosis[];
   onNewDiagnosis: () => void;
   onOpenReport: (d: Diagnosis) => void;
+  onOpenQReport: (r: QResponse) => void;
   onBack: () => void;
 }) {
+  const [qResponses, setQResponses] = useState<QResponse[]>([]);
+  const [qLoading, setQLoading] = useState(true);
+
+  useEffect(() => {
+    supabase
+      .from("questionnaire_responses")
+      .select("*")
+      .eq("student_name", student.name)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        setQResponses((data as QResponse[]) ?? []);
+        setQLoading(false);
+      });
+  }, [student.name]);
+
+  const statusLabel = (s: QResponse["status"]) =>
+    s === "pending" ? "未分析" : s === "analyzed" ? "分析済（未承認）" : "承認済";
+  const statusColor = (s: QResponse["status"]) =>
+    s === "pending" ? "bg-amber-100 text-amber-800"
+    : s === "analyzed" ? "bg-blue-100 text-blue-800"
+    : "bg-green-100 text-green-800";
+
+  const totalCount = diagnoses.length + qResponses.length;
+
   return (
     <div className="min-h-screen bg-slate-100 px-6 py-10">
       <main className="mx-auto max-w-5xl">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-950">{student.name}（{student.grade}）の診断履歴</h1>
-            <p className="mt-1 text-slate-600">{diagnoses.length}件の診断記録</p>
+            <h1 className="text-2xl font-bold text-slate-950">{student.name}（{student.grade}）の診断カルテ</h1>
+            <p className="mt-1 text-slate-600">{totalCount}件の記録</p>
           </div>
           <div className="flex gap-3">
             <button onClick={onNewDiagnosis}
@@ -291,9 +327,9 @@ function StudentHistory({ student, diagnoses, onNewDiagnosis, onOpenReport, onBa
           </div>
         </div>
 
-        {diagnoses.length === 0 ? (
+        {!qLoading && totalCount === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            診断記録がありません。「新規診断」から作成してください。
+            診断記録がありません。「新規診断」から作成するか、テストを配布してください。
           </div>
         ) : (
           <div className="space-y-4">
@@ -304,11 +340,51 @@ function StudentHistory({ student, diagnoses, onNewDiagnosis, onOpenReport, onBa
                 <TrendChart diagnoses={[...diagnoses].reverse()} />
               </div>
             )}
-            {/* 診断一覧 */}
+
+            {/* テスト診断一覧 */}
+            {qLoading ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
+                テスト診断を読み込み中...
+              </div>
+            ) : qResponses.map((r) => (
+              <div key={r.id} className="rounded-3xl border border-indigo-200 bg-white p-6 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-700">テスト診断</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>
+                        {statusLabel(r.status)}
+                      </span>
+                    </div>
+                    <p className="font-semibold text-slate-900">{r.created_at.slice(0, 10)}</p>
+                    <p className="mt-0.5 text-sm text-slate-500">{r.subject} ・ {r.grade}</p>
+                    <div className="mt-2 flex flex-wrap gap-3">
+                      {r.test_percentage != null && <ScorePill label="テスト正答率" score={r.test_percentage} />}
+                      {r.habit_score != null && <ScorePill label="学習習慣" score={r.habit_score} />}
+                      {r.method_score != null && <ScorePill label="学習法" score={r.method_score} />}
+                      {r.skill_score != null && <ScorePill label="学力スキル" score={r.skill_score} />}
+                    </div>
+                  </div>
+                  <button onClick={() => onOpenQReport(r)}
+                    className={`shrink-0 rounded-xl px-5 py-2.5 text-sm font-semibold whitespace-nowrap transition shadow-sm ${
+                      r.status === "pending"
+                        ? "bg-amber-500 text-white hover:bg-amber-600"
+                        : "border border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    }`}>
+                    {r.status === "pending" ? "分析する →" : "レポートを見る"}
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {/* 講師手動診断一覧 */}
             {diagnoses.map((d) => (
               <div key={d.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between gap-4">
                   <div>
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">講師診断</span>
+                    </div>
                     <p className="font-semibold text-slate-900">{d.created_at.slice(0, 10)}</p>
                     <div className="mt-2 flex gap-4 text-sm">
                       <ScorePill label="学習量" score={d.volume_score} />
