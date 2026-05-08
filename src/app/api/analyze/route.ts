@@ -120,10 +120,24 @@ HTMLを含むJSON形式で返してください:
   });
 
   const data = await res.json();
-  const content = data.content?.[0]?.text ?? "";
+  let content = (data.content?.[0]?.text ?? "") as string;
+  // Strip markdown code fences if present
+  content = content.trim();
+  if (content.startsWith("```json")) content = content.slice(7);
+  else if (content.startsWith("```")) content = content.slice(3);
+  if (content.endsWith("```")) content = content.slice(0, -3);
+  content = content.trim();
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) return NextResponse.json({ error: "分析に失敗しました" }, { status: 500 });
 
   const result = JSON.parse(match[0]);
+  // Strip code fences from reportHtml if Claude wrapped it
+  if (typeof result.reportHtml === "string") {
+    result.reportHtml = result.reportHtml.trim();
+    if (result.reportHtml.startsWith("```html")) result.reportHtml = result.reportHtml.slice(7);
+    else if (result.reportHtml.startsWith("```")) result.reportHtml = result.reportHtml.slice(3);
+    if (result.reportHtml.endsWith("```")) result.reportHtml = result.reportHtml.slice(0, -3);
+    result.reportHtml = result.reportHtml.trim();
+  }
   return NextResponse.json({ ...result, byDifficulty, scored });
 }

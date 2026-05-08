@@ -166,8 +166,14 @@ HTMLのみを返してください（説明文・JSONは不要）。`;
   let reportHtml: string;
   try {
     reportHtml = await callClaude(prompt);
+    // Strip markdown code fences (```html ... ``` or ``` ... ```)
+    reportHtml = reportHtml.trim();
+    if (reportHtml.startsWith("```html")) reportHtml = reportHtml.slice(7);
+    else if (reportHtml.startsWith("```")) reportHtml = reportHtml.slice(3);
+    if (reportHtml.endsWith("```")) reportHtml = reportHtml.slice(0, -3);
+    reportHtml = reportHtml.trim();
     // Extract <div id="diagnosis-report">...</div> if wrapped in extra text
-    const match = reportHtml.match(/<div id="diagnosis-report">[\s\S]*<\/div>\s*$/);
+    const match = reportHtml.match(/<div id="diagnosis-report">[\s\S]*<\/div>/);
     if (match) reportHtml = match[0];
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
