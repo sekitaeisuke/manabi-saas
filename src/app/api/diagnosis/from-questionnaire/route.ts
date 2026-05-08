@@ -106,6 +106,10 @@ export async function POST(req: NextRequest) {
       .map(([k, label]) => `  ・${label}：${ratingText(answers[k] ?? 1)}（${answers[k] ?? 1}点）`)
       .join("\n");
 
+  const aiAnalysisSection = qr.ai_analysis
+    ? `\n【学力テスト 解答分析（AI自動分析済み）】\n${qr.ai_analysis}\n`
+    : "";
+
   const prompt = `あなたは日本の学習塾の教育分析の専門家です。
 以下の生徒アンケートとテスト結果をもとに「学力・学習習慣・学習法 多層診断レポート」を作成してください。
 
@@ -115,6 +119,7 @@ export async function POST(req: NextRequest) {
 
 【テスト結果】
 得点: ${qr.test_score ?? "未実施"}点 / ${qr.test_total ?? "-"}点（正答率 ${testRate ?? "-"}%）
+${aiAnalysisSection}
 
 ━━━━━━━━━━━━━━━━━━━━
 【A. 学習習慣セクション】（スコア: ${habitScore}/100）

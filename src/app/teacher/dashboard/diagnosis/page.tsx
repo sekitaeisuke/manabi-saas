@@ -1310,6 +1310,7 @@ type QResponse = {
   skill_score: number | null;
   report_html: string | null;
   teacher_notes: string | null;
+  ai_analysis: string | null;
   created_at: string;
 };
 
@@ -1487,6 +1488,22 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
 
         {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
+        )}
+
+        {/* 学力テストAI分析 */}
+        {response.ai_analysis && (
+          <div className="no-print rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="rounded-full bg-indigo-600 px-3 py-0.5 text-xs font-semibold text-white">AI自動分析</span>
+              <p className="font-semibold text-indigo-900">学力テスト 解答分析</p>
+              {response.test_percentage != null && (
+                <span className="ml-auto text-sm font-semibold text-indigo-700">
+                  {response.test_score}/{response.test_total}点（{response.test_percentage}%）
+                </span>
+              )}
+            </div>
+            <pre className="whitespace-pre-wrap text-sm leading-7 text-slate-700 font-sans">{response.ai_analysis}</pre>
+          </div>
         )}
 
         {/* スコアと分析ボタン */}
