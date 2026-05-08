@@ -207,6 +207,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [saving, setSaving] = useState(false);
+  const [reportSaved, setReportSaved] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const adjacentGrades = getAdjacentGrades(grade);
@@ -320,6 +321,25 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     if (qErr) { alert("問題の保存に失敗しました: " + qErr.message); setSaving(false); return; }
     setSaving(false);
     onSaved();
+  };
+
+  const saveReport = async () => {
+    if (!analysis) return;
+    setSaving(true);
+    const { error } = await supabase.from("lesson_reports").insert({
+      test_title: title,
+      test_subject: subject || null,
+      test_grade: grade || null,
+      student_name: studentName,
+      score: analysis.score,
+      total: analysis.total,
+      percentage: analysis.rate,
+      report_html: analysis.reportHtml,
+      status: "draft",
+    });
+    setSaving(false);
+    if (error) { alert("報告書の保存に失敗しました: " + error.message); return; }
+    setReportSaved(true);
   };
 
   // ── テスト種別選択 ──
@@ -469,6 +489,18 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               className="rounded-xl bg-slate-700 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">
               印刷する
             </button>
+            {testType === "lesson" && (
+              reportSaved ? (
+                <span className="rounded-xl bg-green-100 px-4 py-2 text-sm font-semibold text-green-700">
+                  保存済み ✓
+                </span>
+              ) : (
+                <button onClick={saveReport} disabled={saving}
+                  className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50">
+                  {saving ? "保存中..." : "報告書を保存"}
+                </button>
+              )
+            )}
             {testType === "diagnostic" && (
               <button
                 onClick={() => {
