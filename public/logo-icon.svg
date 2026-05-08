@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72" fill="none" role="img" aria-label="つながるまなび icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4338ca"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="72" height="72" rx="20" fill="url(#bg)"/>
+  <rect x="1" y="1" width="70" height="70" rx="19" stroke="white" stroke-width="1" stroke-opacity="0.2"/>
+
+  <!-- Arcs -->
+  <line x1="23" y1="22" x2="49" y2="22"
+    stroke="white" stroke-width="3" stroke-linecap="round" stroke-opacity="0.5"/>
+  <path d="M54 28 Q60 52 44 58 Q34 63 24 55"
+    stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-opacity="0.5"/>
+
+  <!-- Nodes -->
+  <circle cx="17" cy="22" r="9" fill="white" fill-opacity="0.12"/>
+  <circle cx="17" cy="22" r="5.5" fill="white"/>
+  <circle cx="54" cy="22" r="9" fill="white" fill-opacity="0.12"/>
+  <circle cx="54" cy="22" r="5.5" fill="white"/>
+  <circle cx="19" cy="53" r="10" fill="white" fill-opacity="0.14"/>
+  <circle cx="19" cy="53" r="7" fill="white"/>
+  <circle cx="19" cy="53" r="2.5" fill="#4338ca" fill-opacity="0.6"/>
+</svg>

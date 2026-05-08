@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { Logo } from "@/components/Logo";
 import type { Student } from "@/lib/supabase";
 
 type AssignedTest = {
@@ -96,10 +97,7 @@ export default function StudentDashboardPage() {
       {/* ヘッダー */}
       <header className="sticky top-0 z-10 border-b border-white/60 bg-white/80 px-6 py-4 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-sm font-bold text-white">つ</div>
-            <span className="font-bold text-slate-900">つながるまなび</span>
-          </div>
+          <Logo size="sm" />
           <button onClick={logout} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">
             ログアウト
           </button>

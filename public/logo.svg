@@ -1,68 +1,59 @@
-<svg width="272" height="72" viewBox="0 0 272 72" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="つながるまなび">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 72" fill="none" role="img" aria-label="つながるまなび">
   <defs>
-    <linearGradient id="logo-bg" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#DCFCE7"/>
-      <stop offset="1" stop-color="#DBEAFE"/>
+    <linearGradient id="iconBg" x1="0" y1="0" x2="72" y2="72" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4338ca"/>
+      <stop offset="1" stop-color="#7c3aed"/>
     </linearGradient>
-    <linearGradient id="logo-line" x1="8" y1="8" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#22C55E"/>
-      <stop offset="1" stop-color="#3B82F6"/>
+    <linearGradient id="textAccent" x1="0" y1="0" x2="210" y2="0" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4338ca"/>
+      <stop offset="1" stop-color="#6d28d9"/>
     </linearGradient>
-    <linearGradient id="logo-center" x1="0" y1="0" x2="1" y2="1">
-      <stop stop-color="#14B8A6"/>
-      <stop offset="1" stop-color="#6366F1"/>
-    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
 
-  <!-- Icon background -->
-  <rect width="72" height="72" rx="16" fill="url(#logo-bg)"/>
-  <rect width="72" height="72" rx="16" stroke="url(#logo-line)" stroke-width="1.5" stroke-opacity="0.3"/>
+  <!-- ── Icon mark (72×72) ── -->
+  <rect width="72" height="72" rx="20" fill="url(#iconBg)"/>
 
-  <!-- Connection lines — outer triangle -->
-  <line x1="36" y1="13" x2="14" y2="55" stroke="url(#logo-line)" stroke-width="2.5" stroke-linecap="round"/>
-  <line x1="36" y1="13" x2="58" y2="55" stroke="url(#logo-line)" stroke-width="2.5" stroke-linecap="round"/>
-  <line x1="14" y1="55" x2="58" y2="55" stroke="url(#logo-line)" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Glow ring on icon -->
+  <rect x="1" y="1" width="70" height="70" rx="19" stroke="white" stroke-width="1" stroke-opacity="0.2"/>
 
-  <!-- Connection lines — inner (to center) -->
-  <line x1="36" y1="13" x2="36" y2="35" stroke="url(#logo-line)" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.45"/>
-  <line x1="14" y1="55" x2="36" y2="35" stroke="url(#logo-line)" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.45"/>
-  <line x1="58" y1="55" x2="36" y2="35" stroke="url(#logo-line)" stroke-width="1.5" stroke-linecap="round" stroke-opacity="0.45"/>
+  <!-- Connection arcs forming the shape of "つ" -->
+  <!-- Top horizontal: left node → right node -->
+  <line x1="23" y1="22" x2="49" y2="22"
+    stroke="white" stroke-width="3" stroke-linecap="round" stroke-opacity="0.5"/>
+  <!-- Curve: right node sweeps down and left to bottom node -->
+  <path d="M54 28 Q60 52 44 58 Q34 63 24 55"
+    stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-opacity="0.5"/>
 
-  <!-- Center node -->
-  <circle cx="36" cy="35" r="5.5" fill="url(#logo-center)"/>
-  <circle cx="36" cy="35" r="2.5" fill="white" fill-opacity="0.9"/>
+  <!-- Nodes — soft glow aura then solid dot -->
+  <!-- Top-left node -->
+  <circle cx="17" cy="22" r="9" fill="white" fill-opacity="0.12"/>
+  <circle cx="17" cy="22" r="5.5" fill="white"/>
+  <!-- Top-right node -->
+  <circle cx="54" cy="22" r="9" fill="white" fill-opacity="0.12"/>
+  <circle cx="54" cy="22" r="5.5" fill="white"/>
+  <!-- Bottom node (larger = goal/destination) -->
+  <circle cx="19" cy="53" r="10" fill="white" fill-opacity="0.14"/>
+  <circle cx="19" cy="53" r="7" fill="white"/>
 
-  <!-- Top node (blue) — checkmark = テスト合格 -->
-  <circle cx="36" cy="13" r="9.5" fill="#3B82F6"/>
-  <path d="M32 13.5 L35 16.5 L40.5 10" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Inner dot on bottom node (indigo, representing "core learning") -->
+  <circle cx="19" cy="53" r="2.5" fill="#4338ca" fill-opacity="0.6"/>
 
-  <!-- Bottom-left node (green) -->
-  <circle cx="14" cy="55" r="9.5" fill="#22C55E"/>
-  <circle cx="14" cy="55" r="4" fill="white" fill-opacity="0.85"/>
-
-  <!-- Bottom-right node (sky) -->
-  <circle cx="58" cy="55" r="9.5" fill="#38BDF8"/>
-  <circle cx="58" cy="55" r="4" fill="white" fill-opacity="0.85"/>
-
-  <!-- Text: つながる (green) -->
+  <!-- ── Logotype ── -->
+  <!-- Subtitle: "つながる" in slate -->
   <text
-    x="86"
-    y="31"
-    font-family="'Hiragino Kaku Gothic Pro', 'Noto Sans JP', 'Yu Gothic UI', sans-serif"
-    font-size="17"
-    font-weight="700"
-    fill="#15803D"
-    letter-spacing="0.5"
-  >つながる</text>
+    x="90" y="34"
+    font-family="'Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic','Meiryo',sans-serif"
+    font-size="18" font-weight="700" letter-spacing="1"
+    fill="#334155">つながる</text>
 
-  <!-- Text: まなび (blue, larger) -->
+  <!-- Main word: "まなび" in indigo, larger -->
   <text
-    x="86"
-    y="62"
-    font-family="'Hiragino Kaku Gothic Pro', 'Noto Sans JP', 'Yu Gothic UI', sans-serif"
-    font-size="30"
-    font-weight="800"
-    fill="#1D4ED8"
-    letter-spacing="1"
-  >まなび</text>
+    x="90" y="62"
+    font-family="'Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic','Meiryo',sans-serif"
+    font-size="24" font-weight="800" letter-spacing="3"
+    fill="url(#textAccent)">まなび</text>
 </svg>

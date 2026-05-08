@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -34,10 +35,7 @@ export default function LoginPage() {
       {/* 左：ブランドパネル */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 p-12 text-white">
         <div>
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/20 text-xl font-bold">つ</div>
-            <span className="text-xl font-bold tracking-tight">つながるまなび</span>
-          </div>
+          <Logo size="sm" className="brightness-0 invert" />
         </div>
         <div>
           <h1 className="text-4xl font-bold leading-tight">
@@ -68,8 +66,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           {/* モバイル用ロゴ */}
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-xl font-bold text-white">つ</div>
-            <span className="text-xl font-bold text-slate-900">つながるまなび</span>
+            <Logo size="sm" />
           </div>
 
           <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">

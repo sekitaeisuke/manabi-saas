@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { Logo } from "@/components/Logo";
 
 export default function StudentLoginPage() {
   const [loginId, setLoginId] = useState("");
@@ -30,12 +31,9 @@ export default function StudentLoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50 px-4">
       <div className="w-full max-w-sm">
         {/* ロゴ */}
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-600 text-2xl font-bold text-white shadow-lg">
-            つ
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900">つながるまなび</h1>
-          <p className="mt-1 text-sm text-slate-500">生徒ログイン</p>
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <Logo size="md" />
+          <p className="text-sm text-slate-500">生徒ログイン</p>
         </div>
 
         <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">

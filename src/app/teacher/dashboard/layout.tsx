@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 
 const NAV = [
@@ -83,9 +84,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const Sidebar = ({ pending }: { pending: number }) => (
     <aside className="flex h-full flex-col bg-white">
       {/* ロゴ */}
-      <div className="flex h-16 items-center gap-3 border-b border-slate-100 px-6">
-        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-600 text-sm font-bold text-white">つ</div>
-        <span className="font-bold text-slate-900">つながるまなび</span>
+      <div className="flex h-16 items-center border-b border-slate-100 px-5">
+        <Logo size="sm" />
       </div>
 
       {/* ナビゲーション */}
@@ -162,7 +162,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <span className="font-bold text-slate-900">つながるまなび</span>
+          <Logo size="sm" />
         </div>
 
         <main className="min-h-screen">
