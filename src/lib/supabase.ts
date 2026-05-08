@@ -76,6 +76,8 @@ export type Student = {
   name: string;
   grade: string;
   school_id: string | null;
+  login_id: string | null;
+  auth_user_id: string | null;
   created_at: string;
 };
 

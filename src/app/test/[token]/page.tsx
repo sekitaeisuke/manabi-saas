@@ -60,7 +60,18 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    params.then((p) => loadTest(p.token));
+    params.then(async (p) => {
+      // URLパラメータに studentName があればログイン済み生徒として自動セット
+      const urlParams = new URLSearchParams(window.location.search);
+      const nameFromUrl = urlParams.get("studentName");
+      if (nameFromUrl) {
+        setStudentName(nameFromUrl);
+        await loadTest(p.token);
+        setPhase("test");
+      } else {
+        await loadTest(p.token);
+      }
+    });
   }, []);
 
   const loadTest = async (tok: string) => {

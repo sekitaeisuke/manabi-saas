@@ -266,12 +266,17 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
 }
 
 // ─── 生徒タブ ────────────────────────────────────────
+type AccountModal = { studentId: string; studentName: string; loginId: string; password: string } | null;
+
 function StudentsTab({ students, schools, schoolName, onRefresh }: {
   students: Student[]; schools: School[]; schoolName: (id: string | null) => string; onRefresh: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", grade: "中1", school_id: "" });
   const [saving, setSaving] = useState(false);
+  const [accountModal, setAccountModal] = useState<AccountModal>(null);
+  const [issuing, setIssuing] = useState(false);
+  const [issuedResult, setIssuedResult] = useState<{ loginId: string; password: string } | null>(null);
 
   const save = async () => {
     if (!form.name) return;
@@ -290,6 +295,31 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
   const del = async (id: string) => {
     if (!confirm("この生徒を削除しますか？関連する診断データも削除されます。")) return;
     await supabase.from("students").delete().eq("id", id);
+    onRefresh();
+  };
+
+  const openAccountModal = (s: Student) => {
+    const auto = "s-" + Math.random().toString(36).slice(2, 7);
+    setAccountModal({ studentId: s.id, studentName: s.name, loginId: s.login_id ?? auto, password: "" });
+    setIssuedResult(null);
+  };
+
+  const issueAccount = async () => {
+    if (!accountModal || !accountModal.loginId || accountModal.password.length < 6) return;
+    setIssuing(true);
+    const res = await fetch("/api/student/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        student_id: accountModal.studentId,
+        login_id: accountModal.loginId,
+        password: accountModal.password,
+      }),
+    });
+    const data = await res.json();
+    setIssuing(false);
+    if (data.error) { alert("エラー: " + data.error); return; }
+    setIssuedResult({ loginId: accountModal.loginId, password: accountModal.password });
     onRefresh();
   };
 
@@ -337,10 +367,21 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
           {students.map((s) => (
             <div key={s.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-2">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="font-bold text-slate-900">{s.name}</p>
                   <p className="mt-1 text-sm text-slate-500">{s.grade}</p>
                   {s.school_id && <p className="text-xs text-slate-400">{schoolName(s.school_id)}</p>}
+                  {s.login_id ? (
+                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      <span className="text-xs font-medium text-green-700">ID: {s.login_id}</span>
+                    </div>
+                  ) : (
+                    <button onClick={() => openAccountModal(s)}
+                      className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-100">
+                      アカウント発行
+                    </button>
+                  )}
                   <p className="mt-2 text-xs text-slate-400">登録：{s.created_at.slice(0, 10)}</p>
                 </div>
                 <button onClick={() => del(s.id)}
@@ -350,6 +391,75 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* アカウント発行モーダル */}
+      {accountModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-8 shadow-xl">
+            {issuedResult ? (
+              <>
+                <div className="mb-4 text-center text-4xl">✅</div>
+                <h3 className="mb-1 text-center text-lg font-bold text-slate-900">アカウント発行完了</h3>
+                <p className="mb-6 text-center text-sm text-slate-500">{accountModal.studentName}さんのログイン情報</p>
+                <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
+                  <div>
+                    <p className="text-xs text-slate-500">ログインURL</p>
+                    <p className="font-mono text-sm font-semibold text-indigo-700">
+                      {typeof window !== "undefined" ? window.location.origin : ""}/student/login
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">ログインID</p>
+                    <p className="font-mono text-lg font-bold text-slate-900">{issuedResult.loginId}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">パスワード</p>
+                    <p className="font-mono text-lg font-bold text-slate-900">{issuedResult.password}</p>
+                  </div>
+                </div>
+                <p className="mt-4 text-center text-xs text-slate-400">この情報を生徒・保護者に伝えてください</p>
+                <button onClick={() => setAccountModal(null)}
+                  className="mt-4 w-full rounded-2xl bg-slate-950 py-3 font-semibold text-white hover:bg-slate-800">
+                  閉じる
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="mb-1 text-lg font-bold text-slate-900">アカウント発行</h3>
+                <p className="mb-6 text-sm text-slate-500">{accountModal.studentName}さんのログイン情報を設定します</p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">ログインID</label>
+                    <input value={accountModal.loginId}
+                      onChange={(e) => setAccountModal({ ...accountModal, loginId: e.target.value })}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400"
+                      placeholder="例：s-tanaka-01" />
+                    <p className="mt-1 text-xs text-slate-400">英数字・ハイフンのみ使用可</p>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">初期パスワード（6文字以上）</label>
+                    <input type="text" value={accountModal.password}
+                      onChange={(e) => setAccountModal({ ...accountModal, password: e.target.value })}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400"
+                      placeholder="例：tanaka2025" />
+                  </div>
+                </div>
+                <div className="mt-6 flex gap-2">
+                  <button onClick={issueAccount}
+                    disabled={!accountModal.loginId || accountModal.password.length < 6 || issuing}
+                    className="flex-1 rounded-2xl bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
+                    {issuing ? "発行中..." : "発行する"}
+                  </button>
+                  <button onClick={() => setAccountModal(null)}
+                    className="flex-1 rounded-2xl border border-slate-300 bg-white py-3 text-slate-700 hover:bg-slate-50">
+                    キャンセル
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
