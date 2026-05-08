@@ -56,9 +56,9 @@ const QUICK_ACTIONS = [
     ),
   },
   {
-    title: "分析とカルテ",
-    desc: "テスト結果を分析し、学習カルテを作成",
-    href: "/teacher/dashboard/analysis",
+    title: "カルテ（学習方針書）",
+    desc: "診断結果からAIが3ヶ月間の個別学習方針書を自動生成",
+    href: "/teacher/dashboard/karte",
     color: "bg-violet-50 border-violet-200 hover:border-violet-400 hover:shadow-violet-100",
     iconBg: "bg-violet-100",
     iconColor: "text-violet-600",

@@ -1040,6 +1040,27 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
               一覧に戻る
             </button>
+            {(status === "analyzed" || status === "approved") && reportHtml && (
+              <button
+                onClick={() => {
+                  sessionStorage.setItem("karteFromDiagnosis", JSON.stringify({
+                    studentName: response.student_name,
+                    grade: response.grade || "",
+                    subject: response.subject || "",
+                    testScore: response.test_score,
+                    testTotal: response.test_total,
+                    testPercentage: response.test_percentage,
+                    habitScore: scores.habitScore,
+                    methodScore: scores.methodScore,
+                    aiAnalysis: response.ai_analysis,
+                    sessionId: response.session_id,
+                  }));
+                  window.location.href = "/teacher/dashboard/karte?create=1";
+                }}
+                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+                カルテを作成
+              </button>
+            )}
             {reportHtml && (
               <button onClick={() => window.print()}
                 className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">

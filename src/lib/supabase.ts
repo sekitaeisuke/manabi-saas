@@ -107,6 +107,33 @@ export type QualityRatings = {
   speak_balance: DiagnosisRating;
 };
 
+export type Textbook = {
+  id: string;
+  subject: string;
+  grade: string;
+  name: string;
+  publisher: string | null;
+  description: string | null;
+  type: string;
+  created_at: string;
+};
+
+export type LearningPlan = {
+  id: string;
+  student_name: string;
+  grade: string;
+  subject: string;
+  test_score: number | null;
+  test_total: number | null;
+  test_percentage: number | null;
+  diagnosis_session_id: string | null;
+  selected_textbooks: { id: string; name: string; publisher: string | null }[] | null;
+  plan_html: string;
+  teacher_notes: string | null;
+  status: "draft" | "shared";
+  created_at: string;
+};
+
 export type DifficultyResult = { score: number; total: number };
 
 export type Diagnosis = {

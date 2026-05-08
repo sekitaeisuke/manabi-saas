@@ -22,7 +22,15 @@ export async function POST(req: NextRequest) {
 
   const scored: AnswerEntry[] = (questions as Question[]).map((q) => {
     const given = (answers as Record<string, string>)[q.id] ?? "";
-    const isCorrect = given.trim() === q.correct_answer.trim();
+    const givenNorm = given.trim();
+    const correctNorm = q.correct_answer.trim();
+    let isCorrect = givenNorm === correctNorm;
+    if (!isCorrect && q.type === "multiple-choice") {
+      // "C. -1" vs "C" — compare only the leading option letter/label
+      const givenLetter = givenNorm.split(/[\s.。]/)[0];
+      const correctLetter = correctNorm.split(/[\s.。]/)[0];
+      isCorrect = givenLetter.length > 0 && givenLetter === correctLetter;
+    }
     return { questionId: q.id, answer: given, isCorrect, points: isCorrect ? q.points : 0 };
   });
 
@@ -47,9 +55,13 @@ export async function POST(req: NextRequest) {
     .join("\n");
 
   const wrongList = scored
-    .map((a, i) => !a.isCorrect ? (questions as Question[])[i] : null)
+    .map((a, i) => {
+      if (a.isCorrect) return null;
+      const q = (questions as Question[])[i];
+      const studentAns = a.answer.trim() || "未回答";
+      return `・${q.text.slice(0, 50)}（生徒の解答：「${studentAns}」／正解：「${q.correct_answer}」）`;
+    })
     .filter(Boolean)
-    .map((q) => `・${q!.text.slice(0, 40)}`)
     .join("\n");
 
   const typeLabel = testType === "diagnostic"
