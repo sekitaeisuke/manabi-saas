@@ -145,9 +145,11 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       <div className="bg-white rounded-3xl p-10 shadow-lg w-full max-w-md">
         <h1 className="text-2xl font-bold text-slate-900 mb-1">{test.title}</h1>
         <p className="text-slate-500 text-sm mb-8">{test.subject} ・ {test.grade} ・ {questions.length}問</p>
-        <p className="text-sm text-slate-500 mb-4">
-          このテストはテスト後にアンケートがあります。正直に答えてください。
-        </p>
+        {test.type !== "lesson" && (
+          <p className="text-sm text-slate-500 mb-4">
+            このテストはテスト後にアンケートがあります。正直に答えてください。
+          </p>
+        )}
         <label className="block text-sm font-medium text-slate-700 mb-2">名前を入力してください</label>
         <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && studentName && setPhase("test")}
@@ -205,9 +207,13 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
             ))}
           </div>
           <div className="mt-8 space-y-3">
-            <button onClick={() => setPhase("qa")} disabled={answered < questions.length}
+            <button
+              onClick={() => test.type === "lesson" ? submitAll() : setPhase("qa")}
+              disabled={answered < questions.length}
               className="w-full rounded-2xl bg-blue-600 py-4 font-semibold text-white disabled:opacity-40 hover:bg-blue-700 transition">
-              テスト完了 → アンケートへ（{answered}/{questions.length}問回答済み）
+              {test.type === "lesson"
+                ? `テスト完了 → 提出する（${answered}/${questions.length}問回答済み）`
+                : `テスト完了 → アンケートへ（${answered}/${questions.length}問回答済み）`}
             </button>
           </div>
         </div>

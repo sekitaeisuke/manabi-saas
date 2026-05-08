@@ -12,6 +12,7 @@ export type Test = {
   grade: string;
   difficulty: string;
   status: string;
+  type: "diagnostic" | "lesson";
   created_at: string;
 };
 

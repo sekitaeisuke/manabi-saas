@@ -625,7 +625,7 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
       setStep("saving");
       const { data: test, error: testErr } = await supabase
         .from("tests")
-        .insert({ title, subject, grade, difficulty: difficulties.join(","), status: "draft" })
+        .insert({ title, subject, grade, difficulty: difficulties.join(","), status: "draft", type: "diagnostic" })
         .select().single();
       if (testErr || !test) throw new Error("テストの保存に失敗しました");
 

@@ -395,7 +395,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     setSaving(true);
     const { data: test, error } = await supabase
       .from("tests")
-      .insert({ title, subject, grade, difficulty: difficulties.join(","), status: "draft" })
+      .insert({ title, subject, grade, difficulty: difficulties.join(","), status: "draft", type: testType })
       .select()
       .single();
     if (error || !test) { alert("保存に失敗しました"); setSaving(false); return; }
