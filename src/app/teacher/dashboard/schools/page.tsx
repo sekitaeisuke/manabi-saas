@@ -19,6 +19,8 @@ const ROLE_COLOR: Record<Teacher["role"], string> = {
   "part-time": "bg-slate-100 text-slate-700",
 };
 
+const DAYS = ["月", "火", "水", "木", "金", "土", "日"] as const;
+
 export default function SchoolsPage() {
   const [tab, setTab] = useState<Tab>("schools");
   const [schools, setSchools] = useState<School[]>([]);
@@ -168,6 +170,7 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
   teachers: Teacher[]; schools: School[]; schoolName: (id: string | null) => string; onRefresh: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [showCsvModal, setShowCsvModal] = useState(false);
   const [form, setForm] = useState<{ name: string; email: string; role: Teacher["role"]; school_id: string }>({
     name: "", email: "", role: "teacher", school_id: "",
   });
@@ -196,12 +199,20 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setShowCsvModal(true)}
+          className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+          CSVインポート
+        </button>
         <button onClick={() => setShowForm(!showForm)}
           className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
           {showForm ? "キャンセル" : "+ 講師を追加"}
         </button>
       </div>
+
+      {showCsvModal && (
+        <TeacherCsvModal schools={schools} onClose={() => setShowCsvModal(false)} onRefresh={onRefresh} />
+      )}
 
       {showForm && (
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -272,7 +283,8 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
   students: Student[]; schools: School[]; schoolName: (id: string | null) => string; onRefresh: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", grade: "中1", school_id: "" });
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [form, setForm] = useState({ name: "", grade: "中1", school_id: "", attendance_days: [] as string[] });
   const [saving, setSaving] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
   const [issuing, setIssuing] = useState(false);
@@ -285,8 +297,9 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
       name: form.name,
       grade: form.grade,
       school_id: form.school_id || null,
+      attendance_days: form.attendance_days.length > 0 ? form.attendance_days : null,
     });
-    setForm({ name: "", grade: "中1", school_id: "" });
+    setForm({ name: "", grade: "中1", school_id: "", attendance_days: [] });
     setShowForm(false);
     setSaving(false);
     onRefresh();
@@ -325,12 +338,20 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setShowCsvModal(true)}
+          className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+          CSVインポート
+        </button>
         <button onClick={() => setShowForm(!showForm)}
           className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
           {showForm ? "キャンセル" : "+ 生徒を追加"}
         </button>
       </div>
+
+      {showCsvModal && (
+        <StudentCsvModal schools={schools} onClose={() => setShowCsvModal(false)} onRefresh={onRefresh} />
+      )}
 
       {showForm && (
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -353,6 +374,21 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
               </select>
             </div>
           </div>
+          <div className="mt-3 grid gap-1 text-sm text-slate-700">
+            通塾曜日
+            <div className="flex flex-wrap gap-2">
+              {DAYS.map((day) => {
+                const checked = form.attendance_days.includes(day);
+                return (
+                  <label key={day} className={`flex cursor-pointer items-center gap-1 rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${checked ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                    <input type="checkbox" className="sr-only" checked={checked}
+                      onChange={() => setForm({ ...form, attendance_days: checked ? form.attendance_days.filter((d) => d !== day) : [...form.attendance_days, day] })} />
+                    {day}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <button onClick={save} disabled={!form.name || saving}
             className="mt-4 rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
             {saving ? "保存中..." : "登録する"}
@@ -371,6 +407,13 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
                   <p className="font-bold text-slate-900">{s.name}</p>
                   <p className="mt-1 text-sm text-slate-500">{s.grade}</p>
                   {s.school_id && <p className="text-xs text-slate-400">{schoolName(s.school_id)}</p>}
+                  {s.attendance_days && s.attendance_days.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {DAYS.filter((d) => s.attendance_days!.includes(d)).map((d) => (
+                        <span key={d} className="rounded-md bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-600">{d}</span>
+                      ))}
+                    </div>
+                  )}
                   {s.login_id ? (
                     <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
@@ -462,6 +505,254 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── 講師CSVインポートモーダル ─────────────────────────
+type TeacherRow = { name: string; email: string; role: Teacher["role"]; school_id: string; schoolName: string; error?: string };
+
+const ROLE_MAP: Record<string, Teacher["role"]> = {
+  管理者: "admin", admin: "admin",
+  講師: "teacher", teacher: "teacher",
+  非常勤: "part-time", "非常勤講師": "part-time", "part-time": "part-time",
+};
+
+function parseCsv(text: string): string[][] {
+  return text.trim().split(/\r?\n/).map((line) =>
+    line.split(",").map((c) => c.trim().replace(/^["']|["']$/g, ""))
+  );
+}
+
+function TeacherCsvModal({ schools, onClose, onRefresh }: {
+  schools: School[]; onClose: () => void; onRefresh: () => void;
+}) {
+  const [rows, setRows] = useState<TeacherRow[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const allLines = parseCsv(text);
+      const lines = allLines[0]?.[0] === "氏名" ? allLines.slice(1) : allLines;
+      const parsed: TeacherRow[] = lines
+        .filter((cols) => cols.length >= 1 && cols[0])
+        .map((cols) => {
+          const [name = "", email = "", roleRaw = "", schoolRaw = ""] = cols;
+          const role = ROLE_MAP[roleRaw] ?? "teacher";
+          const school = schools.find((s) => s.name === schoolRaw.trim());
+          const error = !name ? "氏名が空" : undefined;
+          return { name, email, role, school_id: school?.id ?? "", schoolName: schoolRaw, error };
+        });
+      setRows(parsed);
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
+  const importAll = async () => {
+    const valid = rows.filter((r) => !r.error);
+    if (!valid.length) return;
+    setImporting(true);
+    await supabase.from("teachers").insert(
+      valid.map((r) => ({ name: r.name, email: r.email || null, role: r.role, school_id: r.school_id || null }))
+    );
+    setImporting(false);
+    setDone(true);
+    onRefresh();
+  };
+
+  const sampleCsv = "氏名,メールアドレス,役職,校舎名\n田中花子,tanaka@school.jp,講師,本校\n山田一郎,yamada@school.jp,管理者,東校";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-2xl rounded-3xl bg-white p-8 shadow-xl">
+        <div className="mb-6 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900">講師CSVインポート</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+        </div>
+
+        {done ? (
+          <div className="text-center py-8">
+            <p className="text-4xl mb-4">✅</p>
+            <p className="text-lg font-bold text-slate-900 mb-2">{rows.filter((r) => !r.error).length}件 登録しました</p>
+            <button onClick={onClose} className="mt-4 rounded-2xl bg-slate-950 px-8 py-3 text-white font-semibold hover:bg-slate-800">閉じる</button>
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-semibold mb-1">CSV形式（1行目はヘッダー行として自動スキップ）</p>
+              <p className="font-mono text-xs">氏名,メールアドレス,役職,校舎名</p>
+              <p className="mt-1 text-xs text-slate-400">役職：管理者 / 講師 / 非常勤</p>
+              <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsv)}`} download="teachers_sample.csv"
+                className="mt-2 inline-block text-xs text-indigo-600 underline">サンプルCSVをダウンロード</a>
+            </div>
+
+            <input type="file" accept=".csv,text/csv" onChange={handleFile}
+              className="mb-4 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" />
+
+            {rows.length > 0 && (
+              <div className="mb-4 max-h-64 overflow-y-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">氏名</th>
+                      <th className="px-3 py-2 text-left">メール</th>
+                      <th className="px-3 py-2 text-left">役職</th>
+                      <th className="px-3 py-2 text-left">校舎</th>
+                      <th className="px-3 py-2 text-left">状態</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={i} className={`border-t border-slate-100 ${r.error ? "bg-red-50" : ""}`}>
+                        <td className="px-3 py-2 font-medium">{r.name}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.email || "—"}</td>
+                        <td className="px-3 py-2">{ROLE_LABEL[r.role]}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.schoolName || "未所属"}</td>
+                        <td className="px-3 py-2">{r.error ? <span className="text-red-600 text-xs">{r.error}</span> : <span className="text-green-600 text-xs">OK</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={onClose} className="rounded-2xl border border-slate-300 bg-white px-6 py-2.5 text-slate-700 hover:bg-slate-50">キャンセル</button>
+              <button onClick={importAll} disabled={!rows.some((r) => !r.error) || importing}
+                className="rounded-2xl bg-slate-950 px-6 py-2.5 font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
+                {importing ? "登録中..." : `${rows.filter((r) => !r.error).length}件を登録`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── 生徒CSVインポートモーダル ─────────────────────────
+type StudentRow = { name: string; grade: string; school_id: string; schoolName: string; attendance_days: string[]; error?: string };
+
+function StudentCsvModal({ schools, onClose, onRefresh }: {
+  schools: School[]; onClose: () => void; onRefresh: () => void;
+}) {
+  const [rows, setRows] = useState<StudentRow[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const allLines = parseCsv(text);
+      const lines = allLines[0]?.[0] === "氏名" ? allLines.slice(1) : allLines;
+      const parsed: StudentRow[] = lines
+        .filter((cols) => cols.length >= 1 && cols[0])
+        .map((cols) => {
+          const [name = "", grade = "", schoolRaw = "", daysRaw = ""] = cols;
+          const school = schools.find((s) => s.name === schoolRaw.trim());
+          const validGrade = GRADE_ORDER.includes(grade) ? grade : "";
+          const attendance_days = [...daysRaw].filter((c) => (DAYS as readonly string[]).includes(c));
+          let error: string | undefined;
+          if (!name) error = "氏名が空";
+          else if (!validGrade) error = `学年「${grade}」が不正`;
+          return { name, grade: validGrade || grade, school_id: school?.id ?? "", schoolName: schoolRaw, attendance_days, error };
+        });
+      setRows(parsed);
+    };
+    reader.readAsText(file, "utf-8");
+  };
+
+  const importAll = async () => {
+    const valid = rows.filter((r) => !r.error);
+    if (!valid.length) return;
+    setImporting(true);
+    await supabase.from("students").insert(
+      valid.map((r) => ({
+        name: r.name,
+        grade: r.grade,
+        school_id: r.school_id || null,
+        attendance_days: r.attendance_days.length > 0 ? r.attendance_days : null,
+      }))
+    );
+    setImporting(false);
+    setDone(true);
+    onRefresh();
+  };
+
+  const sampleCsv = "氏名,学年,校舎名,通塾曜日\n山田太郎,中1,本校,月水金\n佐藤花子,小5,東校,火木";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-2xl rounded-3xl bg-white p-8 shadow-xl">
+        <div className="mb-6 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900">生徒CSVインポート</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+        </div>
+
+        {done ? (
+          <div className="text-center py-8">
+            <p className="text-4xl mb-4">✅</p>
+            <p className="text-lg font-bold text-slate-900 mb-2">{rows.filter((r) => !r.error).length}件 登録しました</p>
+            <button onClick={onClose} className="mt-4 rounded-2xl bg-slate-950 px-8 py-3 text-white font-semibold hover:bg-slate-800">閉じる</button>
+          </div>
+        ) : (
+          <>
+            <div className="mb-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-semibold mb-1">CSV形式（1行目はヘッダー行として自動スキップ）</p>
+              <p className="font-mono text-xs">氏名,学年,校舎名,通塾曜日</p>
+              <p className="mt-1 text-xs text-slate-400">学年：小1〜小6, 中1〜中3, 高1〜高3　通塾曜日：月火水木金土日（例：月水金）</p>
+              <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsv)}`} download="students_sample.csv"
+                className="mt-2 inline-block text-xs text-indigo-600 underline">サンプルCSVをダウンロード</a>
+            </div>
+
+            <input type="file" accept=".csv,text/csv" onChange={handleFile}
+              className="mb-4 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" />
+
+            {rows.length > 0 && (
+              <div className="mb-4 max-h-64 overflow-y-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">氏名</th>
+                      <th className="px-3 py-2 text-left">学年</th>
+                      <th className="px-3 py-2 text-left">校舎</th>
+                      <th className="px-3 py-2 text-left">通塾曜日</th>
+                      <th className="px-3 py-2 text-left">状態</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={i} className={`border-t border-slate-100 ${r.error ? "bg-red-50" : ""}`}>
+                        <td className="px-3 py-2 font-medium">{r.name}</td>
+                        <td className="px-3 py-2">{r.grade}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.schoolName || "未所属"}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.attendance_days.length > 0 ? r.attendance_days.join("・") : "—"}</td>
+                        <td className="px-3 py-2">{r.error ? <span className="text-red-600 text-xs">{r.error}</span> : <span className="text-green-600 text-xs">OK</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={onClose} className="rounded-2xl border border-slate-300 bg-white px-6 py-2.5 text-slate-700 hover:bg-slate-50">キャンセル</button>
+              <button onClick={importAll} disabled={!rows.some((r) => !r.error) || importing}
+                className="rounded-2xl bg-slate-950 px-6 py-2.5 font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
+                {importing ? "登録中..." : `${rows.filter((r) => !r.error).length}件を登録`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

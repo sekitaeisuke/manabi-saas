@@ -4,6 +4,19 @@ import Link from "next/link";
 
 const QUICK_ACTIONS = [
   {
+    title: "来塾カレンダー",
+    desc: "生徒の来塾予定を曜日で管理し、テストをその場で割当・受験",
+    href: "/teacher/dashboard/calendar",
+    color: "bg-teal-50 border-teal-200 hover:border-teal-400 hover:shadow-teal-100",
+    iconBg: "bg-teal-100",
+    iconColor: "text-teal-600",
+    icon: (
+      <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
     title: "診断テスト作成",
     desc: "AIで問題を自動生成し、URLで生徒に配布",
     href: "/teacher/dashboard/tests",

@@ -79,6 +79,7 @@ export type Student = {
   school_id: string | null;
   login_id: string | null;
   auth_user_id: string | null;
+  attendance_days: string[] | null;
   created_at: string;
 };
 
