@@ -383,6 +383,7 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
   const [issuedResult, setIssuedResult] = useState<{ loginId: string; password: string } | null>(null);
   const [editModal, setEditModal] = useState<EditModal>(null);
   const [editSaving, setEditSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   const openEdit = (s: Student) => {
     setEditModal({
@@ -454,9 +455,33 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
     onRefresh();
   };
 
+  const filtered = students.filter((s) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      s.name.toLowerCase().includes(q) ||
+      s.grade.toLowerCase().includes(q) ||
+      schoolName(s.school_id).toLowerCase().includes(q)
+    );
+  });
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-48">
+          <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+          </svg>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="氏名・学年・校舎で検索"
+            className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>
+          )}
+        </div>
         <button onClick={() => setShowCsvModal(true)}
           className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
           CSVインポート
@@ -516,9 +541,13 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
 
       {students.length === 0 ? (
         <Empty text="生徒が登録されていません" />
+      ) : filtered.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
+          「{search}」に一致する生徒が見つかりません
+        </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {students.map((s) => (
+          {filtered.map((s) => (
             <div key={s.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
