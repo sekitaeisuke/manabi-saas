@@ -369,6 +369,7 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
 
 // ─── 生徒タブ ────────────────────────────────────────
 type AccountModal = { studentId: string; studentName: string; loginId: string; password: string } | null;
+type EditModal = { id: string; name: string; grade: string; school_id: string; attendance_days: string[] } | null;
 
 function StudentsTab({ students, schools, schoolName, onRefresh }: {
   students: Student[]; schools: School[]; schoolName: (id: string | null) => string; onRefresh: () => void;
@@ -380,6 +381,32 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
   const [issuing, setIssuing] = useState(false);
   const [issuedResult, setIssuedResult] = useState<{ loginId: string; password: string } | null>(null);
+  const [editModal, setEditModal] = useState<EditModal>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEdit = (s: Student) => {
+    setEditModal({
+      id: s.id,
+      name: s.name,
+      grade: s.grade,
+      school_id: s.school_id ?? "",
+      attendance_days: s.attendance_days ?? [],
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editModal || !editModal.name) return;
+    setEditSaving(true);
+    await supabase.from("students").update({
+      name: editModal.name,
+      grade: editModal.grade,
+      school_id: editModal.school_id || null,
+      attendance_days: editModal.attendance_days.length > 0 ? editModal.attendance_days : null,
+    }).eq("id", editModal.id);
+    setEditSaving(false);
+    setEditModal(null);
+    onRefresh();
+  };
 
   const save = async () => {
     if (!form.name) return;
@@ -518,13 +545,74 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
                   )}
                   <p className="mt-2 text-xs text-slate-400">登録：{s.created_at.slice(0, 10)}</p>
                 </div>
-                <button onClick={() => del(s.id)}
-                  className="rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
-                  削除
-                </button>
+                <div className="flex flex-col gap-1.5">
+                  <button onClick={() => openEdit(s)}
+                    className="rounded-xl border border-indigo-200 bg-white px-3 py-1.5 text-xs text-indigo-600 hover:bg-indigo-50">
+                    編集
+                  </button>
+                  <button onClick={() => del(s.id)}
+                    className="rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                    削除
+                  </button>
+                </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 生徒編集モーダル */}
+      {editModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-900">生徒情報を編集</h3>
+              <button onClick={() => setEditModal(null)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            <div className="space-y-4">
+              <Field label="氏名 *" value={editModal.name} onChange={(v) => setEditModal({ ...editModal, name: v })} placeholder="例：山田太郎" />
+              <div className="grid gap-1 text-sm text-slate-700">
+                学年
+                <select value={editModal.grade} onChange={(e) => setEditModal({ ...editModal, grade: e.target.value })}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400">
+                  {GRADE_ORDER.map((g) => <option key={g}>{g}</option>)}
+                </select>
+              </div>
+              <div className="grid gap-1 text-sm text-slate-700">
+                所属校舎
+                <select value={editModal.school_id} onChange={(e) => setEditModal({ ...editModal, school_id: e.target.value })}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400">
+                  <option value="">未所属</option>
+                  {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div className="grid gap-1 text-sm text-slate-700">
+                通塾曜日
+                <div className="flex flex-wrap gap-2">
+                  {DAYS.map((day) => {
+                    const checked = editModal.attendance_days.includes(day);
+                    return (
+                      <label key={day} className={`flex cursor-pointer items-center gap-1 rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${checked ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                        <input type="checkbox" className="sr-only" checked={checked}
+                          onChange={() => setEditModal({ ...editModal, attendance_days: checked ? editModal.attendance_days.filter((d) => d !== day) : [...editModal.attendance_days, day] })} />
+                        {day}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-2">
+              <button onClick={saveEdit} disabled={!editModal.name || editSaving}
+                className="flex-1 rounded-2xl bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
+                {editSaving ? "保存中..." : "保存する"}
+              </button>
+              <button onClick={() => setEditModal(null)}
+                className="flex-1 rounded-2xl border border-slate-300 bg-white py-3 text-slate-700 hover:bg-slate-50">
+                キャンセル
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
