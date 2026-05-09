@@ -57,6 +57,7 @@ export type Result = {
 export type School = {
   id: string;
   name: string;
+  group_name: string | null;
   address: string | null;
   phone: string | null;
   admin_name: string | null;

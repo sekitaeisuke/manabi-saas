@@ -26,22 +26,44 @@ export default function SchoolsPage() {
   const [schools, setSchools] = useState<School[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [currentTeacher, setCurrentTeacher] = useState<Teacher | null>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
     const [{ data: s }, { data: t }, { data: st }] = await Promise.all([
-      supabase.from("schools").select("*").order("created_at"),
+      supabase.from("schools").select("*").order("group_name").order("created_at"),
       supabase.from("teachers").select("*").order("created_at"),
       supabase.from("students").select("*").order("created_at"),
     ]);
-    setSchools(s ?? []);
-    setTeachers(t ?? []);
-    setStudents(st ?? []);
+    const allSchools = s ?? [];
+    const allTeachers = t ?? [];
+    const allStudents = st ?? [];
+    setSchools(allSchools);
+    setTeachers(allTeachers);
+    setStudents(allStudents);
+    const me = user?.email ? allTeachers.find((t) => t.email === user.email) : null;
+    setCurrentTeacher(me ?? null);
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const isAdmin = currentTeacher?.role === "admin";
+
+  const visibleSchools = (() => {
+    if (isAdmin) return schools;
+    if (!currentTeacher?.school_id) return [];
+    const mySchool = schools.find((s) => s.id === currentTeacher.school_id);
+    if (!mySchool) return [];
+    if (!mySchool.group_name) return [mySchool];
+    return schools.filter((s) => s.group_name === mySchool.group_name);
+  })();
+
+  const visibleSchoolIds = new Set(visibleSchools.map((s) => s.id));
+  const visibleTeachers = isAdmin ? teachers : teachers.filter((t) => t.school_id != null && visibleSchoolIds.has(t.school_id));
+  const visibleStudents = isAdmin ? students : students.filter((s) => s.school_id != null && visibleSchoolIds.has(s.school_id));
 
   const schoolName = (id: string | null) =>
     schools.find((s) => s.id === id)?.name ?? "未所属";
@@ -55,10 +77,15 @@ export default function SchoolsPage() {
             <h1 className="text-3xl font-bold text-slate-950">校舎・講師・生徒管理</h1>
             <p className="mt-1 text-slate-600">登録・編集・削除を行います</p>
           </div>
-          <Link href="/teacher/dashboard"
-            className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50">
-            ダッシュボード
-          </Link>
+          <div className="flex items-center gap-3">
+            {isAdmin && (
+              <span className="rounded-full bg-purple-100 px-3 py-1 text-xs font-semibold text-purple-700">管理者</span>
+            )}
+            <Link href="/teacher/dashboard"
+              className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50">
+              ダッシュボード
+            </Link>
+          </div>
         </div>
 
         {/* タブ */}
@@ -66,7 +93,7 @@ export default function SchoolsPage() {
           {(["schools", "teachers", "students"] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${tab === t ? "bg-slate-950 text-white" : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
-              {t === "schools" ? `校舎（${schools.length}）` : t === "teachers" ? `講師（${teachers.length}）` : `生徒（${students.length}）`}
+              {t === "schools" ? `校舎（${visibleSchools.length}）` : t === "teachers" ? `講師（${visibleTeachers.length}）` : `生徒（${visibleStudents.length}）`}
             </button>
           ))}
         </div>
@@ -76,13 +103,13 @@ export default function SchoolsPage() {
         ) : (
           <>
             {tab === "schools" && (
-              <SchoolsTab schools={schools} onRefresh={fetchAll} />
+              <SchoolsTab schools={visibleSchools} isAdmin={isAdmin} onRefresh={fetchAll} />
             )}
             {tab === "teachers" && (
-              <TeachersTab teachers={teachers} schools={schools} schoolName={schoolName} onRefresh={fetchAll} />
+              <TeachersTab teachers={visibleTeachers} schools={visibleSchools} schoolName={schoolName} onRefresh={fetchAll} />
             )}
             {tab === "students" && (
-              <StudentsTab students={students} schools={schools} schoolName={schoolName} onRefresh={fetchAll} />
+              <StudentsTab students={visibleStudents} schools={visibleSchools} schoolName={schoolName} onRefresh={fetchAll} />
             )}
           </>
         )}
@@ -92,16 +119,26 @@ export default function SchoolsPage() {
 }
 
 // ─── 校舎タブ ────────────────────────────────────────
-function SchoolsTab({ schools, onRefresh }: { schools: School[]; onRefresh: () => void }) {
+function SchoolsTab({ schools, isAdmin, onRefresh }: {
+  schools: School[]; isAdmin: boolean; onRefresh: () => void;
+}) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", address: "", phone: "", admin_name: "" });
+  const [form, setForm] = useState({ name: "", group_name: "", address: "", phone: "", admin_name: "" });
   const [saving, setSaving] = useState(false);
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  const [editGroupName, setEditGroupName] = useState("");
 
   const save = async () => {
     if (!form.name) return;
     setSaving(true);
-    await supabase.from("schools").insert(form);
-    setForm({ name: "", address: "", phone: "", admin_name: "" });
+    await supabase.from("schools").insert({
+      name: form.name,
+      group_name: form.group_name || null,
+      address: form.address || null,
+      phone: form.phone || null,
+      admin_name: form.admin_name || null,
+    });
+    setForm({ name: "", group_name: "", address: "", phone: "", admin_name: "" });
     setShowForm(false);
     setSaving(false);
     onRefresh();
@@ -113,23 +150,46 @@ function SchoolsTab({ schools, onRefresh }: { schools: School[]; onRefresh: () =
     onRefresh();
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex justify-end">
-        <button onClick={() => setShowForm(!showForm)}
-          className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
-          {showForm ? "キャンセル" : "+ 校舎を追加"}
-        </button>
-      </div>
+  const saveGroupName = async (id: string) => {
+    await supabase.from("schools").update({ group_name: editGroupName || null }).eq("id", id);
+    setEditGroupId(null);
+    onRefresh();
+  };
 
-      {showForm && (
+  // Group schools by group_name
+  const groups = schools.reduce<Record<string, School[]>>((acc, s) => {
+    const key = s.group_name ?? "グループ未設定";
+    (acc[key] = acc[key] ?? []).push(s);
+    return acc;
+  }, {});
+
+  const groupOrder = [
+    ...Object.keys(groups).filter((k) => k !== "グループ未設定"),
+    ...(groups["グループ未設定"] ? ["グループ未設定"] : []),
+  ];
+
+  return (
+    <div className="space-y-6">
+      {isAdmin && (
+        <div className="flex justify-end">
+          <button onClick={() => setShowForm(!showForm)}
+            className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+            {showForm ? "キャンセル" : "+ 校舎を追加"}
+          </button>
+        </div>
+      )}
+
+      {isAdmin && showForm && (
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="mb-4 font-semibold text-slate-900">新規校舎登録</h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="校舎名 *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="例：○○塾 本校" />
+            <Field label="校舎名 *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="例：豊四季教育工房" />
+            <Field label="グループ名" value={form.group_name} onChange={(v) => setForm({ ...form, group_name: v })} placeholder="例：教育工房グループ" />
             <Field label="管理者名" value={form.admin_name} onChange={(v) => setForm({ ...form, admin_name: v })} placeholder="例：山田太郎" />
-            <Field label="住所" value={form.address} onChange={(v) => setForm({ ...form, address: v })} placeholder="例：東京都渋谷区〇〇" />
             <Field label="電話番号" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} placeholder="例：03-XXXX-XXXX" />
+            <div className="sm:col-span-2">
+              <Field label="住所" value={form.address} onChange={(v) => setForm({ ...form, address: v })} placeholder="例：千葉県柏市〇〇" />
+            </div>
           </div>
           <button onClick={save} disabled={!form.name || saving}
             className="mt-4 rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
@@ -141,21 +201,52 @@ function SchoolsTab({ schools, onRefresh }: { schools: School[]; onRefresh: () =
       {schools.length === 0 ? (
         <Empty text="校舎が登録されていません" />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {schools.map((s) => (
-            <div key={s.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-bold text-slate-900">{s.name}</p>
-                  {s.admin_name && <p className="mt-1 text-sm text-slate-500">管理者：{s.admin_name}</p>}
-                  {s.address && <p className="text-sm text-slate-500">{s.address}</p>}
-                  {s.phone && <p className="text-sm text-slate-500">{s.phone}</p>}
-                  <p className="mt-2 text-xs text-slate-400">登録：{s.created_at.slice(0, 10)}</p>
-                </div>
-                <button onClick={() => del(s.id)}
-                  className="rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
-                  削除
-                </button>
+        <div className="space-y-6">
+          {groupOrder.map((groupName) => (
+            <div key={groupName}>
+              <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-slate-400">{groupName}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(groups[groupName] ?? []).map((s) => (
+                  <div key={s.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-slate-900">{s.name}</p>
+                        {isAdmin && (
+                          editGroupId === s.id ? (
+                            <div className="mt-2 flex items-center gap-2">
+                              <input
+                                value={editGroupName}
+                                onChange={(e) => setEditGroupName(e.target.value)}
+                                placeholder="グループ名"
+                                className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-indigo-400"
+                              />
+                              <button onClick={() => saveGroupName(s.id)}
+                                className="rounded-lg bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700">保存</button>
+                              <button onClick={() => setEditGroupId(null)}
+                                className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-500 hover:bg-slate-50">×</button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => { setEditGroupId(s.id); setEditGroupName(s.group_name ?? ""); }}
+                              className="mt-1 text-xs text-indigo-500 hover:underline">
+                              グループ：{s.group_name ?? "未設定"} （編集）
+                            </button>
+                          )
+                        )}
+                        {s.admin_name && <p className="mt-1 text-sm text-slate-500">管理者：{s.admin_name}</p>}
+                        {s.address && <p className="text-sm text-slate-500">{s.address}</p>}
+                        {s.phone && <p className="text-sm text-slate-500">{s.phone}</p>}
+                        <p className="mt-2 text-xs text-slate-400">登録：{s.created_at.slice(0, 10)}</p>
+                      </div>
+                      {isAdmin && (
+                        <button onClick={() => del(s.id)}
+                          className="rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                          削除
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
