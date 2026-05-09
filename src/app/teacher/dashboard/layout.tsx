@@ -32,6 +32,11 @@ const NAV = [
       <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
     </svg>
   )},
+  { href: "/teacher/dashboard/messages", label: "メッセージ", icon: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  )},
   { href: "/teacher/dashboard/karte", label: "カルテ", icon: (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M16 4v12l-4-2-4 2V4M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -49,6 +54,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [userEmail, setUserEmail] = useState("");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -65,15 +71,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [router]);
 
   useEffect(() => {
-    const fetchPending = async () => {
-      const { count } = await supabase
-        .from("questionnaire_responses")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "pending");
-      setPendingCount(count ?? 0);
+    const fetchCounts = async () => {
+      const [{ count: pending }, { count: unread }] = await Promise.all([
+        supabase.from("questionnaire_responses").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("parent_messages").select("*", { count: "exact", head: true }).eq("status", "unread"),
+      ]);
+      setPendingCount(pending ?? 0);
+      setUnreadMessages(unread ?? 0);
     };
-    fetchPending();
-    const timer = setInterval(fetchPending, 60000);
+    fetchCounts();
+    const timer = setInterval(fetchCounts, 60000);
     return () => clearInterval(timer);
   }, []);
 
@@ -96,7 +103,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isActive = (href: string) =>
     href === "/teacher/dashboard" ? pathname === href : pathname.startsWith(href);
 
-  const Sidebar = ({ pending }: { pending: number }) => (
+  const Sidebar = ({ pending, unread }: { pending: number; unread: number }) => (
     <aside className="flex h-full flex-col bg-white">
       {/* ロゴ */}
       <div className="flex h-16 items-center border-b border-slate-100 px-5">
@@ -111,6 +118,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {NAV.map((item) => {
           const active = isActive(item.href);
           const isDiagnosis = item.href === "/teacher/dashboard/diagnosis";
+          const isMessages = item.href === "/teacher/dashboard/messages";
+          const badge = isDiagnosis ? pending : isMessages ? unread : 0;
           return (
             <Link key={item.href} href={item.href}
               onClick={() => setMobileOpen(false)}
@@ -121,12 +130,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               }`}>
               <span className={active ? "text-indigo-600" : "text-slate-400"}>{item.icon}</span>
               {item.label}
-              {isDiagnosis && pending > 0 && (
+              {badge > 0 && (
                 <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
-                  {pending}
+                  {badge}
                 </span>
               )}
-              {active && pending === 0 && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-600" />}
+              {active && badge === 0 && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-600" />}
             </Link>
           );
         })}
@@ -158,7 +167,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen bg-slate-50">
       {/* PC サイドバー */}
       <div className="fixed inset-y-0 left-0 z-30 w-60 border-r border-slate-200 shadow-sm">
-        <Sidebar pending={pendingCount} />
+        <Sidebar pending={pendingCount} unread={unreadMessages} />
       </div>
 
       {/* モバイル オーバーレイ */}
@@ -166,7 +175,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-60">
-            <Sidebar pending={pendingCount} />
+            <Sidebar pending={pendingCount} unread={unreadMessages} />
           </div>
         </div>
       )}
