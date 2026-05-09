@@ -100,7 +100,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <aside className="flex h-full flex-col bg-white">
       {/* ロゴ */}
       <div className="flex h-16 items-center border-b border-slate-100 px-5">
-        <Logo size="sm" />
+        <Link href="/teacher/dashboard">
+          <Logo size="sm" />
+        </Link>
       </div>
 
       {/* ナビゲーション */}
@@ -177,7 +179,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <Logo size="sm" />
+          <Link href="/teacher/dashboard"><Logo size="sm" /></Link>
         </div>
 
         <main className="min-h-screen">
