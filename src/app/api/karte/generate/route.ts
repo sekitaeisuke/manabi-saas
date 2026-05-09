@@ -11,24 +11,62 @@ type TextbookInput = {
 };
 
 export async function POST(req: NextRequest) {
+  const body = await req.json();
   const {
     studentName, grade, subject,
     testScore, testTotal, testPercentage,
     habitScore, methodScore,
     aiAnalysis, textbooks,
-  } = await req.json();
-
-  const textbookInfo = Array.isArray(textbooks) && textbooks.length > 0
-    ? (textbooks as TextbookInput[]).map((t) =>
-        `・${t.name}（${t.type}${t.publisher ? " / " + t.publisher : ""}）${t.description ? " — " + t.description : ""}`
-      ).join("\n")
-    : "（テキスト未選択）";
+    refined,  // from 3-step pipeline
+  } = body;
 
   const scoreText = testPercentage != null
     ? `${testPercentage}%（${testScore}/${testTotal}点）`
     : "未入力";
 
-  const prompt = `あなたは日本の学習塾（個別指導）の熟練した教育コンサルタントです。
+  let prompt: string;
+
+  if (refined) {
+    // 3-step pipeline: format refined JSON as HTML
+    prompt = `あなたは日本の個別指導塾の教育コンサルタントです。
+以下の生徒カルテデータ（JSON）を、読みやすく美しいHTML形式に変換してください。
+
+【生徒情報】
+氏名：${studentName}
+学年：${grade}
+科目：${subject}
+テスト正答率：${scoreText}
+学習習慣スコア：${habitScore != null ? `${habitScore}/100` : "未入力"}
+学習法スコア：${methodScore != null ? `${methodScore}/100` : "未入力"}
+
+【カルテデータ（JSON）】
+${JSON.stringify(refined, null, 2)}
+
+【HTML変換ルール】
+- 最外側を <div id="learning-plan"> で囲む
+- マークダウン（\`\`\`など）は使わずHTMLのみ返す
+- 各セクションは <h2> で区切る
+- 表形式のデータは <table> を活用する
+- リストは <ul>/<ol> を活用する
+- 3ヶ月ロードマップは月ごとに <h3> で区切る
+
+【構成】
+①【現状分析】— currentAnalysis の内容
+②【3ヶ月学習ロードマップ】— roadmap の各月（目標・先取り単元・週次計画・テキスト・特別プログラム）
+③【弱点克服プログラム】— weaknessProgram の内容
+④【先取り学習計画】— advancePlan の内容
+⑤【推奨学習法】— studyMethod の内容（ステップ・ノート術・演習法）
+⑥【毎日の学習ルーティン】— dailyRoutine を表形式で
+⑦【保護者へのメッセージ】— parentMessage の内容`;
+  } else {
+    // standalone mode (direct generation without pipeline)
+    const textbookInfo = Array.isArray(textbooks) && textbooks.length > 0
+      ? (textbooks as TextbookInput[]).map((t) =>
+          `・${t.name}（${t.type}${t.publisher ? " / " + t.publisher : ""}）${t.description ? " — " + t.description : ""}`
+        ).join("\n")
+      : "（テキスト未選択）";
+
+    prompt = `あなたは日本の学習塾（個別指導）の熟練した教育コンサルタントです。
 以下の診断テスト結果をもとに、生徒の3ヶ月間の個別指導カルテ（学習方針書）をHTML形式で作成してください。
 
 【生徒情報】
@@ -68,6 +106,7 @@ ${textbookInfo}
 ⑤【推奨学習法】${subject}に特化した具体的な学習ステップ（ノート術・問題演習法など）
 ⑥【毎日の学習ルーティン】時間帯・内容・分量の具体的な提案（曜日別または平日/休日で示す）
 ⑦【保護者へのメッセージ】温かく・具体的に・励ましの内容（3〜4文）`;
+  }
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",

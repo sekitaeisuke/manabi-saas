@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// GeminiステップはGPT-4o-miniで代替
+// GeminiステップはGPT-4o-miniで代替（Gemini無料枠制限のため）
 export async function POST(req: NextRequest) {
   const { questions, subject, grade, difficulties, instructions } = await req.json();
 
@@ -23,6 +23,7 @@ ${JSON.stringify(questions, null, 2)}
 - 配点のバランス（全問合計が100点になるよう調整）
 - 選択肢の適切さ（正答が明確、紛らわしい選択肢の改善）
 - 学習指導要領との整合性
+- 問題数が少ない場合は同じ難易度の問題を追加して30問以上にすること
 
 【追加指示】
 ${instructions || "なし"}
@@ -38,6 +39,7 @@ ${instructions || "なし"}
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
+      max_tokens: 8192,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     }),

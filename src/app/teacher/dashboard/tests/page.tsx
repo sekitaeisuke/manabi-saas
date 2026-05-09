@@ -96,7 +96,58 @@ export default function TeacherTestsPage() {
   );
 }
 
-// ─── テスト一覧 ────────────────────────────────────────
+// ─── テスト一覧（フォルダ階層） ───────────────────────────
+
+type SubjectGroup = { subjectName: string; tests: Test[] };
+type FolderGroup = { folderKey: string; folderName: string; subjects: SubjectGroup[] };
+
+const SUBJECT_ORDER = ["算数", "数学", "国語", "英語", "理科", "社会"];
+
+function groupTests(tests: Test[]): FolderGroup[] {
+  const groups = new Map<string, { name: string; map: Map<string, Test[]> }>();
+
+  for (const test of tests) {
+    const monthMatch = test.title.match(/(\d+)月/);
+    const month = monthMatch ? monthMatch[1] + "月" : "";
+    const typeLabel = test.type === "diagnostic" ? "多層型診断テスト" : "授業確認テスト";
+    const folderKey = `${month || "その他"}_${test.type ?? "lesson"}`;
+    const folderName = month ? `${month} ${typeLabel}` : typeLabel;
+
+    if (!groups.has(folderKey)) groups.set(folderKey, { name: folderName, map: new Map() });
+    const sub = groups.get(folderKey)!.map;
+    if (!sub.has(test.subject)) sub.set(test.subject, []);
+    sub.get(test.subject)!.push(test);
+  }
+
+  const result: FolderGroup[] = [];
+  for (const [folderKey, { name: folderName, map: subMap }] of groups) {
+    const subjects: SubjectGroup[] = [];
+    for (const [subjectName, ts] of subMap) {
+      ts.sort((a, b) => GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade));
+      subjects.push({ subjectName, tests: ts });
+    }
+    subjects.sort((a, b) => {
+      const ai = SUBJECT_ORDER.findIndex((s) => a.subjectName.includes(s));
+      const bi = SUBJECT_ORDER.findIndex((s) => b.subjectName.includes(s));
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+    result.push({ folderKey, folderName, subjects });
+  }
+
+  result.sort((a, b) => {
+    const am = a.folderKey.match(/^(\d+)/);
+    const bm = b.folderKey.match(/^(\d+)/);
+    const an = am ? parseInt(am[1]) : 0;
+    const bn = bm ? parseInt(bm[1]) : 0;
+    if (bn !== an) return bn - an;
+    if (a.folderKey.includes("_diagnostic") && !b.folderKey.includes("_diagnostic")) return -1;
+    if (!a.folderKey.includes("_diagnostic") && b.folderKey.includes("_diagnostic")) return 1;
+    return 0;
+  });
+
+  return result;
+}
+
 function TestList({ tests, loading, onDelete, onRefresh }: {
   tests: Test[];
   loading: boolean;
@@ -105,22 +156,40 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
 }) {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [publishedUrls, setPublishedUrls] = useState<Record<string, string>>({});
-  const [sessionTokens, setSessionTokens] = useState<Record<string, string>>({}); // test_id → url_token
+  const [sessionTokens, setSessionTokens] = useState<Record<string, string>>({});
   const [students, setStudents] = useState<Student[]>([]);
   const [startModal, setStartModal] = useState<Test | null>(null);
   const [selectedStudent, setSelectedStudent] = useState("");
   const [starting, setStarting] = useState(false);
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
+  const [openSubfolders, setOpenSubfolders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    supabase.from("students").select("*").order("name").then(({ data }) => {
-      setStudents(data ?? []);
-    });
+    supabase.from("students").select("*").order("name").then(({ data }) => setStudents(data ?? []));
     supabase.from("test_sessions").select("test_id, url_token").then(({ data }) => {
       const map: Record<string, string> = {};
       (data ?? []).forEach((s: { test_id: string; url_token: string }) => { map[s.test_id] = s.url_token; });
       setSessionTokens(map);
     });
   }, []);
+
+  // 初回：全フォルダを開いた状態にする
+  useEffect(() => {
+    if (tests.length === 0) return;
+    const folders = groupTests(tests);
+    const fKeys = new Set(folders.map((f) => f.folderKey));
+    const sfKeys = new Set(
+      folders.flatMap((f) => f.subjects.map((s) => `${f.folderKey}__${s.subjectName}`))
+    );
+    setOpenFolders(fKeys);
+    setOpenSubfolders(sfKeys);
+  }, [tests]);
+
+  const toggleFolder = (key: string) =>
+    setOpenFolders((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+
+  const toggleSubfolder = (key: string) =>
+    setOpenSubfolders((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
   const publish = async (testId: string) => {
     setPublishing(testId);
@@ -177,49 +246,118 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
     closed: { label: "終了", color: "bg-red-100 text-red-700" },
   };
 
+  const folders = groupTests(tests);
+
   return (
     <>
       <div className="space-y-3">
-        {tests.map((test) => {
-          const st = statusLabel[test.status] ?? statusLabel.draft;
-          const url = publishedUrls[test.id];
+        {folders.map((folder) => {
+          const folderOpen = openFolders.has(folder.folderKey);
+          const totalCount = folder.subjects.reduce((s, sub) => s + sub.tests.length, 0);
           return (
-            <div key={test.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <h2 className="font-semibold text-slate-950">{test.title}</h2>
-                    <span className={`rounded-full px-3 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-slate-500">{test.subject} ・ {test.grade}</p>
-                  {url && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <input readOnly value={url}
-                        className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600" />
-                      <button onClick={() => { navigator.clipboard.writeText(url); alert("URLをコピーしました"); }}
-                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">
-                        コピー
-                      </button>
-                    </div>
-                  )}
+            <div key={folder.folderKey} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              {/* フォルダヘッダー */}
+              <button
+                onClick={() => toggleFolder(folder.folderKey)}
+                className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-slate-50 transition"
+              >
+                <svg className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${folderOpen ? "rotate-90" : ""}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+                <svg className="h-5 w-5 shrink-0 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                </svg>
+                <span className="flex-1 font-bold text-slate-900">{folder.folderName}</span>
+                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-500">
+                  {totalCount}件
+                </span>
+              </button>
+
+              {/* 教科サブフォルダ */}
+              {folderOpen && (
+                <div className="border-t border-slate-100 px-3 pb-3 pt-2 space-y-2">
+                  {folder.subjects.map((sub) => {
+                    const sfKey = `${folder.folderKey}__${sub.subjectName}`;
+                    const sfOpen = openSubfolders.has(sfKey);
+                    return (
+                      <div key={sfKey} className="overflow-hidden rounded-xl border border-slate-100">
+                        {/* 教科フォルダヘッダー */}
+                        <button
+                          onClick={() => toggleSubfolder(sfKey)}
+                          className="flex w-full items-center gap-2.5 bg-slate-50 px-4 py-2.5 text-left hover:bg-slate-100 transition"
+                        >
+                          <svg className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${sfOpen ? "rotate-90" : ""}`}
+                            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                          <svg className="h-4 w-4 shrink-0 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                          </svg>
+                          <span className="flex-1 text-sm font-semibold text-slate-700">
+                            {sub.subjectName}診断テスト
+                          </span>
+                          <span className="rounded-full bg-white px-2 py-0.5 text-xs text-slate-400 border border-slate-200">
+                            {sub.tests.length}件
+                          </span>
+                        </button>
+
+                        {/* テスト一覧 */}
+                        {sfOpen && (
+                          <div className="divide-y divide-slate-100">
+                            {sub.tests.map((test) => {
+                              const st = statusLabel[test.status] ?? statusLabel.draft;
+                              const url = publishedUrls[test.id];
+                              return (
+                                <div key={test.id} className="px-4 py-3">
+                                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <svg className="h-4 w-4 shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <span className="font-medium text-slate-900 text-sm">{test.title}</span>
+                                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
+                                      </div>
+                                      <p className="mt-0.5 text-xs text-slate-400 pl-6">{test.grade}</p>
+                                      {url && (
+                                        <div className="mt-2 flex items-center gap-2 pl-6">
+                                          <input readOnly value={url}
+                                            className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600" />
+                                          <button onClick={() => { navigator.clipboard.writeText(url); alert("URLをコピーしました"); }}
+                                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 whitespace-nowrap">
+                                            コピー
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1.5 flex-wrap justify-end shrink-0">
+                                      <button onClick={() => { setStartModal(test); setSelectedStudent(""); }}
+                                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                                        受験する
+                                      </button>
+                                      {test.status === "draft" && (
+                                        <button onClick={() => publish(test.id)} disabled={publishing === test.id}
+                                          className="rounded-lg border border-green-400 bg-green-50 px-3 py-1.5 text-xs text-green-700 hover:bg-green-100 disabled:opacity-50">
+                                          {publishing === test.id ? "発行中..." : "配信する"}
+                                        </button>
+                                      )}
+                                      <button onClick={() => onDelete(test.id)}
+                                        className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                                        削除
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="flex gap-2 flex-wrap justify-end">
-                  <button onClick={() => { setStartModal(test); setSelectedStudent(""); }}
-                    className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700">
-                    受験する
-                  </button>
-                  {test.status === "draft" && (
-                    <button onClick={() => publish(test.id)} disabled={publishing === test.id}
-                      className="rounded-xl border border-green-400 bg-green-50 px-4 py-2 text-sm text-green-700 transition hover:bg-green-100 disabled:opacity-50">
-                      {publishing === test.id ? "発行中..." : "配信する"}
-                    </button>
-                  )}
-                  <button onClick={() => onDelete(test.id)}
-                    className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm text-red-600 transition hover:bg-red-50">
-                    削除
-                  </button>
-                </div>
-              </div>
+              )}
             </div>
           );
         })}

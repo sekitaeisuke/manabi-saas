@@ -31,39 +31,25 @@ export async function POST(req: NextRequest) {
     ? "学力学習習慣診断分析多層型テスト"
     : "授業確認テスト（報告書用）";
 
-  // ── Step A: questionsの最終チェック ──
-  const questionsPrompt = `あなたは日本の教育専門家です。
-以下の「${title}」（${grade}・${subject}・${typeLabel}）の問題データを最終チェックして仕上げてください。
+  // ── Step A+B 統合: 問題チェック＋HTML生成を1回で実施（レート制限対策）──
+  // 配点を自動調整してHTMLを生成する
+  const totalPoints = (questions as { points?: number }[]).reduce((s, q) => s + (q.points ?? 0), 0);
+  const normalizedQuestions = totalPoints > 0
+    ? (questions as { points?: number }[]).map((q) => ({
+        ...q,
+        points: Math.round(((q.points ?? 1) / totalPoints) * 100),
+      }))
+    : questions;
 
-【問題データ】
-${JSON.stringify(questions, null, 2)}
+  const finalQuestions = normalizedQuestions;
 
-【最終調整項目】
-- 問題文の表現統一・丁寧さ・誤字脱字チェック
-- 配点の最終調整（全問合計が100点になるよう揃える）
-- 難易度区分の確認（basic=基礎・standard=標準・advanced=応用）
-- sectionフィールドが日本語（基礎・標準・応用）になっているか
-- 日本の学習指導要領との整合性
+  // ── HTML生成 ──
+  const htmlPrompt = `あなたは日本の教育専門家です。
+以下の問題データをもとに「${title}」（${grade}・${subject}・${typeLabel}）のHTMLテストを作成してください。
+問題文の表現・誤字脱字を直しながら、そのままHTMLに組み込んでください。
 
 【追加指示】
 ${instructions || "なし"}
-
-{"questions": [...]} の形式のJSONのみで返してください（説明文不要）。`;
-
-  let finalQuestions: object[];
-  try {
-    const qText = await callClaude(questionsPrompt, 4096);
-    const match = qText.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("JSONが見つかりません: " + qText.slice(0, 200));
-    const parsed = JSON.parse(match[0]);
-    finalQuestions = parsed.questions ?? parsed;
-  } catch (e) {
-    return NextResponse.json({ error: "Claude（問題チェック）エラー: " + String(e) }, { status: 500 });
-  }
-
-  // ── Step B: HTMLテストの生成 ──
-  const htmlPrompt = `あなたは日本の教育専門家です。
-以下の問題データをもとに「${title}」（${grade}・${subject}・${typeLabel}）のHTMLテストを作成してください。
 
 【問題データ】
 ${JSON.stringify(finalQuestions, null, 2)}

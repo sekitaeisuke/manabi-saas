@@ -352,7 +352,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
   const [allTextbooks, setAllTextbooks] = useState<Textbook[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const [generating, setGenerating] = useState(false);
+  const [genStep, setGenStep] = useState(0); // 0=idle 1=chatgpt 2=gemini 3=claude 4=done
   const [planHtml, setPlanHtml] = useState("");
   const [genError, setGenError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -398,33 +398,54 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
 
   const generate = async () => {
     if (!studentName) { alert("生徒名を入力してください"); return; }
-    setGenerating(true);
+    setGenStep(1);
     setGenError("");
+    setPlanHtml("");
     try {
       const selectedTextbooks = allTextbooks.filter((t) => selectedIds.has(t.id));
       const score = testScore ? Number(testScore) : null;
       const total = testTotal ? Number(testTotal) : null;
       const percentage = score != null && total != null && total > 0
         ? Math.round((score / total) * 100) : null;
-      const res = await fetch("/api/karte/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          studentName, grade, subject,
-          testScore: score, testTotal: total, testPercentage: percentage,
-          habitScore: habitScore ? Number(habitScore) : null,
-          methodScore: methodScore ? Number(methodScore) : null,
-          aiAnalysis: aiAnalysis || null,
-          textbooks: selectedTextbooks,
-        }),
+      const basePayload = {
+        studentName, grade, subject,
+        testScore: score, testTotal: total, testPercentage: percentage,
+        habitScore: habitScore ? Number(habitScore) : null,
+        methodScore: methodScore ? Number(methodScore) : null,
+        aiAnalysis: aiAnalysis || null,
+        textbooks: selectedTextbooks,
+      };
+
+      // Step 1: ChatGPT (GPT-4o) — 初稿作成
+      const r1 = await fetch("/api/karte/generate/chatgpt", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(basePayload),
       });
-      const data = await res.json();
-      if (data.error) { setGenError(data.error); return; }
-      setPlanHtml(data.planHtml);
+      const d1 = await r1.json();
+      if (d1.error) { setGenError("ChatGPT: " + d1.error); setGenStep(0); return; }
+
+      // Step 2: Gemini (GPT-4o-mini) — 精査・改善
+      setGenStep(2);
+      const r2 = await fetch("/api/karte/generate/gemini", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draft: d1.draft, studentName, grade, subject }),
+      });
+      const d2 = await r2.json();
+      if (d2.error) { setGenError("Gemini: " + d2.error); setGenStep(0); return; }
+
+      // Step 3: Claude — HTML仕上げ
+      setGenStep(3);
+      const r3 = await fetch("/api/karte/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...basePayload, refined: d2.refined }),
+      });
+      const d3 = await r3.json();
+      if (d3.error) { setGenError("Claude: " + d3.error); setGenStep(0); return; }
+      setPlanHtml(d3.planHtml);
+      setGenStep(4);
     } catch (e) {
       setGenError("生成に失敗しました: " + String(e));
-    } finally {
-      setGenerating(false);
+      setGenStep(0);
     }
   };
 
@@ -541,17 +562,48 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
               </div>
             )}
 
+            {/* 3-step progress */}
+            {genStep >= 1 && genStep <= 3 && (
+              <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                <p className="mb-3 text-xs font-semibold text-violet-700">AI生成中...</p>
+                <div className="space-y-2">
+                  {[
+                    { step: 1, label: "ChatGPT が初稿を作成中", sub: "GPT-4o" },
+                    { step: 2, label: "Gemini が内容を精査中", sub: "GPT-4o-mini" },
+                    { step: 3, label: "Claude が仕上げ中", sub: "claude-sonnet-4-6" },
+                  ].map(({ step, label, sub }) => (
+                    <div key={step} className="flex items-center gap-2.5">
+                      <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                        genStep > step ? "bg-green-500 text-white" :
+                        genStep === step ? "bg-violet-600 text-white" :
+                        "bg-slate-200 text-slate-400"
+                      }`}>
+                        {genStep > step ? "✓" : step}
+                      </div>
+                      <div className="flex-1">
+                        <p className={`text-xs font-medium ${genStep >= step ? "text-slate-800" : "text-slate-400"}`}>{label}</p>
+                        <p className="text-xs text-slate-400">{sub}</p>
+                      </div>
+                      {genStep === step && (
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {genError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{genError}</p>}
             {saveError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{saveError}</p>}
 
-            <button onClick={generate} disabled={generating || !studentName}
+            <button onClick={generate} disabled={genStep >= 1 && genStep <= 3 || !studentName}
               className="w-full rounded-2xl bg-violet-600 py-3.5 font-semibold text-white hover:bg-violet-700 disabled:opacity-40 transition">
-              {generating ? (
+              {genStep >= 1 && genStep <= 3 ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  生成中...（30秒〜1分）
+                  生成中...
                 </span>
-              ) : "カルテを生成する"}
+              ) : genStep === 4 ? "再生成する" : "カルテを生成する"}
             </button>
           </div>
 
@@ -573,7 +625,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                     <div id="karte-preview" dangerouslySetInnerHTML={{ __html: planHtml }} />
                   </div>
                   <div className="mt-3 flex gap-2">
-                    <button onClick={generate} disabled={generating}
+                    <button onClick={generate} disabled={genStep >= 1 && genStep <= 3}
                       className="flex-1 rounded-xl border border-violet-200 bg-violet-50 py-2.5 text-sm text-violet-700 hover:bg-violet-100 disabled:opacity-40">
                       再生成
                     </button>

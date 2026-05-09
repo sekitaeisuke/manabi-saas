@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 【テスト情報】
 テスト名: ${title}
 主要学年: ${grade}　科目: ${subject}
-問題数（合計目安）: ${count}問
+問題数（合計）: 必ず${count}問以上作成すること（少なくとも20問以上）
 
 【出題単元】
 ${unitList}
@@ -84,6 +84,7 @@ JSONのみを返してください。`;
     },
     body: JSON.stringify({
       model: "gpt-4o",
+      max_tokens: 8192,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     }),
