@@ -52,6 +52,7 @@ const NAV = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState(true);
   const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState<"admin" | "teacher" | "part-time">("teacher");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -59,9 +60,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { router.replace("/login"); return; }
-      setUserEmail(session.user.email ?? "");
+      const email = session.user.email ?? "";
+      setUserEmail(email);
+      const { data: teacher } = await supabase.from("teachers").select("role").eq("email", email).single();
+      if (teacher) setUserRole(teacher.role);
       setChecking(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -149,7 +153,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium text-slate-700">{userEmail}</p>
-            <p className="text-xs text-slate-400">講師</p>
+            <p className="text-xs text-slate-400">
+              {userRole === "admin" ? "管理者" : userRole === "part-time" ? "非常勤講師" : "講師"}
+            </p>
           </div>
         </div>
         <button onClick={logout}

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// GeminiステップはGPT-4o-miniで代替（Gemini無料枠制限のため）
 export async function POST(req: NextRequest) {
   const { questions, subject, grade, difficulties, instructions } = await req.json();
 
@@ -31,30 +30,31 @@ ${instructions || "なし"}
 改善した問題データのみをJSON形式で返してください（説明文不要）:
 {"questions": [...]}`;
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      max_tokens: 8192,
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-    }),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json",
+          maxOutputTokens: 8192,
+        },
+      }),
+    }
+  );
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     return NextResponse.json(
-      { error: `OpenAI APIエラー: ${err.error?.message ?? `HTTP ${res.status}`}` },
+      { error: `Gemini APIエラー: ${err.error?.message ?? `HTTP ${res.status}`}` },
       { status: 500 }
     );
   }
 
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!content) {
     return NextResponse.json({ error: "応答が空です" }, { status: 500 });
   }
