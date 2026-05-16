@@ -262,6 +262,7 @@ function StudentHistory({ student, onOpenQReport, onBack }: {
           </div>
         ) : (
           <div className="space-y-4">
+            <TrendChart responses={[...qResponses].reverse()} />
             {qResponses.map((r) => (
               <div key={r.id} className="rounded-3xl border border-indigo-200 bg-white p-6 shadow-sm">
                 <div className="flex items-start justify-between gap-4">
@@ -305,6 +306,97 @@ function ScorePill({ label, score }: { label: string; score: number }) {
     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${color}`}>
       {label}：{score}
     </span>
+  );
+}
+
+
+function TrendChart({ responses }: { responses: QResponse[] }) {
+  const points = responses.filter((r) =>
+    r.habit_score != null || r.method_score != null || r.verbal_score != null || r.skill_score != null
+  );
+  if (points.length < 2) {
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-sm font-semibold text-slate-900">スコア推移</h3>
+        <p className="mt-2 text-xs text-slate-400">2件以上の診断が蓄積されると推移グラフが表示されます。</p>
+      </div>
+    );
+  }
+
+  const width = 720;
+  const height = 220;
+  const padL = 36;
+  const padR = 16;
+  const padT = 16;
+  const padB = 36;
+  const innerW = width - padL - padR;
+  const innerH = height - padT - padB;
+
+  const xAt = (i: number) =>
+    padL + (points.length === 1 ? innerW / 2 : (i * innerW) / (points.length - 1));
+  const yAt = (v: number) => padT + innerH - (Math.max(0, Math.min(100, v)) / 100) * innerH;
+
+  const series = [
+    { key: "habit_score",  label: "学習習慣", color: "#6366f1" },
+    { key: "method_score", label: "学習方法", color: "#0ea5e9" },
+    { key: "verbal_score", label: "言語力",   color: "#10b981" },
+    { key: "skill_score",  label: "技能",     color: "#f59e0b" },
+  ] as const;
+
+  const pathFor = (key: typeof series[number]["key"]) => {
+    const segs: string[] = [];
+    let started = false;
+    points.forEach((p, i) => {
+      const v = p[key];
+      if (v == null) { started = false; return; }
+      segs.push(`${started ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`);
+      started = true;
+    });
+    return segs.join(" ");
+  };
+
+  const dotsFor = (key: typeof series[number]["key"]) =>
+    points
+      .map((p, i) => ({ v: p[key], i }))
+      .filter((d): d is { v: number; i: number } => d.v != null);
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-900">スコア推移</h3>
+        <div className="flex flex-wrap gap-3 text-xs">
+          {series.map((s) => (
+            <span key={s.key} className="flex items-center gap-1.5 text-slate-600">
+              <span className="h-2 w-3 rounded" style={{ background: s.color }} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full" preserveAspectRatio="xMidYMid meet">
+          {[0, 25, 50, 75, 100].map((g) => (
+            <g key={g}>
+              <line x1={padL} x2={width - padR} y1={yAt(g)} y2={yAt(g)} stroke="#e2e8f0" strokeDasharray="2 3" />
+              <text x={padL - 6} y={yAt(g) + 3} fontSize="9" fill="#94a3b8" textAnchor="end">{g}</text>
+            </g>
+          ))}
+          {points.map((p, i) => (
+            <text key={p.id} x={xAt(i)} y={height - 12} fontSize="9" fill="#94a3b8" textAnchor="middle">
+              {p.created_at.slice(5, 10)}
+            </text>
+          ))}
+          {series.map((s) => (
+            <g key={s.key}>
+              <path d={pathFor(s.key)} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              {dotsFor(s.key).map((d) => (
+                <circle key={`${s.key}-${d.i}`} cx={xAt(d.i)} cy={yAt(d.v)} r={3} fill={s.color} />
+              ))}
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
   );
 }
 

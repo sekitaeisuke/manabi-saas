@@ -1,0 +1,322 @@
+"use client";
+
+import { useEffect, useState, useCallback, useMemo } from "react";
+import { supabase } from "@/lib/supabase";
+import type { Teacher } from "@/lib/supabase";
+import { useSelectedStudentId } from "@/lib/useSelectedStudent";
+import { notify, links } from "@/lib/notify";
+
+type Message = {
+  id: string;
+  thread_id: string | null;
+  parent_id: string | null;
+  teacher_id: string | null;
+  student_id: string | null;
+  direction: "parent_to_teacher" | "teacher_to_parent";
+  subject: string | null;
+  message: string;
+  parent_read: boolean;
+  status: string | null;
+  created_at: string;
+};
+
+type ParentRow = { id: string; name: string };
+
+export default function ParentMessagesPage() {
+  const [selectedStudentId] = useSelectedStudentId();
+  const [parent, setParent] = useState<ParentRow | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [activeThread, setActiveThread] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  const [newForm, setNewForm] = useState({ teacher_id: "", subject: "", message: "" });
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data: p } = await supabase
+      .from("parents")
+      .select("id, name")
+      .eq("email", session.user.email!)
+      .maybeSingle();
+    if (!p) { setLoading(false); return; }
+    setParent(p);
+
+    let q = supabase
+      .from("parent_messages")
+      .select("*")
+      .eq("parent_id", p.id)
+      .order("created_at", { ascending: true });
+    if (selectedStudentId) q = q.eq("student_id", selectedStudentId);
+
+    const { data: msgs } = await q;
+    setMessages((msgs as Message[]) ?? []);
+
+    let teacherQuery = supabase.from("teachers").select("*");
+    if (selectedStudentId) {
+      const { data: stu } = await supabase
+        .from("students").select("school_id").eq("id", selectedStudentId).maybeSingle();
+      if (stu?.school_id) teacherQuery = teacherQuery.eq("school_id", stu.school_id);
+    }
+    const { data: ts } = await teacherQuery.order("name");
+    setTeachers((ts as Teacher[]) ?? []);
+
+    setLoading(false);
+  }, [selectedStudentId]);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  const threads = useMemo(() => {
+    const map = new Map<string, Message[]>();
+    for (const m of messages) {
+      const key = m.thread_id ?? m.id;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(m);
+    }
+    return Array.from(map.entries())
+      .map(([id, msgs]) => ({
+        id,
+        msgs,
+        last: msgs[msgs.length - 1],
+        hasUnread: msgs.some((m) => m.direction === "teacher_to_parent" && !m.parent_read),
+        subject: msgs[0].subject ?? "(件名なし)",
+      }))
+      .sort((a, b) => b.last.created_at.localeCompare(a.last.created_at));
+  }, [messages]);
+
+  const active = useMemo(
+    () => threads.find((t) => t.id === activeThread) ?? null,
+    [threads, activeThread]
+  );
+
+  const openThread = async (threadId: string) => {
+    setActiveThread(threadId);
+    if (!parent) return;
+    const unreadIds = messages
+      .filter((m) => (m.thread_id ?? m.id) === threadId && m.direction === "teacher_to_parent" && !m.parent_read)
+      .map((m) => m.id);
+    if (unreadIds.length === 0) return;
+    await supabase.from("parent_messages").update({ parent_read: true }).in("id", unreadIds);
+    setMessages((prev) => prev.map((m) => unreadIds.includes(m.id) ? { ...m, parent_read: true } : m));
+  };
+
+  const sendReply = async () => {
+    if (!parent || !active || !reply.trim()) return;
+    setSending(true);
+    const first = active.msgs[0];
+    const teacherId = active.msgs.find((m) => m.teacher_id)?.teacher_id ?? first.teacher_id;
+    const { error } = await supabase.from("parent_messages").insert({
+      thread_id: active.id,
+      parent_id: parent.id,
+      teacher_id: teacherId,
+      student_id: first.student_id,
+      direction: "parent_to_teacher",
+      parent_name: parent.name,
+      subject: first.subject ? `Re: ${first.subject.replace(/^Re:\s*/, "")}` : null,
+      message: reply.trim(),
+      status: "unread",
+      parent_read: true,
+    });
+    setSending(false);
+    if (!error) {
+      if (teacherId) {
+        notify({
+          actor_kind: "teacher",
+          actor_id: teacherId,
+          event_type: "new_parent_message",
+          subject: "保護者から返信",
+          body_text: `${parent.name} さんから返信が届きました。\n\n${reply.trim()}`,
+          link: links.teacherMessages(),
+        });
+      }
+      setReply("");
+      loadAll();
+    } else {
+      alert(`送信に失敗しました: ${error.message}`);
+    }
+  };
+
+  const sendNew = async () => {
+    if (!parent || !newForm.message.trim()) return;
+    setSending(true);
+    const threadId = crypto.randomUUID();
+    const { error } = await supabase.from("parent_messages").insert({
+      thread_id: threadId,
+      parent_id: parent.id,
+      teacher_id: newForm.teacher_id || null,
+      student_id: selectedStudentId,
+      direction: "parent_to_teacher",
+      parent_name: parent.name,
+      subject: newForm.subject || null,
+      message: newForm.message.trim(),
+      status: "unread",
+      parent_read: true,
+    });
+    setSending(false);
+    if (!error) {
+      if (newForm.teacher_id) {
+        notify({
+          actor_kind: "teacher",
+          actor_id: newForm.teacher_id,
+          event_type: "new_parent_message",
+          subject: "保護者から新着メッセージ",
+          body_text: `${parent.name} さんから新着メッセージです。\n件名: ${newForm.subject || "(件名なし)"}\n\n${newForm.message.trim()}`,
+          link: links.teacherMessages(),
+        });
+      }
+      setShowNew(false);
+      setNewForm({ teacher_id: "", subject: "", message: "" });
+      setActiveThread(threadId);
+      loadAll();
+    } else {
+      alert(`送信に失敗しました: ${error.message}`);
+    }
+  };
+
+  const teacherName = (id: string | null) =>
+    id ? teachers.find((t) => t.id === id)?.name ?? "講師" : "塾";
+
+  return (
+    <div className="px-6 py-10 text-slate-900">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-950">講師とのメッセージ</h1>
+            <p className="mt-1 text-slate-600">教室の講師と連絡を取り合えます。</p>
+          </div>
+          <button onClick={() => setShowNew(true)}
+            className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700">
+            新規メッセージ
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+            <div className="space-y-2">
+              {threads.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
+                  まだメッセージがありません
+                </div>
+              )}
+              {threads.map((t) => (
+                <button key={t.id} onClick={() => openThread(t.id)}
+                  className={`w-full rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:border-blue-200 ${
+                    activeThread === t.id ? "border-blue-400 ring-2 ring-blue-100" : "border-slate-200"
+                  }`}>
+                  <div className="mb-1 flex items-center gap-2">
+                    {t.hasUnread && <span className="h-2 w-2 rounded-full bg-red-500" />}
+                    <p className="truncate font-semibold text-slate-900">{t.subject}</p>
+                  </div>
+                  <p className="truncate text-xs text-slate-500">
+                    {teacherName(t.last.teacher_id)} ・ {new Date(t.last.created_at).toLocaleDateString("ja-JP")}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-xs text-slate-600">{t.last.message}</p>
+                </button>
+              ))}
+            </div>
+
+            <div>
+              {!active ? (
+                <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
+                  左からスレッドを選択するか、「新規メッセージ」を作成してください。
+                </div>
+              ) : (
+                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="mb-4 text-lg font-bold text-slate-950">{active.subject}</h2>
+                  <div className="space-y-3">
+                    {active.msgs.map((m) => {
+                      const fromParent = m.direction === "parent_to_teacher";
+                      return (
+                        <div key={m.id} className={`flex ${fromParent ? "justify-end" : "justify-start"}`}>
+                          <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+                            fromParent ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-900"
+                          }`}>
+                            <p className={`mb-1 text-xs font-semibold ${fromParent ? "text-blue-100" : "text-slate-500"}`}>
+                              {fromParent ? "保護者" : teacherName(m.teacher_id)} ・ {new Date(m.created_at).toLocaleString("ja-JP")}
+                            </p>
+                            <p className="whitespace-pre-wrap leading-7">{m.message}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-6 border-t border-slate-200 pt-4">
+                    <textarea
+                      value={reply}
+                      onChange={(e) => setReply(e.target.value)}
+                      rows={3}
+                      placeholder="返信を入力..."
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                    <div className="mt-3 flex justify-end">
+                      <button onClick={sendReply} disabled={sending || !reply.trim()}
+                        className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+                        {sending ? "送信中..." : "返信を送信"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {showNew && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+              <h3 className="mb-4 text-lg font-bold text-slate-950">新規メッセージ</h3>
+              <div className="space-y-4">
+                <label className="block text-sm text-slate-700">
+                  宛先講師（任意）
+                  <select
+                    value={newForm.teacher_id}
+                    onChange={(e) => setNewForm({ ...newForm, teacher_id: e.target.value })}
+                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                    <option value="">指定なし（教室宛）</option>
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm text-slate-700">
+                  件名
+                  <input
+                    value={newForm.subject}
+                    onChange={(e) => setNewForm({ ...newForm, subject: e.target.value })}
+                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-slate-700">
+                  本文
+                  <textarea
+                    value={newForm.message}
+                    onChange={(e) => setNewForm({ ...newForm, message: e.target.value })}
+                    rows={6}
+                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                  />
+                </label>
+              </div>
+              <div className="mt-6 flex justify-end gap-3">
+                <button onClick={() => setShowNew(false)}
+                  className="rounded-2xl border border-slate-300 bg-white px-5 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  キャンセル
+                </button>
+                <button onClick={sendNew} disabled={sending || !newForm.message.trim()}
+                  className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+                  {sending ? "送信中..." : "送信"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

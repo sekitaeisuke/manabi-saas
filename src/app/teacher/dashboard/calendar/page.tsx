@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import type { Student, School, Test } from "@/lib/supabase";
+import type { Student, School, Test, Teacher } from "@/lib/supabase";
 
 const DAY_JS: Record<string, number> = { 日: 0, 月: 1, 火: 2, 水: 3, 木: 4, 金: 5, 土: 6 };
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -19,6 +19,23 @@ type Assignment = {
   completed_at: string | null;
 };
 
+type LessonRow = {
+  id: string;
+  student_id: string;
+  teacher_id: string | null;
+  subject: string | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  location: string | null;
+  status: string;
+  notes: string | null;
+};
+
+function toLocalInput(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 function dateKey(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -30,6 +47,8 @@ export default function CalendarPage() {
   const [schools, setSchools] = useState<School[]>([]);
   const [tests, setTests] = useState<Test[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [lessons, setLessons] = useState<LessonRow[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterSchool, setFilterSchool] = useState("");
 
@@ -37,6 +56,19 @@ export default function CalendarPage() {
   const [selectedTestId, setSelectedTestId] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState("");
+
+  const [editingLesson, setEditingLesson] = useState<LessonRow | null>(null);
+  const [lessonForm, setLessonForm] = useState({
+    teacher_id: "",
+    subject: "",
+    scheduled_at: "",
+    duration_minutes: 60,
+    location: "",
+    status: "scheduled",
+    notes: "",
+  });
+  const [lessonBusy, setLessonBusy] = useState(false);
+  const [lessonError, setLessonError] = useState("");
 
   const year = current.getFullYear();
   const month = current.getMonth();
@@ -46,7 +78,10 @@ export default function CalendarPage() {
     const start = dateKey(new Date(year, month, 1));
     const end = dateKey(new Date(year, month + 1, 0));
 
-    const [{ data: s }, { data: sc }, { data: t }, { data: a }] = await Promise.all([
+    const lessonStart = new Date(year, month, 1).toISOString();
+    const lessonEnd = new Date(year, month + 1, 1).toISOString();
+
+    const [{ data: s }, { data: sc }, { data: t }, { data: a }, { data: ls }, { data: tch }] = await Promise.all([
       supabase.from("students").select("*").order("name"),
       supabase.from("schools").select("*").order("name"),
       supabase.from("tests").select("*").order("grade").order("subject"),
@@ -55,11 +90,18 @@ export default function CalendarPage() {
         .select("*, test_sessions(url_token, completed_at:created_at), tests(title)")
         .gte("scheduled_date", start)
         .lte("scheduled_date", end),
+      supabase
+        .from("lessons")
+        .select("id, student_id, teacher_id, subject, scheduled_at, duration_minutes, location, status, notes")
+        .gte("scheduled_at", lessonStart)
+        .lt("scheduled_at", lessonEnd),
+      supabase.from("teachers").select("*").order("name"),
     ]);
 
     setStudents(s ?? []);
     setSchools(sc ?? []);
     setTests(t ?? []);
+    setTeachers((tch as Teacher[]) ?? []);
     setAssignments(
       (a ?? []).map((x: any) => ({
         id: x.id,
@@ -72,6 +114,7 @@ export default function CalendarPage() {
         completed_at: x.completed_at ?? null,
       }))
     );
+    setLessons((ls as LessonRow[]) ?? []);
     setLoading(false);
   }, [year, month]);
 
@@ -91,9 +134,22 @@ export default function CalendarPage() {
     ? students.filter((s) => s.school_id === filterSchool)
     : students;
 
+  const lessonsFor = (studentId: string, date: Date) => {
+    const k = dateKey(date);
+    return lessons.filter((l) => l.student_id === studentId && dateKey(new Date(l.scheduled_at)) === k);
+  };
+
   const studentsForDay = (date: Date) => {
     const jsDay = date.getDay();
-    return filteredStudents.filter((s) => s.attendance_days?.some((d) => DAY_JS[d] === jsDay));
+    const k = dateKey(date);
+    const lessonStudentIds = new Set(
+      lessons
+        .filter((l) => dateKey(new Date(l.scheduled_at)) === k)
+        .map((l) => l.student_id)
+    );
+    return filteredStudents.filter(
+      (s) => s.attendance_days?.some((d) => DAY_JS[d] === jsDay) || lessonStudentIds.has(s.id)
+    );
   };
 
   const assignmentsFor = (studentId: string, date: Date) =>
@@ -103,6 +159,51 @@ export default function CalendarPage() {
     setModal({ student, date });
     setSelectedTestId("");
     setGeneratedUrl("");
+  };
+
+  const openLessonEdit = (l: LessonRow) => {
+    setEditingLesson(l);
+    setLessonForm({
+      teacher_id: l.teacher_id ?? "",
+      subject: l.subject ?? "",
+      scheduled_at: toLocalInput(new Date(l.scheduled_at)),
+      duration_minutes: l.duration_minutes,
+      location: l.location ?? "",
+      status: l.status,
+      notes: l.notes ?? "",
+    });
+    setLessonError("");
+  };
+
+  const saveLesson = async () => {
+    if (!editingLesson) return;
+    if (!lessonForm.scheduled_at) { setLessonError("日時は必須です"); return; }
+    setLessonBusy(true);
+    setLessonError("");
+    const { error } = await supabase.from("lessons").update({
+      teacher_id: lessonForm.teacher_id || null,
+      subject: lessonForm.subject || null,
+      scheduled_at: new Date(lessonForm.scheduled_at).toISOString(),
+      duration_minutes: Number(lessonForm.duration_minutes) || 60,
+      location: lessonForm.location || null,
+      status: lessonForm.status,
+      notes: lessonForm.notes || null,
+    }).eq("id", editingLesson.id);
+    setLessonBusy(false);
+    if (error) { setLessonError(error.message); return; }
+    setEditingLesson(null);
+    fetchData();
+  };
+
+  const deleteLesson = async () => {
+    if (!editingLesson) return;
+    if (!confirm("この授業を削除しますか？")) return;
+    setLessonBusy(true);
+    const { error } = await supabase.from("lessons").delete().eq("id", editingLesson.id);
+    setLessonBusy(false);
+    if (error) { setLessonError(error.message); return; }
+    setEditingLesson(null);
+    fetchData();
   };
 
   const assignTest = async () => {
@@ -272,6 +373,7 @@ export default function CalendarPage() {
                         <div className="space-y-0.5">
                           {dayStudents.map((student) => {
                             const dayAssignments = assignmentsFor(student.id, date);
+                            const dayLessons = lessonsFor(student.id, date);
                             return (
                               <div
                                 key={student.id}
@@ -286,6 +388,26 @@ export default function CalendarPage() {
                                     {student.grade}
                                   </span>
                                 </div>
+                                {dayLessons.map((l) => (
+                                  <button
+                                    key={l.id}
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); openLessonEdit(l); }}
+                                    className="mt-0.5 flex w-full items-center gap-1 rounded px-0.5 text-left hover:bg-indigo-50"
+                                  >
+                                    <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                                      l.status === "canceled" ? "bg-slate-300"
+                                      : l.status === "completed" ? "bg-emerald-400"
+                                      : "bg-indigo-400"
+                                    }`} />
+                                    <span className={`truncate text-[10px] font-medium ${
+                                      l.status === "canceled" ? "text-slate-400 line-through" : "text-indigo-700"
+                                    }`}>
+                                      {new Date(l.scheduled_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                                      {l.subject && ` ${l.subject}`}
+                                    </span>
+                                  </button>
+                                ))}
                                 {dayAssignments.map((a) => (
                                   <div
                                     key={a.id}
@@ -326,9 +448,16 @@ export default function CalendarPage() {
             <span className="h-2 w-2 rounded-full bg-teal-400" />
             テスト割当済み
           </span>
-          <span>生徒をクリック → テスト割当・受験URL発行</span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-indigo-400" />
+            授業予定
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            実施済
+          </span>
           <span className="text-slate-300">｜</span>
-          <span>「曜日設定」で生徒の通塾曜日を設定してください</span>
+          <span>生徒クリック → テスト割当 ／ 授業の編集は「授業予定」ページ</span>
         </div>
       </main>
 
@@ -466,6 +595,88 @@ export default function CalendarPage() {
                 閉じる
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 授業編集モーダル */}
+      {editingLesson && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={() => !lessonBusy && setEditingLesson(null)}>
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">授業を編集</h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {students.find((s) => s.id === editingLesson.student_id)?.name ?? "—"}
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-slate-600">日時
+                  <input type="datetime-local" value={lessonForm.scheduled_at}
+                    onChange={(e) => setLessonForm({ ...lessonForm, scheduled_at: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-slate-600">所要（分）
+                  <input type="number" min={15} step={15} value={lessonForm.duration_minutes}
+                    onChange={(e) => setLessonForm({ ...lessonForm, duration_minutes: Number(e.target.value) })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                </label>
+              </div>
+              <label className="text-xs text-slate-600">担当講師
+                <select value={lessonForm.teacher_id}
+                  onChange={(e) => setLessonForm({ ...lessonForm, teacher_id: e.target.value })}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                  <option value="">未指定</option>
+                  {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-xs text-slate-600">科目
+                  <input value={lessonForm.subject}
+                    onChange={(e) => setLessonForm({ ...lessonForm, subject: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                </label>
+                <label className="text-xs text-slate-600">ステータス
+                  <select value={lessonForm.status}
+                    onChange={(e) => setLessonForm({ ...lessonForm, status: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    <option value="scheduled">予定</option>
+                    <option value="completed">実施済</option>
+                    <option value="canceled">中止</option>
+                    <option value="rescheduled">振替済</option>
+                  </select>
+                </label>
+              </div>
+              <label className="text-xs text-slate-600">場所
+                <input value={lessonForm.location}
+                  onChange={(e) => setLessonForm({ ...lessonForm, location: e.target.value })}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-xs text-slate-600">備考
+                <textarea value={lessonForm.notes} rows={3}
+                  onChange={(e) => setLessonForm({ ...lessonForm, notes: e.target.value })}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+              </label>
+              {lessonError && <p className="text-xs text-red-600">{lessonError}</p>}
+            </div>
+            <div className="mt-5 flex justify-between gap-3">
+              <button onClick={deleteLesson} disabled={lessonBusy}
+                className="rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-100 disabled:opacity-40">
+                削除
+              </button>
+              <div className="flex gap-2">
+                <button onClick={() => setEditingLesson(null)} disabled={lessonBusy}
+                  className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  キャンセル
+                </button>
+                <button onClick={saveLesson} disabled={lessonBusy}
+                  className="rounded-2xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
+                  {lessonBusy ? "保存中..." : "保存"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

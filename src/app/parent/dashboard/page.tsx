@@ -1,117 +1,251 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+import type { Student } from "@/lib/supabase";
+import { useSelectedStudentId } from "@/lib/useSelectedStudent";
 
-const children = [
-  {
-    id: 1,
-    name: "田中太郎",
-    grade: "中3",
-    recentTests: [
-      { subject: "数学", date: "2026-01-20", score: 78, status: "合格" },
-      { subject: "英語", date: "2026-01-19", score: 85, status: "優秀" },
-    ],
-    messages: [
-      { date: "2026-01-15", teacher: "山田太郎", content: "今月の成績が良くなってきました。継続頑張りましょう。" },
-    ],
-  },
-];
+type UpcomingLesson = {
+  id: string;
+  subject: string | null;
+  scheduled_at: string;
+  status: string;
+};
 
-export default function ParentDashboardPage() {
-  const child = children[0];
+type LatestReport = {
+  id: string;
+  test_title: string;
+  test_subject: string | null;
+  percentage: number | null;
+  created_at: string;
+};
 
-  const getStatusClass = (status: string) => {
-    return status === "優秀" ? "bg-green-100 text-green-900" : "bg-blue-100 text-blue-900";
-  };
+type LatestDiagnosis = {
+  id: string;
+  subject: string | null;
+  test_percentage: number | null;
+  created_at: string;
+};
+
+type Announcement = {
+  id: string;
+  title: string;
+  content: string;
+  target_grade: string | null;
+  target_school_id: string | null;
+  created_at: string;
+};
+
+export default function ParentOverviewPage() {
+  const [selectedId] = useSelectedStudentId();
+  const [student, setStudent] = useState<Student | null>(null);
+  const [unread, setUnread] = useState(0);
+  const [upcoming, setUpcoming] = useState<UpcomingLesson[]>([]);
+  const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
+  const [latestDiagnosis, setLatestDiagnosis] = useState<LatestDiagnosis | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchAll = useCallback(async (sid: string) => {
+    setLoading(true);
+
+    const { data: s } = await supabase.from("students").select("*").eq("id", sid).maybeSingle();
+    setStudent(s);
+
+    const { data: ann } = await supabase
+      .from("announcements")
+      .select("id, title, content, target_grade, target_school_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(20);
+    const filtered = (ann ?? []).filter((a) => {
+      const gradeOk  = !a.target_grade     || a.target_grade     === s?.grade;
+      const schoolOk = !a.target_school_id || a.target_school_id === s?.school_id;
+      return gradeOk && schoolOk;
+    });
+    setAnnouncements(filtered.slice(0, 5) as Announcement[]);
+
+    const { count: unreadCount } = await supabase
+      .from("parent_messages")
+      .select("*", { count: "exact", head: true })
+      .eq("student_id", sid)
+      .eq("direction", "teacher_to_parent")
+      .eq("parent_read", false);
+    setUnread(unreadCount ?? 0);
+
+    const nowIso = new Date().toISOString();
+    const { data: lessons } = await supabase
+      .from("lessons")
+      .select("id, subject, scheduled_at, status")
+      .eq("student_id", sid)
+      .gte("scheduled_at", nowIso)
+      .order("scheduled_at", { ascending: true })
+      .limit(3);
+    setUpcoming((lessons as UpcomingLesson[]) ?? []);
+
+    if (s?.name) {
+      const { data: rep } = await supabase
+        .from("lesson_reports")
+        .select("id, test_title, test_subject, percentage, created_at")
+        .eq("student_name", s.name)
+        .eq("status", "sent")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setLatestReport((rep as LatestReport) ?? null);
+
+      const { data: diag } = await supabase
+        .from("questionnaire_responses")
+        .select("id, subject, test_percentage, created_at")
+        .eq("student_name", s.name)
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setLatestDiagnosis((diag as LatestDiagnosis) ?? null);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (selectedId) fetchAll(selectedId);
+  }, [selectedId, fetchAll]);
+
+  if (!selectedId) {
+    return (
+      <div className="px-6 py-10 text-slate-600">お子さまが登録されていません。</div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-100 px-6 py-10 text-slate-900">
-      <main className="mx-auto max-w-5xl">
-        <div className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-950">お子さまの学習状況</h1>
-            <p className="mt-2 text-slate-600">{child.name} さんの学習状況と連絡事項をまとめています。</p>
+    <div className="px-6 py-10 text-slate-900">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-950">お子さまの学習状況</h1>
+          <p className="mt-2 text-slate-600">
+            {student ? `${student.name} さん（${student.grade}）の最新情報` : "..."}
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">
+            読み込み中...
           </div>
-          <Link href="/" className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-slate-950 transition hover:bg-slate-50">
-            トップに戻る
-          </Link>
-        </div>
+        ) : (
+          <div className="grid gap-6">
+            <section className="grid gap-4 md:grid-cols-3">
+              <SummaryCard
+                title="未読メッセージ"
+                value={`${unread}件`}
+                href="/parent/dashboard/messages"
+                tone={unread > 0 ? "alert" : "default"}
+              />
+              <SummaryCard
+                title="直近の報告書"
+                value={latestReport ? `${latestReport.percentage ?? "-"}%` : "なし"}
+                sub={latestReport?.test_title ?? "—"}
+                href="/parent/dashboard/reports"
+              />
+              <SummaryCard
+                title="直近の多層診断"
+                value={latestDiagnosis ? `${latestDiagnosis.test_percentage ?? "-"}%` : "なし"}
+                sub={latestDiagnosis?.subject ?? "—"}
+                href="/parent/dashboard/diagnosis"
+              />
+            </section>
 
-        <div className="grid gap-8">
-          <section className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold text-slate-500">お子さまの名前</p>
-              <p className="mt-3 text-2xl font-bold text-slate-950">{child.name}</p>
-              <p className="mt-2 text-sm text-slate-600">{child.grade}</p>
-            </div>
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold text-slate-500">直近のテスト</p>
-              <p className="mt-3 text-2xl font-bold text-slate-950">{child.recentTests[0].score}点</p>
-              <p className="mt-2 text-sm text-slate-600">{child.recentTests[0].subject}</p>
-            </div>
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <p className="text-sm font-semibold text-slate-500">講師からの連絡</p>
-              <p className="mt-3 text-2xl font-bold text-slate-950">{child.messages.length}件</p>
-              <p className="mt-2 text-sm text-slate-600">未読あり</p>
-            </div>
-          </section>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-950 mb-6">最近のテスト結果</h2>
-            {child.recentTests.length > 0 ? (
-              <div className="space-y-3">
-                {child.recentTests.map((test, idx) => (
-                  <div key={idx} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1">
-                        <p className="font-semibold text-slate-950">{test.subject}</p>
-                        <p className="mt-1 text-sm text-slate-600">{test.date}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-950">{test.score}点</p>
-                        <div className={`mt-1 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${getStatusClass(test.status)}`}>
-                          {test.status}
+            <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+              <div className="mb-6 flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-slate-950">次回以降の授業</h2>
+                <Link href="/parent/dashboard/calendar" className="text-sm font-medium text-blue-600 hover:underline">
+                  カレンダーを見る →
+                </Link>
+              </div>
+              {upcoming.length === 0 ? (
+                <p className="text-sm text-slate-500">予定されている授業はありません。</p>
+              ) : (
+                <div className="space-y-3">
+                  {upcoming.map((l) => (
+                    <div key={l.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-slate-950">
+                            {new Date(l.scheduled_at).toLocaleString("ja-JP", {
+                              month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
+                            })}
+                          </p>
+                          <p className="mt-1 text-sm text-slate-600">{l.subject ?? "—"}</p>
                         </div>
+                        <Link
+                          href={`/parent/dashboard/reschedule?lesson=${l.id}`}
+                          className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          振替を申請
+                        </Link>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500">テスト結果がまだ登録されていません</p>
-            )}
-          </section>
+                  ))}
+                </div>
+              )}
+            </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-950 mb-6">講師からの連絡事項</h2>
-            {child.messages.length > 0 ? (
-              <div className="space-y-4">
-                {child.messages.map((msg, idx) => (
-                  <div key={idx} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1">
-                        <p className="font-semibold text-slate-950">{msg.teacher}</p>
-                        <p className="mt-1 text-sm text-slate-600">{msg.date}</p>
+            {announcements.length > 0 && (
+              <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+                <h2 className="mb-6 text-xl font-semibold text-slate-950">お知らせ</h2>
+                <div className="space-y-3">
+                  {announcements.map((a) => (
+                    <div key={a.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <p className="font-semibold text-slate-900">{a.title}</p>
+                        <span className="shrink-0 text-xs text-slate-400">{a.created_at.slice(0, 10)}</span>
                       </div>
+                      <p className="line-clamp-3 whitespace-pre-wrap text-sm text-slate-600">{a.content}</p>
                     </div>
-                    <p className="mt-3 text-slate-700">{msg.content}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-slate-500">まだ連絡事項がありません</p>
+                  ))}
+                </div>
+              </section>
             )}
-          </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <h2 className="text-xl font-semibold text-slate-950 mb-6">報告書</h2>
-            <p className="text-slate-600 mb-4">講師からの報告書をダウンロードできます。</p>
-            <button className="rounded-2xl bg-slate-950 px-6 py-3 font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-              報告書がまだ登録されていません
-            </button>
-          </section>
-        </div>
-      </main>
+            <section className="grid gap-4 md:grid-cols-2">
+              <QuickLink
+                href="/parent/dashboard/karte"
+                title="カルテ"
+                description="お子さまの学習カルテ（共有された分のみ）を閲覧できます。"
+              />
+              <QuickLink
+                href="/parent/dashboard/reports"
+                title="授業報告書"
+                description="送信済みの授業報告書を一覧でご覧いただけます。"
+              />
+            </section>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function SummaryCard({
+  title, value, sub, href, tone,
+}: { title: string; value: string; sub?: string; href: string; tone?: "default" | "alert" }) {
+  return (
+    <Link href={href}
+      className={`block rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md ${
+        tone === "alert" ? "border-red-200" : "border-slate-200"
+      }`}>
+      <p className="text-sm font-semibold text-slate-500">{title}</p>
+      <p className={`mt-3 text-2xl font-bold ${tone === "alert" ? "text-red-600" : "text-slate-950"}`}>{value}</p>
+      {sub && <p className="mt-2 truncate text-sm text-slate-600">{sub}</p>}
+    </Link>
+  );
+}
+
+function QuickLink({ href, title, description }: { href: string; title: string; description: string }) {
+  return (
+    <Link href={href} className="block rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md">
+      <p className="text-lg font-bold text-slate-950">{title}</p>
+      <p className="mt-2 text-sm text-slate-600">{description}</p>
+    </Link>
   );
 }

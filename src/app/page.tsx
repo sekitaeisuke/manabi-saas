@@ -35,6 +35,18 @@ export default function Home() {
 
       if (teacher) {
         router.replace("/teacher/dashboard");
+        return;
+      }
+
+      // 保護者かどうか確認
+      const { data: parent } = await supabase
+        .from("parents")
+        .select("id")
+        .eq("email", session.user.email)
+        .maybeSingle();
+
+      if (parent) {
+        router.replace("/parent/dashboard");
       }
     };
     check();
@@ -58,6 +70,18 @@ export default function Home() {
             <div>
               <p className="font-bold text-lg">生徒ログイン</p>
               <p className="mt-0.5 text-sm text-indigo-200">先生から教えてもらったIDでログイン</p>
+            </div>
+            <span className="text-2xl">→</span>
+          </Link>
+
+          {/* 保護者ログイン */}
+          <Link
+            href="/login/parent"
+            className="flex w-full items-center justify-between rounded-2xl bg-blue-600 px-6 py-4 text-white shadow-sm transition hover:bg-blue-700 active:scale-95"
+          >
+            <div>
+              <p className="font-bold text-lg">保護者ログイン</p>
+              <p className="mt-0.5 text-sm text-blue-100">お子さまの学習状況・報告書・カルテを確認</p>
             </div>
             <span className="text-2xl">→</span>
           </Link>
