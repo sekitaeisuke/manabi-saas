@@ -1,9 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, School, Test, Teacher } from "@/lib/supabase";
+
+type RescheduleReq = {
+  id: string;
+  lesson_id: string;
+  parent_id: string | null;
+  student_id: string;
+  proposed_at: string;
+  reason: string | null;
+  parents?: { name: string; email: string } | null;
+};
 
 const DAY_JS: Record<string, number> = { 日: 0, 月: 1, 火: 2, 水: 3, 木: 4, 金: 5, 土: 6 };
 const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
@@ -40,9 +50,12 @@ function dateKey(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+type CalendarView = "grid" | "list";
+
 export default function CalendarPage() {
   const today = new Date();
   const [current, setCurrent] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [view, setView] = useState<CalendarView>("grid");
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [tests, setTests] = useState<Test[]>([]);
@@ -70,6 +83,15 @@ export default function CalendarPage() {
   const [lessonBusy, setLessonBusy] = useState(false);
   const [lessonError, setLessonError] = useState("");
 
+  // 手動振替（日時直接指定）
+  const [rescheduleAt, setRescheduleAt] = useState("");
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+
+  // 保護者からの振替リクエスト
+  const [rescheduleReqs, setRescheduleReqs] = useState<RescheduleReq[]>([]);
+  const [reqResponse, setReqResponse] = useState("");
+  const [reqActing, setReqActing] = useState(false);
+
   const year = current.getFullYear();
   const month = current.getMonth();
 
@@ -81,7 +103,7 @@ export default function CalendarPage() {
     const lessonStart = new Date(year, month, 1).toISOString();
     const lessonEnd = new Date(year, month + 1, 1).toISOString();
 
-    const [{ data: s }, { data: sc }, { data: t }, { data: a }, { data: ls }, { data: tch }] = await Promise.all([
+    const [{ data: s }, { data: sc }, { data: t }, { data: a }, { data: ls }, { data: tch }, { data: rr }] = await Promise.all([
       supabase.from("students").select("*").order("name"),
       supabase.from("schools").select("*").order("name"),
       supabase.from("tests").select("*").order("grade").order("subject"),
@@ -96,12 +118,17 @@ export default function CalendarPage() {
         .gte("scheduled_at", lessonStart)
         .lt("scheduled_at", lessonEnd),
       supabase.from("teachers").select("*").order("name"),
+      supabase
+        .from("reschedule_requests")
+        .select("id, lesson_id, parent_id, student_id, proposed_at, reason, parents(name, email)")
+        .eq("status", "pending"),
     ]);
 
     setStudents(s ?? []);
     setSchools(sc ?? []);
     setTests(t ?? []);
     setTeachers((tch as Teacher[]) ?? []);
+    setRescheduleReqs((rr as unknown as RescheduleReq[]) ?? []);
     setAssignments(
       (a ?? []).map((x: any) => ({
         id: x.id,
@@ -161,6 +188,65 @@ export default function CalendarPage() {
     setGeneratedUrl("");
   };
 
+  const pendingByLessonId = useMemo(() => {
+    const m = new Map<string, RescheduleReq>();
+    for (const r of rescheduleReqs) m.set(r.lesson_id, r);
+    return m;
+  }, [rescheduleReqs]);
+
+  const notifyRescheduleDecision = async (r: RescheduleReq, decision: "approved" | "rejected") => {
+    if (!r.parent_id) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    let teacherId: string | null = null;
+    if (session?.user?.email) {
+      const { data: tc } = await supabase.from("teachers").select("id").eq("email", session.user.email).maybeSingle();
+      teacherId = tc?.id ?? null;
+    }
+    const stu = students.find((s) => s.id === r.student_id);
+    const subject = decision === "approved" ? "振替申請を承認しました" : "振替申請への返答";
+    const head = decision === "approved"
+      ? `振替申請を承認しました。\n新しい授業日時：${new Date(r.proposed_at).toLocaleString("ja-JP")}`
+      : "振替申請にお返事します。（元の日時のまま実施予定です）";
+    const body = reqResponse.trim() ? `${head}\n\n【講師より】\n${reqResponse.trim()}` : head;
+    await supabase.from("parent_messages").insert({
+      thread_id: crypto.randomUUID(),
+      parent_id: r.parent_id,
+      teacher_id: teacherId,
+      student_id: r.student_id,
+      direction: "teacher_to_parent",
+      parent_name: r.parents?.name ?? null,
+      student_name: stu?.name ?? null,
+      email: r.parents?.email ?? null,
+      subject,
+      message: body,
+      status: "read",
+      parent_read: false,
+    });
+  };
+
+  const approveRequest = async (r: RescheduleReq) => {
+    setReqActing(true);
+    await supabase.from("reschedule_requests").update({
+      status: "approved", teacher_response: reqResponse || null, responded_at: new Date().toISOString(),
+    }).eq("id", r.id);
+    await supabase.from("lessons").update({ scheduled_at: r.proposed_at, status: "rescheduled" }).eq("id", r.lesson_id);
+    await notifyRescheduleDecision(r, "approved");
+    setReqActing(false);
+    setEditingLesson(null);
+    fetchData();
+  };
+
+  const rejectRequest = async (r: RescheduleReq) => {
+    setReqActing(true);
+    await supabase.from("reschedule_requests").update({
+      status: "rejected", teacher_response: reqResponse || null, responded_at: new Date().toISOString(),
+    }).eq("id", r.id);
+    await notifyRescheduleDecision(r, "rejected");
+    setReqActing(false);
+    setEditingLesson(null);
+    fetchData();
+  };
+
   const openLessonEdit = (l: LessonRow) => {
     setEditingLesson(l);
     setLessonForm({
@@ -173,6 +259,26 @@ export default function CalendarPage() {
       notes: l.notes ?? "",
     });
     setLessonError("");
+    setRescheduleAt("");
+    setReqResponse("");
+  };
+
+  const executeReschedule = async () => {
+    if (!editingLesson || !rescheduleAt) return;
+    setRescheduleBusy(true);
+    await supabase.from("lessons").update({ status: "rescheduled" }).eq("id", editingLesson.id);
+    await supabase.from("lessons").insert({
+      student_id: editingLesson.student_id,
+      teacher_id: editingLesson.teacher_id,
+      subject: editingLesson.subject,
+      duration_minutes: editingLesson.duration_minutes,
+      location: editingLesson.location,
+      scheduled_at: new Date(rescheduleAt).toISOString(),
+      status: "scheduled",
+    });
+    setRescheduleBusy(false);
+    setEditingLesson(null);
+    fetchData();
   };
 
   const saveLesson = async () => {
@@ -257,6 +363,20 @@ export default function CalendarPage() {
             <p className="mt-0.5 text-sm text-slate-500">来塾予定の生徒とテスト割当を管理します</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <button
+                onClick={() => setView("grid")}
+                className={`px-3 py-2 text-sm font-medium transition ${view === "grid" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              >
+                カレンダー
+              </button>
+              <button
+                onClick={() => setView("list")}
+                className={`px-3 py-2 text-sm font-medium transition ${view === "list" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              >
+                一覧
+              </button>
+            </div>
             <select
               value={filterSchool}
               onChange={(e) => setFilterSchool(e.target.value)}
@@ -316,7 +436,120 @@ export default function CalendarPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-16 text-center text-slate-400">
             読み込み中...
           </div>
+        ) : view === "list" ? (
+          /* ── 一覧ビュー ── */
+          (() => {
+            const filteredLesson = lessons.filter((l) => {
+              if (!filterSchool) return true;
+              const s = students.find((st) => st.id === l.student_id);
+              return s?.school_id === filterSchool;
+            });
+            const sorted = [...filteredLesson].sort(
+              (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+            );
+
+            // 日付ごとにグループ
+            const groups: { key: string; date: Date; items: LessonRow[] }[] = [];
+            for (const l of sorted) {
+              const d = new Date(l.scheduled_at);
+              const key = dateKey(d);
+              const last = groups.at(-1);
+              if (last?.key === key) {
+                last.items.push(l);
+              } else {
+                groups.push({ key, date: d, items: [l] });
+              }
+            }
+
+            if (groups.length === 0) {
+              return (
+                <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center text-sm text-slate-400">
+                  この月に授業予定がありません
+                </div>
+              );
+            }
+
+            return (
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-100">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400">日付</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400">時刻</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400">生徒</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400">科目</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400">講師</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400">状態</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groups.map(({ key, date, items }) => (
+                      items.map((l, li) => {
+                        const student = students.find((s) => s.id === l.student_id);
+                        const teacher = teachers.find((t) => t.id === l.teacher_id);
+                        const isToday = date.toDateString() === today.toDateString();
+                        const jsDay = date.getDay();
+                        const statusStyle =
+                          l.status === "completed" ? "bg-emerald-100 text-emerald-700"
+                          : l.status === "canceled" ? "bg-slate-100 text-slate-400"
+                          : l.status === "rescheduled" ? "bg-amber-100 text-amber-700"
+                          : "bg-indigo-100 text-indigo-700";
+                        const statusLabel =
+                          l.status === "completed" ? "実施済"
+                          : l.status === "canceled" ? "中止"
+                          : l.status === "rescheduled" ? "振替済"
+                          : "予定";
+                        return (
+                          <tr
+                            key={l.id}
+                            onClick={() => openLessonEdit(l)}
+                            className={`cursor-pointer border-b border-slate-50 transition hover:bg-indigo-50 ${
+                              isToday ? "bg-teal-50/40" : ""
+                            }`}
+                          >
+                            {li === 0 ? (
+                              <td className="px-4 py-3 font-semibold text-slate-700" rowSpan={items.length}>
+                                <span className={`font-bold ${isToday ? "text-teal-600" : jsDay === 0 ? "text-red-500" : jsDay === 6 ? "text-blue-500" : "text-slate-700"}`}>
+                                  {date.getMonth() + 1}/{date.getDate()}（{WEEKDAY_LABELS[jsDay]}）
+                                </span>
+                                {isToday && <span className="ml-1 text-[10px] font-normal text-teal-500">今日</span>}
+                              </td>
+                            ) : null}
+                            <td className="px-4 py-3 text-slate-600">
+                              {new Date(l.scheduled_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                              <span className="ml-1 text-xs text-slate-400">
+                                {l.duration_minutes === 0 ? "無制限" : `${l.duration_minutes}分`}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="font-medium text-slate-800">{student?.name ?? "—"}</span>
+                              <span className="ml-1.5 text-xs text-slate-400">{student?.grade}</span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">{l.subject ?? "—"}</td>
+                            <td className="px-4 py-3 text-slate-500">{teacher?.name ?? "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusStyle}`}>
+                                {statusLabel}
+                              </span>
+                              {pendingByLessonId.has(l.id) && (
+                                <div className="mt-1">
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                                    振替希望 → {new Date(pendingByLessonId.get(l.id)!.proposed_at).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()
         ) : (
+          /* ── グリッドビュー（従来） ── */
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             {/* 曜日ヘッダー */}
             <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
@@ -406,6 +639,9 @@ export default function CalendarPage() {
                                       {new Date(l.scheduled_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
                                       {l.subject && ` ${l.subject}`}
                                     </span>
+                                    {pendingByLessonId.has(l.id) && (
+                                      <span className="ml-auto flex-shrink-0 rounded bg-amber-400 px-1 py-0.5 text-[8px] font-bold text-white">振替希望</span>
+                                    )}
                                   </button>
                                 ))}
                                 {dayAssignments.map((a) => (
@@ -661,7 +897,63 @@ export default function CalendarPage() {
               </label>
               {lessonError && <p className="text-xs text-red-600">{lessonError}</p>}
             </div>
-            <div className="mt-5 flex justify-between gap-3">
+
+            {/* 保護者からの振替リクエスト */}
+            {editingLesson && pendingByLessonId.has(editingLesson.id) && (() => {
+              const req = pendingByLessonId.get(editingLesson.id)!;
+              return (
+                <div className="mt-4 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
+                  <p className="mb-2 text-xs font-bold text-amber-800">保護者から振替希望が届いています</p>
+                  <p className="text-sm font-semibold text-amber-900">
+                    希望日時：{new Date(req.proposed_at).toLocaleString("ja-JP")}
+                  </p>
+                  {req.reason && <p className="mt-1 text-xs text-amber-700 bg-white rounded-lg px-3 py-2">{req.reason}</p>}
+                  {req.parents && <p className="mt-1 text-xs text-amber-600">申請者：{req.parents.name}</p>}
+                  <textarea
+                    value={reqResponse}
+                    onChange={(e) => setReqResponse(e.target.value)}
+                    rows={2}
+                    placeholder="保護者への返答（任意）"
+                    className="mt-2 w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button onClick={() => rejectRequest(req)} disabled={reqActing}
+                      className="flex-1 rounded-xl border border-red-200 bg-white py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40">
+                      不可で返答
+                    </button>
+                    <button onClick={() => approveRequest(req)} disabled={reqActing}
+                      className="flex-1 rounded-xl bg-green-600 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-40">
+                      {reqActing ? "処理中..." : "承認して日時を更新"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 手動振替セクション */}
+            {lessonForm.status !== "rescheduled" && lessonForm.status !== "completed" && (
+              <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                <p className="mb-2 text-xs font-semibold text-amber-700">振替</p>
+                <label className="text-xs text-amber-700">
+                  振替先の日時
+                  <input
+                    type="datetime-local"
+                    value={rescheduleAt}
+                    onChange={(e) => setRescheduleAt(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-700"
+                  />
+                </label>
+                <button
+                  onClick={executeReschedule}
+                  disabled={!rescheduleAt || rescheduleBusy}
+                  className="mt-2 w-full rounded-xl bg-amber-500 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-40"
+                >
+                  {rescheduleBusy ? "処理中..." : "振替を実行（元の授業を振替済にして新規作成）"}
+                </button>
+              </div>
+            )}
+
+            <div className="mt-4 flex justify-between gap-3">
               <button onClick={deleteLesson} disabled={lessonBusy}
                 className="rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-100 disabled:opacity-40">
                 削除

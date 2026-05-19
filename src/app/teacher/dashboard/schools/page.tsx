@@ -20,6 +20,63 @@ const ROLE_COLOR: Record<Teacher["role"], string> = {
 };
 
 const DAYS = ["月", "火", "水", "木", "金", "土", "日"] as const;
+const DAY_TO_JS: Record<string, number> = { 日: 0, 月: 1, 火: 2, 水: 3, 木: 4, 金: 5, 土: 6 };
+
+// duration: null = 無制限（DBには 0 で保存）
+async function autoGenerateLessons(
+  studentId: string,
+  attendanceDays: string[],
+  startTime = "17:00",
+  duration: number | null = 60,
+  teacherId: string | null = null,
+) {
+  if (attendanceDays.length === 0) return;
+  const [h, m] = startTime.split(":").map(Number);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(today.getDate() + 56); // 8週間分
+
+  const { data: existing } = await supabase
+    .from("lessons")
+    .select("scheduled_at")
+    .eq("student_id", studentId)
+    .gte("scheduled_at", today.toISOString())
+    .lt("scheduled_at", end.toISOString());
+
+  const existingKeys = new Set(
+    (existing ?? []).map((l) => {
+      const d = new Date(l.scheduled_at);
+      return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    })
+  );
+
+  const toInsert: { student_id: string; teacher_id: string | null; scheduled_at: string; duration_minutes: number; status: string }[] = [];
+  const cursor = new Date(today);
+  while (cursor <= end) {
+    const jsDay = cursor.getDay();
+    const dayName = Object.keys(DAY_TO_JS).find((k) => DAY_TO_JS[k] === jsDay);
+    if (dayName && attendanceDays.includes(dayName)) {
+      const key = `${cursor.getFullYear()}-${cursor.getMonth()}-${cursor.getDate()}`;
+      if (!existingKeys.has(key)) {
+        const dt = new Date(cursor);
+        dt.setHours(h, m, 0, 0);
+        toInsert.push({
+          student_id: studentId,
+          teacher_id: teacherId,
+          scheduled_at: dt.toISOString(),
+          duration_minutes: duration ?? 0,
+          status: "scheduled",
+        });
+      }
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  if (toInsert.length > 0) {
+    await supabase.from("lessons").insert(toInsert);
+  }
+}
 
 export default function SchoolsPage() {
   const [tab, setTab] = useState<Tab>("schools");
@@ -109,7 +166,7 @@ export default function SchoolsPage() {
               <TeachersTab teachers={visibleTeachers} schools={visibleSchools} schoolName={schoolName} onRefresh={fetchAll} />
             )}
             {tab === "students" && (
-              <StudentsTab students={visibleStudents} schools={visibleSchools} schoolName={schoolName} onRefresh={fetchAll} />
+              <StudentsTab students={visibleStudents} schools={visibleSchools} teachers={visibleTeachers} schoolName={schoolName} onRefresh={fetchAll} />
             )}
           </>
         )}
@@ -369,14 +426,36 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
 
 // ─── 生徒タブ ────────────────────────────────────────
 type AccountModal = { studentId: string; studentName: string; loginId: string; password: string } | null;
-type EditModal = { id: string; name: string; grade: string; school_id: string; attendance_days: string[] } | null;
+type EditModal = {
+  id: string; name: string; grade: string; school_id: string;
+  attendance_days: string[];
+  lesson_start_time: string;
+  lesson_duration: number | null; // null = 無制限
+  lesson_teacher_id: string;
+} | null;
 
-function StudentsTab({ students, schools, schoolName, onRefresh }: {
-  students: Student[]; schools: School[]; schoolName: (id: string | null) => string; onRefresh: () => void;
+const DURATION_OPTIONS: { label: string; value: number | null }[] = [
+  { label: "30分", value: 30 },
+  { label: "45分", value: 45 },
+  { label: "60分", value: 60 },
+  { label: "90分", value: 90 },
+  { label: "120分", value: 120 },
+  { label: "無制限", value: null },
+];
+
+function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
+  students: Student[]; schools: School[]; teachers: Teacher[];
+  schoolName: (id: string | null) => string; onRefresh: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
-  const [form, setForm] = useState({ name: "", grade: "中1", school_id: "", attendance_days: [] as string[] });
+  const [form, setForm] = useState({
+    name: "", grade: "中1", school_id: "",
+    attendance_days: [] as string[],
+    lesson_start_time: "17:00",
+    lesson_duration: 60 as number | null,
+    lesson_teacher_id: "",
+  });
   const [saving, setSaving] = useState(false);
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
   const [issuing, setIssuing] = useState(false);
@@ -392,6 +471,9 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
       grade: s.grade,
       school_id: s.school_id ?? "",
       attendance_days: s.attendance_days ?? [],
+      lesson_start_time: "17:00",
+      lesson_duration: 60,
+      lesson_teacher_id: "",
     });
   };
 
@@ -404,6 +486,9 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
       school_id: editModal.school_id || null,
       attendance_days: editModal.attendance_days.length > 0 ? editModal.attendance_days : null,
     }).eq("id", editModal.id);
+    if (editModal.attendance_days.length > 0) {
+      await autoGenerateLessons(editModal.id, editModal.attendance_days, editModal.lesson_start_time, editModal.lesson_duration, editModal.lesson_teacher_id || null);
+    }
     setEditSaving(false);
     setEditModal(null);
     onRefresh();
@@ -412,13 +497,16 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
   const save = async () => {
     if (!form.name) return;
     setSaving(true);
-    await supabase.from("students").insert({
+    const { data: inserted } = await supabase.from("students").insert({
       name: form.name,
       grade: form.grade,
       school_id: form.school_id || null,
       attendance_days: form.attendance_days.length > 0 ? form.attendance_days : null,
-    });
-    setForm({ name: "", grade: "中1", school_id: "", attendance_days: [] });
+    }).select("id").single();
+    if (inserted && form.attendance_days.length > 0) {
+      await autoGenerateLessons(inserted.id, form.attendance_days, form.lesson_start_time, form.lesson_duration, form.lesson_teacher_id || null);
+    }
+    setForm({ name: "", grade: "中1", school_id: "", attendance_days: [], lesson_start_time: "17:00", lesson_duration: 60, lesson_teacher_id: "" });
     setShowForm(false);
     setSaving(false);
     onRefresh();
@@ -532,6 +620,42 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
               })}
             </div>
           </div>
+          {form.attendance_days.length > 0 && (
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-1 text-sm text-slate-700">
+                授業開始時刻
+                <input
+                  type="time"
+                  value={form.lesson_start_time}
+                  onChange={(e) => setForm({ ...form, lesson_start_time: e.target.value })}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400"
+                />
+              </div>
+              <div className="grid gap-1 text-sm text-slate-700">
+                授業時間
+                <select
+                  value={form.lesson_duration ?? "null"}
+                  onChange={(e) => setForm({ ...form, lesson_duration: e.target.value === "null" ? null : Number(e.target.value) })}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  {DURATION_OPTIONS.map((o) => (
+                    <option key={String(o.value)} value={o.value ?? "null"}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1 text-sm text-slate-700">
+                担当講師
+                <select
+                  value={form.lesson_teacher_id}
+                  onChange={(e) => setForm({ ...form, lesson_teacher_id: e.target.value })}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400"
+                >
+                  <option value="">未指定</option>
+                  {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
           <button onClick={save} disabled={!form.name || saving}
             className="mt-4 rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
             {saving ? "保存中..." : "登録する"}
@@ -630,6 +754,42 @@ function StudentsTab({ students, schools, schoolName, onRefresh }: {
                   })}
                 </div>
               </div>
+              {editModal.attendance_days.length > 0 && (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="grid gap-1 text-sm text-slate-700">
+                    授業開始時刻
+                    <input
+                      type="time"
+                      value={editModal.lesson_start_time}
+                      onChange={(e) => setEditModal({ ...editModal, lesson_start_time: e.target.value })}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+                  <div className="grid gap-1 text-sm text-slate-700">
+                    授業時間
+                    <select
+                      value={editModal.lesson_duration ?? "null"}
+                      onChange={(e) => setEditModal({ ...editModal, lesson_duration: e.target.value === "null" ? null : Number(e.target.value) })}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      {DURATION_OPTIONS.map((o) => (
+                        <option key={String(o.value)} value={o.value ?? "null"}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-1 text-sm text-slate-700">
+                    担当講師
+                    <select
+                      value={editModal.lesson_teacher_id}
+                      onChange={(e) => setEditModal({ ...editModal, lesson_teacher_id: e.target.value })}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      <option value="">未指定</option>
+                      {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="mt-6 flex gap-2">
               <button onClick={saveEdit} disabled={!editModal.name || editSaving}

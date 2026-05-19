@@ -4,6 +4,16 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, Teacher, School } from "@/lib/supabase";
 
+type RescheduleReq = {
+  id: string;
+  lesson_id: string;
+  parent_id: string | null;
+  student_id: string;
+  proposed_at: string;
+  reason: string | null;
+  parents?: { name: string; email: string } | null;
+};
+
 type Lesson = {
   id: string;
   student_id: string;
@@ -54,6 +64,9 @@ export default function TeacherLessonsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [rescheduleReqs, setRescheduleReqs] = useState<RescheduleReq[]>([]);
+  const [reqResponse, setReqResponse] = useState("");
+  const [reqActing, setReqActing] = useState(false);
 
   const fetchRefs = useCallback(async () => {
     const [{ data: s }, { data: sc }, { data: t }] = await Promise.all([
@@ -76,8 +89,15 @@ export default function TeacherLessonsPage() {
       q = q.lt("scheduled_at", end.toISOString());
     }
     if (filterStudent) q = q.eq("student_id", filterStudent);
-    const { data } = await q;
+    const [{ data }, { data: rr }] = await Promise.all([
+      q,
+      supabase
+        .from("reschedule_requests")
+        .select("id, lesson_id, parent_id, student_id, proposed_at, reason, parents(name, email)")
+        .eq("status", "pending"),
+    ]);
     setLessons((data as Lesson[]) ?? []);
+    setRescheduleReqs((rr as unknown as RescheduleReq[]) ?? []);
     setLoading(false);
   }, [filterFrom, filterTo, filterStudent]);
 
@@ -88,6 +108,67 @@ export default function TeacherLessonsPage() {
     if (!filterSchool) return students;
     return students.filter((s) => s.school_id === filterSchool);
   }, [students, filterSchool]);
+
+  const pendingByLessonId = useMemo(() => {
+    const m = new Map<string, RescheduleReq>();
+    for (const r of rescheduleReqs) m.set(r.lesson_id, r);
+    return m;
+  }, [rescheduleReqs]);
+
+  const notifyDecision = async (r: RescheduleReq, decision: "approved" | "rejected") => {
+    if (!r.parent_id) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    let teacherId: string | null = null;
+    if (session?.user?.email) {
+      const { data: tc } = await supabase.from("teachers").select("id").eq("email", session.user.email).maybeSingle();
+      teacherId = tc?.id ?? null;
+    }
+    const stu = students.find((s) => s.id === r.student_id);
+    const subject = decision === "approved" ? "振替申請を承認しました" : "振替申請への返答";
+    const head = decision === "approved"
+      ? `振替申請を承認しました。\n新しい授業日時：${new Date(r.proposed_at).toLocaleString("ja-JP")}`
+      : "振替申請にお返事します。（元の日時のまま実施予定です）";
+    const body = reqResponse.trim() ? `${head}\n\n【講師より】\n${reqResponse.trim()}` : head;
+    await supabase.from("parent_messages").insert({
+      thread_id: crypto.randomUUID(),
+      parent_id: r.parent_id,
+      teacher_id: teacherId,
+      student_id: r.student_id,
+      direction: "teacher_to_parent",
+      parent_name: r.parents?.name ?? null,
+      student_name: stu?.name ?? null,
+      email: r.parents?.email ?? null,
+      subject,
+      message: body,
+      status: "read",
+      parent_read: false,
+    });
+  };
+
+  const approveRequest = async (r: RescheduleReq) => {
+    setReqActing(true);
+    await supabase.from("reschedule_requests").update({
+      status: "approved", teacher_response: reqResponse || null, responded_at: new Date().toISOString(),
+    }).eq("id", r.id);
+    await supabase.from("lessons").update({ scheduled_at: r.proposed_at, status: "rescheduled" }).eq("id", r.lesson_id);
+    await notifyDecision(r, "approved");
+    setReqActing(false);
+    setCreating(false);
+    setEditing(null);
+    fetchLessons();
+  };
+
+  const rejectRequest = async (r: RescheduleReq) => {
+    setReqActing(true);
+    await supabase.from("reschedule_requests").update({
+      status: "rejected", teacher_response: reqResponse || null, responded_at: new Date().toISOString(),
+    }).eq("id", r.id);
+    await notifyDecision(r, "rejected");
+    setReqActing(false);
+    setCreating(false);
+    setEditing(null);
+    fetchLessons();
+  };
 
   const studentName = (id: string) => students.find((s) => s.id === id)?.name ?? "—";
   const teacherName = (id: string | null) => id ? teachers.find((t) => t.id === id)?.name ?? "—" : "—";
@@ -111,6 +192,7 @@ export default function TeacherLessonsPage() {
       notes: l.notes ?? "",
     });
     setError("");
+    setReqResponse("");
     setCreating(true);
   };
 
@@ -215,7 +297,9 @@ export default function TeacherLessonsPage() {
                       {new Date(l.scheduled_at).toLocaleString("ja-JP", {
                         month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
                       })}
-                      <div className="text-xs font-normal text-slate-400">{l.duration_minutes}分</div>
+                      <div className="text-xs font-normal text-slate-400">
+                        {l.duration_minutes === 0 ? "無制限" : `${l.duration_minutes}分`}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-slate-800">{studentName(l.student_id)}</td>
                     <td className="px-4 py-3 text-slate-800">
@@ -224,13 +308,20 @@ export default function TeacherLessonsPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-700">{l.location ?? "—"}</td>
                     <td className="px-4 py-3">
-                      <select value={l.status} onChange={(e) => updateStatus(l, e.target.value)}
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
-                        <option value="scheduled">予定</option>
-                        <option value="completed">実施済</option>
-                        <option value="canceled">中止</option>
-                        <option value="rescheduled">振替済</option>
-                      </select>
+                      {pendingByLessonId.has(l.id) && (
+                        <span className="mb-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                          振替希望
+                        </span>
+                      )}
+                      <div>
+                        <select value={l.status} onChange={(e) => updateStatus(l, e.target.value)}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
+                          <option value="scheduled">予定</option>
+                          <option value="completed">実施済</option>
+                          <option value="canceled">中止</option>
+                          <option value="rescheduled">振替済</option>
+                        </select>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => openEdit(l)}
@@ -294,6 +385,36 @@ export default function TeacherLessonsPage() {
                   <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3}
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
                 </label>
+                {(() => {
+                  if (!editing) return null;
+                  const pr = pendingByLessonId.get(editing.id);
+                  if (!pr) return null;
+                  return (
+                    <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                      <p className="mb-2 text-sm font-semibold text-amber-800">振替リクエストあり</p>
+                      <p className="text-xs leading-relaxed text-amber-700">
+                        保護者：{pr.parents?.name ?? "不明"}<br />
+                        希望日時：{new Date(pr.proposed_at).toLocaleString("ja-JP")}<br />
+                        {pr.reason && <>理由：{pr.reason}</>}
+                      </p>
+                      <label className="mt-3 block text-xs text-slate-600">返答メッセージ（任意）
+                        <textarea value={reqResponse} onChange={(e) => setReqResponse(e.target.value)} rows={2}
+                          placeholder="保護者への返答コメント"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+                      </label>
+                      <div className="mt-3 flex gap-2">
+                        <button onClick={() => approveRequest(pr)} disabled={reqActing}
+                          className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">
+                          {reqActing ? "処理中..." : "✓ 承認（日時変更）"}
+                        </button>
+                        <button onClick={() => rejectRequest(pr)} disabled={reqActing}
+                          className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-40">
+                          {reqActing ? "処理中..." : "✕ 却下"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {error && <p className="text-sm text-red-600">{error}</p>}
               </div>
               <div className="mt-5 flex justify-end gap-3">
