@@ -119,10 +119,10 @@ export default function ParentOverviewPage() {
   }
 
   return (
-    <div className="px-6 py-10 text-slate-900">
+    <div className="px-4 py-5 text-slate-900 sm:px-6 sm:py-10">
       <div className="mx-auto max-w-5xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-950">お子さまの学習状況</h1>
+          <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">お子さまの学習状況</h1>
           <p className="mt-2 text-slate-600">
             {student ? `${student.name} さん（${student.grade}）の最新情報` : "..."}
           </p>
@@ -134,7 +134,7 @@ export default function ParentOverviewPage() {
           </div>
         ) : (
           <div className="grid gap-6">
-            <section className="grid gap-4 md:grid-cols-3">
+            <section className="grid grid-cols-2 gap-3 md:grid-cols-3">
               <SummaryCard
                 title="未読メッセージ"
                 value={`${unread}件`}
@@ -155,7 +155,7 @@ export default function ParentOverviewPage() {
               />
             </section>
 
-            <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
               <div className="mb-6 flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-slate-950">次回以降の授業</h2>
                 <Link href="/parent/dashboard/calendar" className="text-sm font-medium text-blue-600 hover:underline">
@@ -191,7 +191,7 @@ export default function ParentOverviewPage() {
             </section>
 
             {announcements.length > 0 && (
-              <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
                 <h2 className="mb-6 text-xl font-semibold text-slate-950">お知らせ</h2>
                 <div className="space-y-3">
                   {announcements.map((a) => (
@@ -243,7 +243,7 @@ function SummaryCard({
 
 function QuickLink({ href, title, description }: { href: string; title: string; description: string }) {
   return (
-    <Link href={href} className="block rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md">
+    <Link href={href} className="block rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md sm:p-6">
       <p className="text-lg font-bold text-slate-950">{title}</p>
       <p className="mt-2 text-sm text-slate-600">{description}</p>
     </Link>

@@ -259,10 +259,10 @@ export default function TeacherDashboardPage() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="px-8 py-8">
-      <div className="mb-8">
+    <div className="px-4 py-4 sm:px-8 sm:py-8">
+      <div className="mb-6">
         <p className="text-sm text-slate-400">{today}</p>
-        <h1 className="mt-1 text-2xl font-bold text-slate-900">ダッシュボード</h1>
+        <h1 className="mt-1 text-xl font-bold text-slate-900 sm:text-2xl">ダッシュボード</h1>
         <p className="mt-1 text-sm text-slate-500">今日も生徒の成長をサポートしましょう。</p>
       </div>
 
@@ -281,7 +281,7 @@ export default function TeacherDashboardPage() {
         </Link>
       )}
 
-      <section className="mb-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="今日の授業"     value={counts?.todayLessons}        loading={loading} />
         <KpiCard label="今週の授業"     value={counts?.weekLessons}         loading={loading} />
         <KpiCard label="申請中の振替"   value={counts?.pendingReschedules}  loading={loading} alert  href="/teacher/dashboard/reschedules" />
@@ -292,8 +292,8 @@ export default function TeacherDashboardPage() {
         <KpiCard label="保護者数"       value={counts?.parents}             loading={loading} href="/teacher/dashboard/parents" />
       </section>
 
-      <section className="mb-8 grid gap-6 lg:grid-cols-[2fr_3fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="mb-6 grid gap-4 lg:grid-cols-[2fr_3fr]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-4 text-sm font-semibold text-slate-900">直近のアクティビティ</h2>
           {loading ? (
             <p className="text-sm text-slate-400">読み込み中...</p>
