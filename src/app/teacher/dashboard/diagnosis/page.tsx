@@ -1273,7 +1273,177 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
             <div id="diagnosis-report" dangerouslySetInnerHTML={{ __html: reportHtml }} />
           </div>
         )}
+
+        {/* おすすめ学校 */}
+        {(status === "analyzed" || status === "approved") && (
+          <SchoolRecommendPanel
+            testPercentage={response.test_percentage}
+            habitScore={scores.habitScore}
+            skillScore={scores.skillScore}
+            grade={response.grade}
+          />
+        )}
       </main>
+    </div>
+  );
+}
+
+// ─── おすすめ高校パネル ───────────────────────────────────
+type RecommendedSchool = {
+  id: string;
+  name: string;
+  school_type: string;
+  school_level: string;
+  prefecture: string;
+  city: string | null;
+  deviation_value_min: number | null;
+  deviation_value_max: number | null;
+  features: string[] | null;
+  description: string | null;
+  appeal_points: string | null;
+  website: string | null;
+};
+
+function SchoolRecommendPanel({
+  testPercentage,
+  habitScore,
+  skillScore,
+  grade,
+}: {
+  testPercentage: number | null;
+  habitScore: number | null;
+  skillScore: number | null;
+  grade: string | null;
+}) {
+  const [schools, setSchools] = useState<RecommendedSchool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [estimatedCenter, setEstimatedCenter] = useState<number | null>(null);
+  const [targetLevels, setTargetLevels] = useState<string[]>([]);
+  const [prefFilter, setPrefFilter] = useState("all");
+
+  const isJuniorTarget = grade?.startsWith("小") ?? false;
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (testPercentage != null) params.set("test_percentage", String(testPercentage));
+    if (habitScore     != null) params.set("habit_score",     String(habitScore));
+    if (skillScore     != null) params.set("skill_score",     String(skillScore));
+    if (grade          != null) params.set("grade",           grade);
+
+    fetch(`/api/schools/recommend?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setSchools(data.schools ?? []);
+        setEstimatedCenter(data.center ?? null);
+        setTargetLevels(data.targetLevels ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [testPercentage, habitScore, skillScore, grade]);
+
+  const filtered = prefFilter === "all"
+    ? schools
+    : schools.filter((s) => s.prefecture === prefFilter);
+
+  const prefectures = [...new Set(schools.map((s) => s.prefecture))].sort();
+
+  return (
+    <div className="rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
+      <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-indigo-600 px-3 py-0.5 text-xs font-semibold text-white">
+              {isJuniorTarget ? "おすすめ中学校" : "おすすめ高校"}
+            </span>
+            {estimatedCenter && (
+              <span className="text-sm text-indigo-700 font-semibold">推定偏差値帯：{estimatedCenter - 6}〜{estimatedCenter + 6}</span>
+            )}
+            {targetLevels.length > 0 && (
+              <span className="text-xs text-indigo-500">
+                （{targetLevels.join("・")}）
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-indigo-600">
+            {isJuniorTarget
+              ? "診断スコアをもとにマッチした受験中学校を表示しています"
+              : "診断スコアをもとにマッチした高校を表示しています"}
+          </p>
+        </div>
+        {prefectures.length > 1 && (
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setPrefFilter("all")}
+              className={`rounded-xl px-3 py-1 text-xs font-semibold transition ${prefFilter === "all" ? "bg-indigo-600 text-white" : "border border-indigo-300 bg-white text-indigo-600 hover:bg-indigo-50"}`}>
+              全都県
+            </button>
+            {prefectures.map((p) => (
+              <button key={p} onClick={() => setPrefFilter(p)}
+                className={`rounded-xl px-3 py-1 text-xs font-semibold transition ${prefFilter === p ? "bg-indigo-600 text-white" : "border border-indigo-300 bg-white text-indigo-600 hover:bg-indigo-50"}`}>
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-indigo-600 text-sm">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
+          マッチング中...
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="text-sm text-indigo-600">
+          {schools.length === 0
+            ? "現在、登録されている高校データがありません。「校舎管理」→「高校データベース」から学校を登録してください。"
+            : "選択した都県に該当する学校がありません。"}
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {filtered.map((s) => (
+            <div key={s.id} className="rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-slate-900 text-sm">{s.name}</span>
+                    <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold ${
+                      s.school_type === "公立" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                    }`}>{s.school_type}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {s.prefecture} {s.city}
+                    {s.deviation_value_min && s.deviation_value_max && (
+                      <span className="ml-2 font-semibold text-indigo-700">偏差値 {s.deviation_value_min}〜{s.deviation_value_max}</span>
+                    )}
+                  </p>
+                  {s.features && s.features.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {s.features.slice(0, 3).map((f) => (
+                        <span key={f} className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-600">{f}</span>
+                      ))}
+                    </div>
+                  )}
+                  {s.appeal_points && (
+                    <p className="mt-1.5 text-xs text-slate-600 line-clamp-2">{s.appeal_points}</p>
+                  )}
+                </div>
+                {s.website && (
+                  <a href={s.website} target="_blank"
+                    className="shrink-0 rounded-lg border border-indigo-200 px-2 py-1 text-xs text-indigo-600 hover:bg-indigo-50">
+                    公式サイト
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {schools.length > 0 && (
+        <p className="mt-4 text-xs text-indigo-500">
+          ※ 偏差値・学校情報は参考値です。実際の入試要件は各校の公式情報をご確認ください。
+          学校掲載数: {schools.length}件（フィルター適用後: {filtered.length}件）
+        </p>
+      )}
     </div>
   );
 }

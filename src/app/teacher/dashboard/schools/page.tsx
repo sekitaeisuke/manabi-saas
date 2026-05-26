@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import type { School, Teacher, Student } from "@/lib/supabase";
 import { GRADE_ORDER } from "@/lib/curriculum";
 
-type Tab = "schools" | "teachers" | "students";
+type Tab = "schools" | "teachers" | "students" | "highschools" | "mailing";
 
 const ROLE_LABEL: Record<Teacher["role"], string> = {
   admin: "管理者",
@@ -146,13 +146,21 @@ export default function SchoolsPage() {
         </div>
 
         {/* タブ */}
-        <div className="mb-6 flex gap-2">
+        <div className="mb-6 flex flex-wrap gap-2">
           {(["schools", "teachers", "students"] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${tab === t ? "bg-slate-950 text-white" : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>
               {t === "schools" ? `校舎（${visibleSchools.length}）` : t === "teachers" ? `講師（${visibleTeachers.length}）` : `生徒（${visibleStudents.length}）`}
             </button>
           ))}
+          <button onClick={() => setTab("highschools")}
+            className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${tab === "highschools" ? "bg-indigo-600 text-white" : "bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100"}`}>
+            高校データベース
+          </button>
+          <button onClick={() => setTab("mailing")}
+            className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${tab === "mailing" ? "bg-teal-600 text-white" : "bg-teal-50 border border-teal-200 text-teal-700 hover:bg-teal-100"}`}>
+            メーリングリスト
+          </button>
         </div>
 
         {loading ? (
@@ -168,6 +176,8 @@ export default function SchoolsPage() {
             {tab === "students" && (
               <StudentsTab students={visibleStudents} schools={visibleSchools} teachers={visibleTeachers} schoolName={schoolName} onRefresh={fetchAll} />
             )}
+            {tab === "highschools" && <HighSchoolsTab />}
+            {tab === "mailing"     && <MailingListTab />}
           </>
         )}
       </main>
@@ -1142,6 +1152,500 @@ function Empty({ text }: { text: string }) {
   return (
     <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
       {text}
+    </div>
+  );
+}
+
+// ─── 高校データベース タブ ────────────────────────────────
+type HighSchool = {
+  id: string;
+  name: string;
+  school_type: string;
+  school_level: string;
+  prefecture: string;
+  city: string | null;
+  email: string | null;
+  website: string | null;
+  deviation_value_min: number | null;
+  deviation_value_max: number | null;
+  features: string[] | null;
+  description: string | null;
+  appeal_points: string | null;
+  status: "pending" | "active" | "inactive";
+  registered_by_school: boolean;
+  created_at: string;
+};
+
+function HighSchoolsTab() {
+  const [schools, setSchools] = useState<HighSchool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "pending" | "active">("all");
+  const [prefFilter, setPrefFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const fetch_ = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("high_schools")
+      .select("*")
+      .order("prefecture")
+      .order("deviation_value_max", { ascending: false });
+    setSchools((data ?? []) as HighSchool[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch_(); }, [fetch_]);
+
+  const approve = async (id: string) => {
+    setUpdating(id);
+    await supabase.from("high_schools").update({ status: "active" }).eq("id", id);
+    setSchools((prev) => prev.map((s) => s.id === id ? { ...s, status: "active" } : s));
+    setUpdating(null);
+  };
+
+  const deactivate = async (id: string) => {
+    setUpdating(id);
+    await supabase.from("high_schools").update({ status: "inactive" }).eq("id", id);
+    setSchools((prev) => prev.map((s) => s.id === id ? { ...s, status: "inactive" } : s));
+    setUpdating(null);
+  };
+
+  const del = async (id: string) => {
+    if (!confirm("この学校を削除しますか？")) return;
+    await supabase.from("high_schools").delete().eq("id", id);
+    setSchools((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  const copyRegisterUrl = () => {
+    const url = `${window.location.origin}/school-register`;
+    navigator.clipboard.writeText(url);
+    alert(`コピーしました:\n${url}`);
+  };
+
+  const filtered = schools.filter((s) => {
+    if (filter !== "all" && s.status !== filter) return false;
+    if (prefFilter !== "all" && s.prefecture !== prefFilter) return false;
+    if (typeFilter !== "all" && s.school_type !== typeFilter) return false;
+    return true;
+  });
+
+  const pendingCount = schools.filter((s) => s.status === "pending").length;
+  const activeCount  = schools.filter((s) => s.status === "active").length;
+
+  return (
+    <div className="space-y-5">
+      {/* ヘッダー */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">高校データベース</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            掲載校 {activeCount}件 / 審査待ち {pendingCount}件
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={copyRegisterUrl}
+            className="rounded-2xl border border-indigo-300 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100">
+            登録URLをコピー
+          </button>
+          <a href="/school-register" target="_blank"
+            className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
+            登録ページを開く →
+          </a>
+        </div>
+      </div>
+
+      {/* 審査待ちバナー */}
+      {pendingCount > 0 && (
+        <div className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 flex items-center gap-3">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-500 font-bold text-white text-sm">{pendingCount}</span>
+          <p className="text-sm font-semibold text-amber-900">審査待ちの学校があります。下の一覧から「承認」してください。</p>
+          <button onClick={() => setFilter("pending")} className="ml-auto rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600">
+            確認する
+          </button>
+        </div>
+      )}
+
+      {/* フィルター */}
+      <div className="flex flex-wrap gap-2">
+        {(["all", "pending", "active"] as const).map((f) => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${filter === f ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            {f === "all" ? "すべて" : f === "pending" ? "審査待ち" : "掲載中"}
+          </button>
+        ))}
+        <div className="w-px bg-slate-200 mx-1" />
+        {(["all", "東京都", "千葉県", "茨城県"] as const).map((p) => (
+          <button key={p} onClick={() => setPrefFilter(p)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${prefFilter === p ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            {p === "all" ? "全都県" : p}
+          </button>
+        ))}
+        <div className="w-px bg-slate-200 mx-1" />
+        {(["all", "公立", "私立"] as const).map((t) => (
+          <button key={t} onClick={() => setTypeFilter(t)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${typeFilter === t ? "bg-teal-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            {t === "all" ? "公私立" : t}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
+          条件に合う学校がありません
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((s) => {
+            const isExpanded = expandedId === s.id;
+            return (
+              <div key={s.id} className={`overflow-hidden rounded-3xl border bg-white shadow-sm ${
+                s.status === "pending" ? "border-amber-300" : s.status === "inactive" ? "border-slate-200 opacity-60" : "border-slate-200"
+              }`}>
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900">{s.name}</span>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          s.school_type === "公立" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                        }`}>{s.school_type}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{s.school_level}</span>
+                        {s.registered_by_school && (
+                          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">学校自己申請</span>
+                        )}
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          s.status === "pending" ? "bg-amber-100 text-amber-700"
+                          : s.status === "active"  ? "bg-green-100 text-green-700"
+                          : "bg-slate-100 text-slate-500"
+                        }`}>
+                          {s.status === "pending" ? "審査待ち" : s.status === "active" ? "掲載中" : "非掲載"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {s.prefecture} {s.city && `/ ${s.city}`}
+                        {s.deviation_value_min && s.deviation_value_max && (
+                          <span className="ml-2 font-semibold text-indigo-700">偏差値 {s.deviation_value_min}〜{s.deviation_value_max}</span>
+                        )}
+                      </p>
+                      {s.features && s.features.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {s.features.map((f) => (
+                            <span key={f} className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">{f}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button onClick={() => setExpandedId(isExpanded ? null : s.id)}
+                        className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                        {isExpanded ? "閉じる" : "詳細"}
+                      </button>
+                      {s.status === "pending" && (
+                        <button onClick={() => approve(s.id)} disabled={updating === s.id}
+                          className="rounded-xl bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-40">
+                          {updating === s.id ? "..." : "承認"}
+                        </button>
+                      )}
+                      {s.status === "active" && (
+                        <button onClick={() => deactivate(s.id)} disabled={updating === s.id}
+                          className="rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                          非掲載
+                        </button>
+                      )}
+                      {s.status === "inactive" && (
+                        <button onClick={() => approve(s.id)} disabled={updating === s.id}
+                          className="rounded-xl border border-green-300 px-3 py-1.5 text-xs text-green-700 hover:bg-green-50 disabled:opacity-40">
+                          再掲載
+                        </button>
+                      )}
+                      <button onClick={() => del(s.id)}
+                        className="rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                        削除
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div className="border-t border-slate-100 bg-slate-50 p-5 text-sm space-y-2 text-slate-700">
+                    {s.email    && <p><span className="text-slate-500 mr-2">メール</span>{s.email}</p>}
+                    {s.website  && <p><span className="text-slate-500 mr-2">サイト</span><a href={s.website} target="_blank" className="text-indigo-600 underline">{s.website}</a></p>}
+                    {s.description   && <p><span className="text-slate-500 mr-2">説明</span>{s.description}</p>}
+                    {s.appeal_points && <p><span className="text-slate-500 mr-2">アピール</span>{s.appeal_points}</p>}
+                    <p className="text-xs text-slate-400">登録日: {s.created_at.slice(0, 10)}</p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── メーリングリスト タブ ────────────────────────────────
+type MailingEntry = {
+  id: string;
+  school_name: string;
+  school_type: string | null;
+  prefecture: string | null;
+  city: string | null;
+  email: string | null;
+  contact_status: "未送信" | "送信済" | "登録済" | "辞退";
+  notes: string | null;
+  created_at: string;
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  "未送信": "bg-slate-100 text-slate-600",
+  "送信済": "bg-blue-100 text-blue-700",
+  "登録済": "bg-green-100 text-green-700",
+  "辞退":   "bg-red-100 text-red-600",
+};
+
+function MailingListTab() {
+  const [entries, setEntries] = useState<MailingEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [prefFilter, setPrefFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [emailInput, setEmailInput] = useState<Record<string, string>>({});
+  const [showAdd, setShowAdd] = useState(false);
+  const [newEntry, setNewEntry] = useState({ school_name: "", school_type: "公立", prefecture: "東京都", city: "", email: "" });
+  const [adding, setAdding] = useState(false);
+
+  const fetch_ = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("school_mailing_list")
+      .select("*")
+      .order("prefecture")
+      .order("school_name");
+    setEntries((data ?? []) as MailingEntry[]);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch_(); }, [fetch_]);
+
+  const updateStatus = async (id: string, status: MailingEntry["contact_status"]) => {
+    setUpdating(id);
+    const updates: Record<string, unknown> = { contact_status: status };
+    if (status === "送信済") updates.sent_at = new Date().toISOString();
+    if (emailInput[id]) updates.email = emailInput[id];
+    await supabase.from("school_mailing_list").update(updates).eq("id", id);
+    setEntries((prev) => prev.map((e) => e.id === id ? { ...e, contact_status: status, email: emailInput[id] || e.email } : e));
+    setUpdating(null);
+  };
+
+  const addEntry = async () => {
+    if (!newEntry.school_name) return;
+    setAdding(true);
+    const { data } = await supabase.from("school_mailing_list").insert({
+      school_name: newEntry.school_name,
+      school_type: newEntry.school_type,
+      prefecture: newEntry.prefecture,
+      city: newEntry.city || null,
+      email: newEntry.email || null,
+      contact_status: "未送信",
+    }).select().single();
+    if (data) setEntries((prev) => [...prev, data as MailingEntry]);
+    setNewEntry({ school_name: "", school_type: "公立", prefecture: "東京都", city: "", email: "" });
+    setShowAdd(false);
+    setAdding(false);
+  };
+
+  const exportCsv = () => {
+    const header = "学校名,種別,都道府県,市区町村,メールアドレス,状況\n";
+    const rows = filtered.map((e) =>
+      `"${e.school_name}","${e.school_type ?? ""}","${e.prefecture ?? ""}","${e.city ?? ""}","${e.email ?? ""}","${e.contact_status}"`
+    ).join("\n");
+    const blob = new Blob(["﻿" + header + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `学校メーリングリスト_${new Date().toLocaleDateString("ja-JP").replace(/\//g, "-")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const filtered = entries.filter((e) => {
+    if (prefFilter !== "all" && e.prefecture !== prefFilter) return false;
+    if (statusFilter !== "all" && e.contact_status !== statusFilter) return false;
+    if (typeFilter !== "all" && e.school_type !== typeFilter) return false;
+    return true;
+  });
+
+  const counts = {
+    未送信: entries.filter((e) => e.contact_status === "未送信").length,
+    送信済: entries.filter((e) => e.contact_status === "送信済").length,
+    登録済: entries.filter((e) => e.contact_status === "登録済").length,
+    辞退:   entries.filter((e) => e.contact_status === "辞退").length,
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* ヘッダー */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">メーリングリスト</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            全 {entries.length}件 ／ 未送信 {counts["未送信"]} ／ 送信済 {counts["送信済"]} ／ 登録済 {counts["登録済"]}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setShowAdd(!showAdd)}
+            className="rounded-2xl border border-teal-300 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-700 hover:bg-teal-100">
+            + 学校を追加
+          </button>
+          <button onClick={exportCsv}
+            className="rounded-2xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">
+            CSVエクスポート
+          </button>
+        </div>
+      </div>
+
+      {/* サマリー */}
+      <div className="grid grid-cols-4 gap-3">
+        {(["未送信", "送信済", "登録済", "辞退"] as const).map((s) => (
+          <button key={s} onClick={() => setStatusFilter(statusFilter === s ? "all" : s)}
+            className={`rounded-2xl border p-4 text-center transition ${statusFilter === s ? "border-teal-400 bg-teal-50" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+            <p className="text-2xl font-bold text-slate-900">{counts[s]}</p>
+            <p className={`mt-1 text-xs font-semibold rounded-full px-2 py-0.5 inline-block ${STATUS_COLOR[s]}`}>{s}</p>
+          </button>
+        ))}
+      </div>
+
+      {/* 追加フォーム */}
+      {showAdd && (
+        <div className="rounded-3xl border border-teal-200 bg-teal-50 p-6">
+          <h3 className="mb-4 font-semibold text-teal-900">学校を追加</h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm text-slate-700">
+              学校名
+              <input value={newEntry.school_name} onChange={(e) => setNewEntry((p) => ({ ...p, school_name: e.target.value }))}
+                placeholder="○○高等学校"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-teal-400" />
+            </label>
+            <label className="grid gap-1 text-sm text-slate-700">
+              都道府県
+              <select value={newEntry.prefecture} onChange={(e) => setNewEntry((p) => ({ ...p, prefecture: e.target.value }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-teal-400">
+                {["東京都","千葉県","茨城県","その他"].map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-slate-700">
+              種別
+              <select value={newEntry.school_type} onChange={(e) => setNewEntry((p) => ({ ...p, school_type: e.target.value }))}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-teal-400">
+                <option>公立</option><option>私立</option>
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-slate-700">
+              メールアドレス
+              <input type="email" value={newEntry.email} onChange={(e) => setNewEntry((p) => ({ ...p, email: e.target.value }))}
+                placeholder="info@school.ed.jp"
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-teal-400" />
+            </label>
+          </div>
+          <div className="mt-4 flex gap-2 justify-end">
+            <button onClick={() => setShowAdd(false)} className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">キャンセル</button>
+            <button onClick={addEntry} disabled={!newEntry.school_name || adding}
+              className="rounded-xl bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-40">
+              {adding ? "追加中..." : "追加"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* フィルター */}
+      <div className="flex flex-wrap gap-2">
+        {(["all", "東京都", "千葉県", "茨城県"] as const).map((p) => (
+          <button key={p} onClick={() => setPrefFilter(p)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${prefFilter === p ? "bg-teal-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            {p === "all" ? "全都県" : p}
+          </button>
+        ))}
+        <div className="w-px bg-slate-200 mx-1" />
+        {(["all", "公立", "私立"] as const).map((t) => (
+          <button key={t} onClick={() => setTypeFilter(t)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${typeFilter === t ? "bg-teal-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            {t === "all" ? "公私立" : t}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+      ) : (
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">学校名</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">種別</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">所在地</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">メール</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">状況</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((e) => (
+                <tr key={e.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-4 py-3 font-medium text-slate-900">{e.school_name}</td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${e.school_type === "公立" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
+                      {e.school_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-slate-500 text-xs">{e.prefecture} {e.city}</td>
+                  <td className="px-4 py-3">
+                    {e.contact_status === "未送信" ? (
+                      <input
+                        value={emailInput[e.id] ?? (e.email || "")}
+                        onChange={(ev) => setEmailInput((prev) => ({ ...prev, [e.id]: ev.target.value }))}
+                        placeholder="メールアドレスを入力"
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-teal-400 w-44"
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-500">{e.email || "—"}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${STATUS_COLOR[e.contact_status]}`}>
+                      {e.contact_status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-1">
+                      {e.contact_status === "未送信" && (
+                        <button onClick={() => updateStatus(e.id, "送信済")} disabled={updating === e.id}
+                          className="rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+                          {updating === e.id ? "..." : "送信済にする"}
+                        </button>
+                      )}
+                      {e.contact_status === "送信済" && (
+                        <button onClick={() => updateStatus(e.id, "辞退")} disabled={updating === e.id}
+                          className="rounded-lg border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-40">
+                          辞退
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div className="p-12 text-center text-slate-400">条件に合う学校がありません</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
