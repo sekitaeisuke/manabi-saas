@@ -131,6 +131,11 @@ HTMLを含むJSON形式で返してください:
     }),
   });
 
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Claude API error:", res.status, errText);
+    return NextResponse.json({ error: "分析に失敗しました" }, { status: 502 });
+  }
   const data = await res.json();
   let content = (data.content?.[0]?.text ?? "") as string;
   // Strip markdown code fences if present

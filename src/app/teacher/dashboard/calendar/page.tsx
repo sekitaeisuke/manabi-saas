@@ -103,7 +103,7 @@ export default function CalendarPage() {
     const lessonStart = new Date(year, month, 1).toISOString();
     const lessonEnd = new Date(year, month + 1, 1).toISOString();
 
-    const [{ data: s }, { data: sc }, { data: t }, { data: a }, { data: ls }, { data: tch }, { data: rr }] = await Promise.all([
+    const [sRes, scRes, tRes, aRes, lsRes, tchRes, rrRes] = await Promise.allSettled([
       supabase.from("students").select("*").order("name"),
       supabase.from("schools").select("*").order("name"),
       supabase.from("tests").select("*").order("grade").order("subject"),
@@ -123,6 +123,13 @@ export default function CalendarPage() {
         .select("id, lesson_id, parent_id, student_id, proposed_at, reason, parents(name, email)")
         .eq("status", "pending"),
     ]);
+    const s  = sRes.status   === "fulfilled" ? sRes.value.data   : null;
+    const sc = scRes.status  === "fulfilled" ? scRes.value.data  : null;
+    const t  = tRes.status   === "fulfilled" ? tRes.value.data   : null;
+    const a  = aRes.status   === "fulfilled" ? aRes.value.data   : null;
+    const ls = lsRes.status  === "fulfilled" ? lsRes.value.data  : null;
+    const tch = tchRes.status === "fulfilled" ? tchRes.value.data : null;
+    const rr = rrRes.status  === "fulfilled" ? rrRes.value.data  : null;
 
     setStudents(s ?? []);
     setSchools(sc ?? []);
@@ -268,19 +275,26 @@ export default function CalendarPage() {
   const executeReschedule = async () => {
     if (!editingLesson || !rescheduleAt) return;
     setRescheduleBusy(true);
-    await supabase.from("lessons").update({ status: "rescheduled" }).eq("id", editingLesson.id);
-    await supabase.from("lessons").insert({
-      student_id: editingLesson.student_id,
-      teacher_id: editingLesson.teacher_id,
-      subject: editingLesson.subject,
-      duration_minutes: editingLesson.duration_minutes,
-      location: editingLesson.location,
-      scheduled_at: new Date(rescheduleAt).toISOString(),
-      status: "scheduled",
-    });
-    setRescheduleBusy(false);
-    setEditingLesson(null);
-    fetchData();
+    try {
+      const { error: updateError } = await supabase.from("lessons").update({ status: "rescheduled" }).eq("id", editingLesson.id);
+      if (updateError) { alert("更新エラー: " + updateError.message); return; }
+
+      const { error: insertError } = await supabase.from("lessons").insert({
+        student_id: editingLesson.student_id,
+        teacher_id: editingLesson.teacher_id,
+        subject: editingLesson.subject,
+        duration_minutes: editingLesson.duration_minutes,
+        location: editingLesson.location,
+        scheduled_at: new Date(rescheduleAt).toISOString(),
+        status: "scheduled",
+      });
+      if (insertError) { alert("振替授業の作成エラー: " + insertError.message); return; }
+
+      setEditingLesson(null);
+      fetchData();
+    } finally {
+      setRescheduleBusy(false);
+    }
   };
 
   const saveLesson = async () => {
@@ -317,27 +331,30 @@ export default function CalendarPage() {
   const assignTest = async () => {
     if (!modal || !selectedTestId) return;
     setAssigning(true);
+    try {
+      const token =
+        Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+      const { data: session, error } = await supabase
+        .from("test_sessions")
+        .insert({ test_id: selectedTestId, url_token: token })
+        .select()
+        .single();
 
-    const token =
-      Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
-    const { data: session, error } = await supabase
-      .from("test_sessions")
-      .insert({ test_id: selectedTestId, url_token: token })
-      .select()
-      .single();
+      if (error || !session) { alert("エラー: " + error?.message); return; }
 
-    if (error || !session) { alert("エラー: " + error?.message); setAssigning(false); return; }
+      const { error: assignError } = await supabase.from("student_test_assignments").insert({
+        student_id: modal.student.id,
+        test_id: selectedTestId,
+        session_id: session.id,
+        scheduled_date: dateKey(modal.date),
+      });
+      if (assignError) { alert("割当エラー: " + assignError.message); return; }
 
-    await supabase.from("student_test_assignments").insert({
-      student_id: modal.student.id,
-      test_id: selectedTestId,
-      session_id: session.id,
-      scheduled_date: dateKey(modal.date),
-    });
-
-    setGeneratedUrl(`${window.location.origin}/test/${token}`);
-    setAssigning(false);
-    fetchData();
+      setGeneratedUrl(`${window.location.origin}/test/${token}`);
+      fetchData();
+    } finally {
+      setAssigning(false);
+    }
   };
 
   const deleteAssignment = async (id: string) => {

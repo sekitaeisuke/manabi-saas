@@ -21,7 +21,7 @@ async function dispatch(origin: string, opts: {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(opts),
-  }).catch(() => {});
+  }).catch((e) => { console.error("dispatch failed:", opts.event_type, e); });
 }
 
 export async function POST(req: NextRequest) {

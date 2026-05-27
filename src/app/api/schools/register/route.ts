@@ -13,7 +13,7 @@ async function sendAdminEmail(school: {
   const key = process.env.RESEND_API_KEY;
   if (!key) return;
   const from = process.env.EMAIL_FROM ?? "noreply@manabi-navi.com";
-  const to   = "sekitaeisuke@kyouiku-koubou.com";
+  const to   = process.env.ADMIN_EMAIL ?? "sekitaeisuke@kyouiku-koubou.com";
   const subject = `【まなびナビ】新規学校登録: ${school.name}`;
   const html = `
 <h2>新規学校登録がありました</h2>
@@ -33,7 +33,7 @@ async function sendAdminEmail(school: {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({ from, to, subject, html, text: `新規登録: ${school.name} (${school.prefecture})` }),
-  }).catch(() => {});
+  }).catch((e) => { console.error("sendAdminEmail failed:", e); });
 }
 
 async function sendSchoolConfirmEmail(school: { name: string; id: string }, toEmail: string) {
@@ -53,7 +53,7 @@ async function sendSchoolConfirmEmail(school: { name: string; id: string }, toEm
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({ from, to: toEmail, subject, html, text: `${school.name}様、ご登録を受け付けました。審査後にご連絡いたします。` }),
-  }).catch(() => {});
+  }).catch((e) => { console.error("sendSchoolConfirmEmail failed:", e); });
 }
 
 export async function POST(req: NextRequest) {

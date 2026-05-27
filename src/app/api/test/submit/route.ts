@@ -165,7 +165,11 @@ ${analysisSection}
     is_correct: gradedMap[a.question_id] ?? null,
   }));
 
-  await supabase.from("answers").insert(gradedAnswers);
+  const { error: answersErr } = await supabase.from("answers").insert(gradedAnswers);
+  if (answersErr) {
+    console.error("answers insert:", answersErr);
+    return NextResponse.json({ error: "回答の保存に失敗しました" }, { status: 500 });
+  }
 
   // スコア計算
   let score = 0;
@@ -176,12 +180,16 @@ ${analysisSection}
   }
   const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
 
-  await supabase.from("results").insert({ session_id, student_name, score, total, percentage });
+  const { error: resultsErr } = await supabase.from("results").insert({ session_id, student_name, score, total, percentage });
+  if (resultsErr) {
+    console.error("results insert:", resultsErr);
+    return NextResponse.json({ error: "結果の保存に失敗しました" }, { status: 500 });
+  }
 
   // アンケート＋AI分析を保存
   if (questionnaire) {
     const qr_key = `${session_id}:${student_name}`;
-    await supabase.from("questionnaire_responses").insert({
+    const { error: qrErr } = await supabase.from("questionnaire_responses").insert({
       session_id: qr_key,
       student_name,
       grade: grade ?? null,
@@ -195,6 +203,7 @@ ${analysisSection}
       ai_analysis,
       status: "pending",
     });
+    if (qrErr) console.error("questionnaire_responses insert:", qrErr);
   }
 
   return NextResponse.json({ score, total, percentage });
