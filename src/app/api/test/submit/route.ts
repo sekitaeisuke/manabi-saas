@@ -156,7 +156,15 @@ ${analysisSection}
     ai_analysis = "【全問正解】\nすべての問題を正解しました。非常に優秀な結果です！";
   }
 
-  // ── Step3: 採点結果を確定してDB保存 ──────────────────
+  // ── Step3: session_id から student_id を取得 ──────────
+  const { data: assignment } = await supabase
+    .from("student_test_assignments")
+    .select("student_id")
+    .eq("session_id", session_id)
+    .maybeSingle();
+  const student_id = assignment?.student_id ?? null;
+
+  // ── Step4: 採点結果を確定してDB保存 ──────────────────
   const gradedAnswers = answers.map((a) => ({
     question_id: a.question_id,
     answer: a.answer,
@@ -192,6 +200,7 @@ ${analysisSection}
     const { error: qrErr } = await supabase.from("questionnaire_responses").insert({
       session_id: qr_key,
       student_name,
+      student_id,
       grade: grade ?? null,
       subject: subject ?? null,
       test_score: score,

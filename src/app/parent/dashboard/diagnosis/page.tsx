@@ -53,12 +53,10 @@ export default function ParentDiagnosisPage() {
   const load = useCallback(async () => {
     if (!selectedId) return;
     setLoading(true);
-    const { data: stu } = await supabase.from("students").select("name").eq("id", selectedId).maybeSingle();
-    if (!stu) { setLoading(false); return; }
     const { data } = await supabase
       .from("questionnaire_responses")
       .select("id, student_name, grade, subject, test_score, test_total, test_percentage, habit_score, method_score, verbal_score, skill_score, report_html, teacher_notes, created_at")
-      .eq("student_name", stu.name)
+      .eq("student_id", selectedId)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
     setResponses((data as QResponse[]) ?? []);
