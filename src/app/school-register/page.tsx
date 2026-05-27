@@ -50,7 +50,7 @@ export default function SchoolRegisterPage() {
   const [form, setForm] = useState<FormData>(EMPTY);
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
   const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
+  const [registrationId, setRegistrationId] = useState("");
   const [error, setError] = useState("");
 
   const set = (k: keyof FormData, v: string) =>
@@ -65,14 +65,24 @@ export default function SchoolRegisterPage() {
     }));
 
   const next = () => {
-    if (step === 0 && !form.name) { setError("学校名を入力してください"); return; }
     setError("");
+    if (step === 0) {
+      if (!form.name.trim()) { setError("学校名を入力してください"); return; }
+    }
+    if (step === 1) {
+      if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+        setError("メールアドレスの形式が正しくありません"); return;
+      }
+      if (form.website && !/^https?:\/\/.+/.test(form.website)) {
+        setError("WebサイトURLは https:// または http:// から始めてください"); return;
+      }
+    }
     setStep((prev) => Math.min(3, prev + 1) as 0 | 1 | 2 | 3);
   };
   const back = () => { setError(""); setStep((prev) => Math.max(0, prev - 1) as 0 | 1 | 2 | 3); };
 
   const submit = async () => {
-    if (!form.name) { setError("学校名を入力してください"); return; }
+    if (!form.name.trim()) { setError("学校名を入力してください"); return; }
     setSubmitting(true);
     setError("");
     try {
@@ -103,28 +113,62 @@ export default function SchoolRegisterPage() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setDone(true);
+      setRegistrationId(data.id ?? "");
     } catch (e) {
-      setError("送信に失敗しました: " + String(e));
+      setError(String(e).replace(/^Error:\s*/, ""));
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (done) {
+  if (registrationId) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-50 flex items-center justify-center px-4">
-        <div className="max-w-lg w-full rounded-3xl bg-white p-12 shadow-xl text-center">
-          <div className="text-6xl mb-4">🎉</div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-3">ご登録ありがとうございます</h1>
-          <p className="text-slate-600 leading-relaxed mb-6">
-            {form.name}の情報を受け付けました。<br />
-            審査後、まなびシステムの学校おすすめ機能に掲載されます。<br />
-            通常1〜3営業日以内にご連絡いたします。
-          </p>
-          <div className="rounded-2xl bg-indigo-50 p-4 text-sm text-indigo-700">
-            登録メールアドレス: <strong>{form.email || "未入力"}</strong>
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-50 flex items-center justify-center px-4 py-12">
+        <div className="max-w-lg w-full rounded-3xl bg-white p-10 shadow-xl text-center">
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+            <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
           </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-2">ご登録ありがとうございます</h1>
+          <p className="text-slate-600 text-sm leading-relaxed mb-6">
+            <strong>{form.name}</strong> の情報を受け付けました。<br />
+            審査完了後、まなびナビの学校推薦機能に掲載されます。
+          </p>
+
+          <div className="space-y-3 text-left mb-6">
+            <div className="flex items-start gap-3 rounded-2xl bg-slate-50 p-4">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">1</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-800">審査中（1〜3営業日）</p>
+                <p className="text-xs text-slate-500 mt-0.5">登録内容を担当者が確認します</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-2xl bg-slate-50 p-4">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">2</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-800">掲載開始</p>
+                <p className="text-xs text-slate-500 mt-0.5">審査通過後、生徒の診断テスト結果に貴校が表示されます</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-2xl bg-slate-50 p-4">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">3</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-800">情報更新</p>
+                <p className="text-xs text-slate-500 mt-0.5">入試情報・説明会日程などはいつでも更新依頼できます</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 mb-6 text-left space-y-1">
+            <p>受付番号: <code className="font-mono text-slate-700">{registrationId}</code></p>
+            {form.email && <p>確認先: {form.email}</p>}
+            <p>お問い合わせ: <a href="mailto:sekitaeisuke@kyouiku-koubou.com" className="text-indigo-600 hover:underline">sekitaeisuke@kyouiku-koubou.com</a></p>
+          </div>
+
+          <a href="/" className="block w-full rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
+            トップに戻る
+          </a>
         </div>
       </div>
     );
