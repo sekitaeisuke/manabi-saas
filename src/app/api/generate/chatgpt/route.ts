@@ -90,8 +90,19 @@ JSONのみを返してください。`;
     }),
   });
 
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    return NextResponse.json(
+      { error: errBody?.error?.message ?? `OpenAI error ${res.status}` },
+      { status: 500 }
+    );
+  }
   const data = await res.json();
   const content = data.choices?.[0]?.message?.content;
   if (!content) return NextResponse.json({ error: "生成に失敗しました" }, { status: 500 });
-  return NextResponse.json(JSON.parse(content));
+  try {
+    return NextResponse.json(JSON.parse(content));
+  } catch {
+    return NextResponse.json({ error: "生成結果のJSON解析に失敗しました" }, { status: 500 });
+  }
 }

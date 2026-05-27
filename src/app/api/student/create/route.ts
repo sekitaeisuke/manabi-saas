@@ -7,10 +7,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const supabase = createClient(url, anonKey);
 
   const email = `${login_id}@students.local`;
 
@@ -30,6 +31,13 @@ export async function POST(req: NextRequest) {
     .eq("id", student_id);
 
   if (updateErr) {
+    // auth userが宙に浮かないようサービスロールで削除
+    if (serviceRoleKey) {
+      const admin = createClient(url, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      await admin.auth.admin.deleteUser(authUserId);
+    }
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }
 

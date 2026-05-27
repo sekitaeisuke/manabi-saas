@@ -100,7 +100,7 @@ function ReschedulePageInner() {
     const { data: lesson } = await supabase
       .from("lessons").select("teacher_id, subject, scheduled_at").eq("id", form.lesson_id).maybeSingle();
     if (lesson?.teacher_id) {
-      notify({
+      await notify({
         actor_kind: "teacher",
         actor_id: lesson.teacher_id,
         event_type: "reschedule_request",

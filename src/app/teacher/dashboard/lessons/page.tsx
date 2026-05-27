@@ -153,6 +153,7 @@ export default function TeacherLessonsPage() {
     await supabase.from("lessons").update({ scheduled_at: r.proposed_at, status: "rescheduled" }).eq("id", r.lesson_id);
     await notifyDecision(r, "approved");
     setReqActing(false);
+    setReqResponse("");
     setCreating(false);
     setEditing(null);
     fetchLessons();
@@ -165,6 +166,7 @@ export default function TeacherLessonsPage() {
     }).eq("id", r.id);
     await notifyDecision(r, "rejected");
     setReqActing(false);
+    setReqResponse("");
     setCreating(false);
     setEditing(null);
     fetchLessons();

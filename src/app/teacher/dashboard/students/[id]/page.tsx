@@ -68,17 +68,17 @@ export default function StudentDetailPage() {
         .limit(20),
       supabase.from("lesson_reports")
         .select("id, test_title, test_subject, percentage, status, created_at")
-        .eq("student_name", s.name)
+        .eq("student_id", studentId)
         .order("created_at", { ascending: false })
         .limit(10),
       supabase.from("learning_plans")
         .select("id, subject, grade, status, created_at")
-        .eq("student_name", s.name)
+        .eq("student_id", studentId)
         .order("created_at", { ascending: false })
         .limit(10),
       supabase.from("questionnaire_responses")
         .select("id, subject, grade, status, test_percentage, habit_score, method_score, verbal_score, skill_score, created_at")
-        .eq("student_name", s.name)
+        .eq("student_id", studentId)
         .order("created_at", { ascending: false })
         .limit(20),
       supabase.from("parent_messages")

@@ -51,7 +51,7 @@ export default function NotificationsLogPage() {
     if (fromDate) q = q.gte("created_at", new Date(fromDate).toISOString());
     if (toDate) {
       const end = new Date(toDate);
-      end.setDate(end.getDate() + 1);
+      end.setUTCDate(end.getUTCDate() + 1);
       q = q.lt("created_at", end.toISOString());
     }
     if (keyword.trim()) {

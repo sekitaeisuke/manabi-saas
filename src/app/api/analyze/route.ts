@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
 
   const totalPoints = (questions as Question[]).reduce((s: number, q: Question) => s + q.points, 0);
   const earned = scored.reduce((s, a) => s + a.points, 0);
-  const rate = Math.round((earned / totalPoints) * 100);
+  const rate = totalPoints > 0 ? Math.round((earned / totalPoints) * 100) : 0;
 
   const byDifficulty: Record<string, { earned: number; total: number; wrong: string[] }> = {};
   (questions as Question[]).forEach((q, i) => {
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
   });
 
   const diffSummary = Object.entries(byDifficulty)
-    .map(([d, v]) => `${d}：${v.earned}/${v.total}点（${Math.round(v.earned/v.total*100)}%）`)
+    .map(([d, v]) => `${d}：${v.earned}/${v.total}点（${v.total > 0 ? Math.round(v.earned/v.total*100) : 0}%）`)
     .join("\n");
 
   const wrongList = scored

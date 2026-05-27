@@ -232,6 +232,7 @@ export default function CalendarPage() {
     await supabase.from("lessons").update({ scheduled_at: r.proposed_at, status: "rescheduled" }).eq("id", r.lesson_id);
     await notifyRescheduleDecision(r, "approved");
     setReqActing(false);
+    setReqResponse("");
     setEditingLesson(null);
     fetchData();
   };
@@ -243,6 +244,7 @@ export default function CalendarPage() {
     }).eq("id", r.id);
     await notifyRescheduleDecision(r, "rejected");
     setReqActing(false);
+    setReqResponse("");
     setEditingLesson(null);
     fetchData();
   };
