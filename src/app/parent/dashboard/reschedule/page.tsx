@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
 import { notify, links } from "@/lib/notify";
+import { Toast } from "@/components/Toast";
 
 type Lesson = {
   id: string;
@@ -43,6 +44,7 @@ function ReschedulePageInner() {
   const [form, setForm] = useState({ lesson_id: "", proposed_at: "", reason: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [successToast, setSuccessToast] = useState(false);
 
   const loadAll = useCallback(async () => {
     if (!selectedStudentId) return;
@@ -111,12 +113,14 @@ function ReschedulePageInner() {
     }
 
     setForm({ lesson_id: "", proposed_at: "", reason: "" });
+    setSuccessToast(true);
     router.replace("/parent/dashboard/reschedule");
     loadAll();
   };
 
   return (
     <div className="px-6 py-10 text-slate-900">
+      {successToast && <Toast message="振替申請を送信しました" onClose={() => setSuccessToast(false)} />}
       <div className="mx-auto max-w-4xl">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-slate-950">振替リクエスト</h1>

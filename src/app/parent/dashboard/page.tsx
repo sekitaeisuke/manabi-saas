@@ -93,17 +93,17 @@ export default function ParentOverviewPage() {
         .limit(1)
         .maybeSingle();
       setLatestReport((rep as LatestReport) ?? null);
-
-      const { data: diag } = await supabase
-        .from("questionnaire_responses")
-        .select("id, subject, test_percentage, created_at")
-        .eq("student_name", s.name)
-        .eq("status", "approved")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      setLatestDiagnosis((diag as LatestDiagnosis) ?? null);
     }
+
+    const { data: diag } = await supabase
+      .from("questionnaire_responses")
+      .select("id, subject, test_percentage, created_at")
+      .eq("student_id", sid)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLatestDiagnosis((diag as LatestDiagnosis) ?? null);
 
     setLoading(false);
   }, []);
@@ -144,13 +144,13 @@ export default function ParentOverviewPage() {
               <SummaryCard
                 title="直近の報告書"
                 value={latestReport ? `${latestReport.percentage ?? "-"}%` : "なし"}
-                sub={latestReport?.test_title ?? "—"}
+                sub={latestReport ? latestReport.test_title : "授業後に講師が作成します"}
                 href="/parent/dashboard/reports"
               />
               <SummaryCard
                 title="直近の多層診断"
                 value={latestDiagnosis ? `${latestDiagnosis.test_percentage ?? "-"}%` : "なし"}
-                sub={latestDiagnosis?.subject ?? "—"}
+                sub={latestDiagnosis ? (latestDiagnosis.subject ?? "—") : "診断テスト受験後に共有されます"}
                 href="/parent/dashboard/diagnosis"
               />
             </section>
@@ -229,14 +229,15 @@ export default function ParentOverviewPage() {
 function SummaryCard({
   title, value, sub, href, tone,
 }: { title: string; value: string; sub?: string; href: string; tone?: "default" | "alert" }) {
+  const isEmpty = value === "なし";
   return (
     <Link href={href}
       className={`block rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md ${
         tone === "alert" ? "border-red-200" : "border-slate-200"
       }`}>
       <p className="text-sm font-semibold text-slate-500">{title}</p>
-      <p className={`mt-3 text-2xl font-bold ${tone === "alert" ? "text-red-600" : "text-slate-950"}`}>{value}</p>
-      {sub && <p className="mt-2 truncate text-sm text-slate-600">{sub}</p>}
+      <p className={`mt-3 text-2xl font-bold ${tone === "alert" ? "text-red-600" : isEmpty ? "text-slate-400" : "text-slate-950"}`}>{value}</p>
+      {sub && <p className={`mt-2 truncate text-sm ${isEmpty ? "text-slate-400 italic" : "text-slate-600"}`}>{sub}</p>}
     </Link>
   );
 }

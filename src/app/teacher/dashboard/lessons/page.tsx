@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, Teacher, School } from "@/lib/supabase";
+import { Toast } from "@/components/Toast";
 
 type RescheduleReq = {
   id: string;
@@ -67,6 +68,7 @@ export default function TeacherLessonsPage() {
   const [rescheduleReqs, setRescheduleReqs] = useState<RescheduleReq[]>([]);
   const [reqResponse, setReqResponse] = useState("");
   const [reqActing, setReqActing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   const fetchRefs = useCallback(async () => {
     const [{ data: s }, { data: sc }, { data: t }] = await Promise.all([
@@ -156,6 +158,7 @@ export default function TeacherLessonsPage() {
     setReqResponse("");
     setCreating(false);
     setEditing(null);
+    setToast("振替申請を承認しました");
     fetchLessons();
   };
 
@@ -169,6 +172,7 @@ export default function TeacherLessonsPage() {
     setReqResponse("");
     setCreating(false);
     setEditing(null);
+    setToast("振替申請を却下しました");
     fetchLessons();
   };
 
@@ -294,7 +298,7 @@ export default function TeacherLessonsPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {lessons.map((l) => (
-                  <tr key={l.id} className="hover:bg-slate-50/60">
+                  <tr key={l.id} className={`${pendingByLessonId.has(l.id) ? "bg-red-50/40 hover:bg-red-50/60" : "hover:bg-slate-50/60"}`}>
                     <td className="px-4 py-3 font-semibold text-slate-900">
                       {new Date(l.scheduled_at).toLocaleString("ja-JP", {
                         month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
@@ -311,8 +315,8 @@ export default function TeacherLessonsPage() {
                     <td className="px-4 py-3 text-slate-700">{l.location ?? "—"}</td>
                     <td className="px-4 py-3">
                       {pendingByLessonId.has(l.id) && (
-                        <span className="mb-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                          振替希望
+                        <span className="mb-1.5 inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                          ⚑ 振替希望
                         </span>
                       )}
                       <div>
@@ -433,6 +437,7 @@ export default function TeacherLessonsPage() {
           </div>
         )}
       </div>
+      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
     </div>
   );
 }

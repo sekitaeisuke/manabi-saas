@@ -141,7 +141,13 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       <div className="text-6xl mb-4">✅</div>
       <h1 className="text-2xl font-bold text-slate-900 mb-2">提出完了！</h1>
       <p className="text-slate-600">{studentName}さんの回答を受け付けました。</p>
-      <p className="mt-3 text-slate-400 text-sm">このページを閉じてください。</p>
+      <div className="mt-6 rounded-2xl bg-blue-50 border border-blue-100 px-5 py-4 text-left text-sm text-blue-800 space-y-1.5">
+        <p className="font-semibold">これから行われること</p>
+        <p>・AI がテスト結果とアンケートを分析します</p>
+        <p>・担当講師が内容を確認・承認します</p>
+        <p>・保護者アプリの「多層診断」に結果が届きます</p>
+      </div>
+      <p className="mt-5 text-slate-400 text-sm">このページは閉じても大丈夫です。</p>
     </Center>
   );
 
@@ -178,8 +184,22 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
   if (phase === "test") {
     const total = questions.reduce((s, q) => s + q.points, 0);
     const answered = Object.keys(answers).length;
+    const pct = questions.length > 0 ? Math.round((answered / questions.length) * 100) : 0;
     return (
-      <div className="min-h-screen bg-slate-50 py-10 px-4">
+      <div className="min-h-screen bg-slate-50">
+        <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-3 shadow-sm">
+          <div className="mx-auto max-w-2xl">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="font-semibold text-slate-700">{test.title}</span>
+              <span className="text-slate-500 tabular-nums">{answered} / {questions.length}問</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-slate-100">
+              <div className="h-1.5 rounded-full bg-blue-500 transition-all duration-300"
+                style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        </div>
+        <div className="py-8 px-4">
         <div className="mx-auto max-w-2xl">
           <header className="mb-8">
             <h1 className="text-2xl font-bold text-slate-900">{test.title}</h1>
@@ -228,21 +248,37 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
             </button>
           </div>
         </div>
+        </div>
       </div>
     );
   }
 
   // ── アンケート共通レイアウト ──
   const QuestionnaireSection = ({
-    title, subtitle, color, section, qAnswers, setAnswers: setAns, onNext, onBack, nextLabel,
+    title, subtitle, color, section, qAnswers, setAnswers: setAns, onNext, onBack, nextLabel, partNum, partTotal,
   }: {
     title: string; subtitle: string; color: string;
     section: { key: string; text: string }[];
     qAnswers: QAnswers;
     setAnswers: React.Dispatch<React.SetStateAction<QAnswers>>;
     onNext: () => void; onBack: () => void; nextLabel: string;
+    partNum: number; partTotal: number;
   }) => (
-    <div className="min-h-screen bg-slate-50 py-10 px-4">
+    <div className="min-h-screen bg-slate-50">
+      <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-3 shadow-sm">
+        <div className="mx-auto max-w-2xl">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span className="font-semibold text-slate-700">アンケート</span>
+            <span className="text-slate-500">Part {partNum} / {partTotal}</span>
+          </div>
+          <div className="flex gap-1">
+            {Array.from({ length: partTotal }).map((_, i) => (
+              <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${i < partNum ? "bg-blue-500" : "bg-slate-200"}`} />
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="py-8 px-4">
       <div className="mx-auto max-w-2xl">
         <div className={`mb-6 rounded-2xl p-4 ${color}`}>
           <h2 className="font-bold text-lg">{title}</h2>
@@ -290,6 +326,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
           </button>
         </div>
       </div>
+      </div>
     </div>
   );
 
@@ -299,7 +336,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       color="bg-indigo-50 text-indigo-800" section={SECTION_A}
       qAnswers={qaAnswers} setAnswers={setQaAnswers}
       onNext={() => setPhase("qb")} onBack={() => setPhase("test")}
-      nextLabel="Part B へ" />
+      nextLabel="Part B へ" partNum={1} partTotal={3} />
   );
 
   if (phase === "qb") return (
@@ -308,7 +345,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       color="bg-emerald-50 text-emerald-800" section={SECTION_B}
       qAnswers={qbAnswers} setAnswers={setQbAnswers}
       onNext={() => setPhase("qc")} onBack={() => setPhase("qa")}
-      nextLabel="Part C へ" />
+      nextLabel="Part C へ" partNum={2} partTotal={3} />
   );
 
   if (phase === "qc") return (
@@ -317,7 +354,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       color="bg-amber-50 text-amber-800" section={SECTION_C}
       qAnswers={qcAnswers} setAnswers={setQcAnswers}
       onNext={submitAll} onBack={() => setPhase("qb")}
-      nextLabel="提出する" />
+      nextLabel="提出する" partNum={3} partTotal={3} />
   );
 
   return null;

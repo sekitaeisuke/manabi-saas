@@ -121,27 +121,30 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
         <Link href="/parent/dashboard"><Logo size="sm" /></Link>
       </div>
 
-      <div className="border-b border-slate-100 p-4">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">お子さま</p>
+      <div className="border-b border-slate-100 bg-blue-50/60 p-4">
+        <p className="mb-2 text-xs font-semibold text-blue-600">現在表示中のお子さま</p>
         {students.length === 0 ? (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
             ひも付けされたお子さまがいません。塾にご連絡ください。
           </p>
         ) : students.length === 1 ? (
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800">
-            {students[0].name}
-            <span className="ml-2 text-xs text-slate-500">{students[0].grade}</span>
-          </p>
+          <div className="rounded-xl border border-blue-200 bg-white px-3 py-2.5 shadow-sm">
+            <p className="text-sm font-bold text-slate-900">{students[0].name}</p>
+            <p className="text-xs text-slate-500">{students[0].grade}</p>
+          </div>
         ) : (
-          <select
-            value={selectedId ?? ""}
-            onChange={(e) => selectStudent(e.target.value)}
-            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
-          >
-            {students.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>
-            ))}
-          </select>
+          <>
+            <p className="mb-1.5 text-xs text-slate-500">お子さまを切り替え：</p>
+            <select
+              value={selectedId ?? ""}
+              onChange={(e) => selectStudent(e.target.value)}
+              className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              {students.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>
+              ))}
+            </select>
+          </>
         )}
       </div>
 
