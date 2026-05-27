@@ -125,10 +125,10 @@ ${teacherNotes ? `【講師メモ（非公開用）】\n${teacherNotes}` : ""}
   const match = reportHtml.match(/<div id="lesson-report">[\s\S]*<\/div>/);
   if (match) reportHtml = match[0];
 
-  // Supabase に保存
+  // Supabase に保存（サーバーサイドはservice role keyでRLSをバイパス）
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
   const title = `${today} ${subject}授業`;
