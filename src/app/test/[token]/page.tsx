@@ -92,20 +92,31 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     if (!session || !studentName) return;
     setPhase("submitting");
     const answerRows = Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));
-    await fetch("/api/test/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: session.id,
-        student_name: studentName,
-        grade: test?.grade ?? "",
-        subject: test?.subject ?? "",
-        answers: answerRows,
-        questions,
-        questionnaire: { a: qaAnswers, b: qbAnswers, c: qcAnswers },
-      }),
-    });
-    setPhase("submitted");
+    try {
+      const res = await fetch("/api/test/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: session.id,
+          student_name: studentName,
+          grade: test?.grade ?? "",
+          subject: test?.subject ?? "",
+          answers: answerRows,
+          questions,
+          questionnaire: { a: qaAnswers, b: qbAnswers, c: qcAnswers },
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "不明なエラー" }));
+        alert(`提出に失敗しました: ${err.error ?? res.statusText}`);
+        setPhase("qc");
+        return;
+      }
+      setPhase("submitted");
+    } catch {
+      alert("ネットワークエラーが発生しました。もう一度お試しください。");
+      setPhase("qc");
+    }
   };
 
   const setQ = (setter: React.Dispatch<React.SetStateAction<QAnswers>>, key: string, val: number) =>

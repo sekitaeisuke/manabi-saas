@@ -37,7 +37,7 @@ export default function ParentMessagesPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!session) { setLoading(false); return; }
 
     const { data: p } = await supabase
       .from("parents")

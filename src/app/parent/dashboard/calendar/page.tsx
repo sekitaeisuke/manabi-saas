@@ -45,7 +45,7 @@ export default function ParentCalendarPage() {
     setLoading(true);
     const start = new Date(year, month, 1).toISOString();
     const end = new Date(year, month + 1, 1).toISOString();
-    const [{ data: ls }, { data: ts }] = await Promise.all([
+    const [lsRes, tsRes] = await Promise.allSettled([
       supabase
         .from("lessons")
         .select("id, subject, scheduled_at, duration_minutes, location, status, notes, teacher_id")
@@ -55,6 +55,8 @@ export default function ParentCalendarPage() {
         .order("scheduled_at", { ascending: true }),
       supabase.from("teachers").select("id, name"),
     ]);
+    const ls = lsRes.status === "fulfilled" ? lsRes.value.data : null;
+    const ts = tsRes.status === "fulfilled" ? tsRes.value.data : null;
     setLessons((ls as Lesson[]) ?? []);
     setTeachers((ts as Teacher[]) ?? []);
     setLoading(false);
