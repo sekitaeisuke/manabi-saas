@@ -15,6 +15,7 @@ type Report = {
   percentage: number | null;
   report_html: string | null;
   teacher_notes: string | null;
+  message_to_child: string | null;
   status: "draft" | "sent";
   created_at: string;
 };
@@ -88,6 +89,18 @@ export default function ParentReportsPage() {
               </button>
             </div>
           </div>
+
+          {selected.message_to_child && (
+            <div className="rounded-3xl border-2 border-yellow-300 bg-yellow-50 p-6 shadow-md print:border print:border-yellow-300 print:bg-yellow-50">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-2xl">⭐</span>
+                <h2 className="text-base font-bold text-yellow-900">お子様に伝えて欲しいこと</h2>
+              </div>
+              <p className="whitespace-pre-wrap text-sm leading-8 text-yellow-900 font-medium">
+                {selected.message_to_child}
+              </p>
+            </div>
+          )}
 
           {selected.percentage != null && (
             <div className="no-print rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">

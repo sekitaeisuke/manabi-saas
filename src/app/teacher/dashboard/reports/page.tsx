@@ -15,6 +15,7 @@ type LessonReport = {
   percentage: number | null;
   report_html: string | null;
   teacher_notes: string | null;
+  message_to_child: string | null;
   status: "draft" | "sent";
   report_source: "test" | "manual" | null;
   created_at: string;
@@ -83,12 +84,16 @@ function ReportDetailView({ report, onBack, onUpdated }: {
   onUpdated: (r: LessonReport) => void;
 }) {
   const [notes, setNotes] = useState(report.teacher_notes ?? "");
+  const [messageToChild, setMessageToChild] = useState(report.message_to_child ?? "");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(report.status);
 
   const save = async (nextStatus?: LessonReport["status"]) => {
     setSaving(true);
-    const update: Partial<LessonReport> = { teacher_notes: notes };
+    const update: Partial<LessonReport> = {
+      teacher_notes: notes,
+      message_to_child: messageToChild || null,
+    };
     if (nextStatus) update.status = nextStatus;
     const { data } = await supabase
       .from("lesson_reports")
@@ -167,16 +172,33 @@ function ReportDetailView({ report, onBack, onUpdated }: {
           </div>
         )}
 
+        <div className="no-print rounded-3xl border-2 border-yellow-300 bg-yellow-50 p-6 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-xl">⭐</span>
+            <h3 className="font-bold text-yellow-900">お子様に伝えて欲しいこと</h3>
+          </div>
+          <p className="mb-3 text-xs text-yellow-800">
+            保護者が報告書を開いたとき<strong>最初に目に入る場所</strong>に表示されます。褒め・成長を具体的に。
+          </p>
+          <textarea
+            value={messageToChild}
+            onChange={(e) => setMessageToChild(e.target.value)}
+            rows={3}
+            placeholder="例：今日は難しい問題でも諦めずに最後まで取り組めました。途中式を丁寧に書く習慣がついてきています。"
+            className="w-full rounded-2xl border border-yellow-300 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-yellow-400"
+          />
+        </div>
+
         <div className="no-print rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
           <h3 className="mb-3 font-semibold text-indigo-900">講師コメント・補足</h3>
           <p className="mb-3 text-xs text-indigo-600">
-            AIレポートに追加したいコメント・修正事項・保護者へのメッセージを記入してください。
+            AIレポートに追加したいコメント・修正事項・保護者への連絡事項を記入してください。
           </p>
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            rows={5}
-            placeholder="例：今回の授業で特に頑張っていた点、次回に向けた具体的なアドバイス、保護者への連絡事項など..."
+            rows={4}
+            placeholder="例：今回の授業で特に頑張っていた点、次回に向けた具体的なアドバイス..."
             className="w-full rounded-2xl border border-indigo-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400"
           />
           <div className="mt-4 flex flex-wrap justify-end gap-3">
@@ -370,6 +392,7 @@ function ManualReportForm({
   const [learningContent, setLearningContent] = useState("");
   const [learningMethod, setLearningMethod] = useState("");
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
+  const [messageToChild, setMessageToChild] = useState("");
   const [teacherNotes, setTeacherNotes] = useState("");
   const [generating, setGenerating] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -415,6 +438,7 @@ function ManualReportForm({
           learningContent,
           learningMethod,
           checkedItems: Array.from(checkedItems),
+          messageToChild: messageToChild || undefined,
           teacherNotes: teacherNotes || undefined,
         }),
       });
@@ -429,6 +453,7 @@ function ManualReportForm({
         student_name: studentName.trim(),
         report_html: data.reportHtml,
         teacher_notes: teacherNotes || null,
+        message_to_child: messageToChild || null,
         status: "draft",
         report_source: "manual",
         learning_content: learningContent || null,
@@ -581,16 +606,34 @@ function ManualReportForm({
           </div>
         </div>
 
+        {/* お子様に伝えて欲しいこと */}
+        <div className="no-print rounded-3xl border-2 border-yellow-300 bg-yellow-50 p-6 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-2xl">⭐</span>
+            <h2 className="font-bold text-yellow-900">お子様に伝えて欲しいこと</h2>
+          </div>
+          <p className="mb-3 text-xs text-yellow-800">
+            保護者が報告書を開いたとき<strong>最初に目に入る場所</strong>に大きく表示されます。<br />
+            お子さんの頑張りや成長を具体的に書くと、保護者が繰り返し読み、お子さんに伝えてくれます。
+          </p>
+          <textarea
+            value={messageToChild}
+            onChange={(e) => setMessageToChild(e.target.value)}
+            rows={3}
+            placeholder="例：今日は難しい問題でも諦めずに最後まで取り組めました。特に途中式を丁寧に書く習慣がついてきています。このまま続けていきましょう！"
+            className="w-full rounded-xl border border-yellow-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          />
+        </div>
+
         {/* 講師メモ */}
-        <div className="no-print rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
-          <h2 className="mb-3 font-semibold text-amber-900">講師メモ（任意）</h2>
-          <p className="mb-3 text-xs text-amber-700">レポートには反映しますが、AIへの補足指示として使えます</p>
+        <div className="no-print rounded-3xl border border-slate-200 bg-slate-50 p-6 shadow-sm">
+          <h2 className="mb-3 font-semibold text-slate-700">講師メモ（任意・保護者非公開）</h2>
           <textarea
             value={teacherNotes}
             onChange={(e) => setTeacherNotes(e.target.value)}
-            rows={3}
-            placeholder="例：今日は特に集中できていた。次回は英語の単語テストを実施予定"
-            className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+            rows={2}
+            placeholder="例：次回は英語の単語テストを実施予定"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-400"
           />
         </div>
 
@@ -634,6 +677,7 @@ function ManualReportForm({
                   setLearningContent("");
                   setLearningMethod("");
                   setCheckedItems(new Set());
+                  setMessageToChild("");
                   setTeacherNotes("");
                 }}
                 className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">

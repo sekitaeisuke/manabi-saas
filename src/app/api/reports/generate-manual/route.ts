@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
     learningMethod,
     checkedItems,
     teacherNotes,
+    messageToChild,
   } = await req.json() as {
     studentName: string;
     grade: string;
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
     learningMethod: string;
     checkedItems: string[];
     teacherNotes?: string;
+    messageToChild?: string;
   };
 
   if (!studentName || !grade || !subject) {
@@ -60,6 +62,10 @@ export async function POST(req: NextRequest) {
   }).join("\n\n");
 
   const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" });
+
+  const messageSection = messageToChild
+    ? `【お子様に伝えて欲しいこと（講師メモ）】\n${messageToChild}`
+    : "";
 
   const prompt = `あなたは日本の個別指導塾の熟練した講師です。
 以下の授業記録をもとに、保護者向けの授業報告書をHTML形式で作成してください。
@@ -78,7 +84,8 @@ ${learningMethod || "（未記入）"}
 【学習スキルチェック】
 ${checkedSummary}
 
-${teacherNotes ? `【講師メモ（非公開用）】\n${teacherNotes}` : ""}
+${messageSection}
+${teacherNotes ? `【講師メモ（補足）】\n${teacherNotes}` : ""}
 
 【レポート作成ルール】
 - <div id="lesson-report"> ～ </div> で囲む
@@ -86,12 +93,14 @@ ${teacherNotes ? `【講師メモ（非公開用）】\n${teacherNotes}` : ""}
 - 各セクションは <h2> で区切る
 - 保護者が読みやすい温かみのある文体にする
 - チェック項目は表形式で視覚的に示す
+- 「お子様に伝えて欲しいこと」セクションは報告書の最初に配置し、背景色 #fffbeb・ボーダー #fcd34d の目立つカードで囲む
 
 【構成】
-① 今日の授業サマリー（2〜3文、何をどう取り組んだかを具体的に）
-② 学習スキルチェック結果（チェック項目を「できていた点」「これから伸ばしたい点」に分けて表形式で）
-③ 講師からのメッセージ（生徒の頑張りをほめつつ、次回に向けたアドバイスを温かく2〜3文）
-④ 次回の授業に向けて（宿題・家庭学習のポイントを具体的に1〜2項目）`;
+① 【お子様に伝えて欲しいこと】${messageToChild ? `（以下の内容を温かく丁寧な言葉に仕上げて）：${messageToChild}` : "（今日の授業で特に褒めたい点を具体的に1〜2文）"}
+② 今日の授業サマリー（2〜3文、何をどう取り組んだかを具体的に）
+③ 学習スキルチェック結果（チェック項目を「できていた点」「これから伸ばしたい点」に分けて表形式で）
+④ 講師からのメッセージ（次回に向けたアドバイスを温かく2〜3文）
+⑤ 次回の授業に向けて（宿題・家庭学習のポイントを具体的に1〜2項目）`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -123,8 +132,7 @@ ${teacherNotes ? `【講師メモ（非公開用）】\n${teacherNotes}` : ""}
   const match = reportHtml.match(/<div id="lesson-report">[\s\S]*<\/div>/);
   if (match) reportHtml = match[0];
 
-  // Supabase保存はクライアント側で行う（RLSの認証セッションが必要なため）
   const title = `${today} ${subject}授業`;
 
-  return NextResponse.json({ reportHtml, title });
+  return NextResponse.json({ reportHtml, title, messageToChild: messageToChild ?? null });
 }
