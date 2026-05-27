@@ -404,6 +404,7 @@ function ManualReportForm({
     setPreviewHtml("");
     setSaved(false);
     try {
+      // Step1: Claude でHTMLを生成
       const res = await fetch("/api/reports/generate-manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -419,6 +420,23 @@ function ManualReportForm({
       });
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
+
+      // Step2: 認証済みセッションでクライアントから直接INSERT（RLS対応）
+      const { error: dbErr } = await supabase.from("lesson_reports").insert({
+        test_title: data.title,
+        test_subject: subject,
+        test_grade: grade,
+        student_name: studentName.trim(),
+        report_html: data.reportHtml,
+        teacher_notes: teacherNotes || null,
+        status: "draft",
+        report_source: "manual",
+        learning_content: learningContent || null,
+        learning_method: learningMethod || null,
+        checked_items: Array.from(checkedItems),
+      });
+      if (dbErr) { setError("報告書の保存に失敗しました: " + dbErr.message); return; }
+
       setPreviewHtml(data.reportHtml);
       setSaved(true);
     } catch (e) {

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 const CHECKED_GROUPS = [
   {
@@ -53,7 +52,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "生徒名・学年・教科は必須です" }, { status: 400 });
   }
 
-  // チェック項目をグループ別に整理してプロンプトに渡す
   const checkedSet = new Set(checkedItems);
   const checkedSummary = CHECKED_GROUPS.map((g) => {
     const checked = g.items.filter((item) => checkedSet.has(item));
@@ -125,35 +123,8 @@ ${teacherNotes ? `【講師メモ（非公開用）】\n${teacherNotes}` : ""}
   const match = reportHtml.match(/<div id="lesson-report">[\s\S]*<\/div>/);
   if (match) reportHtml = match[0];
 
-  // Supabase に保存（サーバーサイドはservice role keyでRLSをバイパス）
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
+  // Supabase保存はクライアント側で行う（RLSの認証セッションが必要なため）
   const title = `${today} ${subject}授業`;
 
-  const { data, error } = await supabase
-    .from("lesson_reports")
-    .insert({
-      test_title: title,
-      test_subject: subject,
-      test_grade: grade,
-      student_name: studentName,
-      report_html: reportHtml,
-      teacher_notes: teacherNotes ?? null,
-      status: "draft",
-      report_source: "manual",
-      learning_content: learningContent || null,
-      learning_method: learningMethod || null,
-      checked_items: checkedItems,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: "報告書の保存に失敗しました: " + error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ reportHtml, reportId: data.id });
+  return NextResponse.json({ reportHtml, title });
 }
