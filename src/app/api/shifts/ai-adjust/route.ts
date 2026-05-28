@@ -13,7 +13,8 @@ async function callClaude(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 4000,
+      max_tokens: 8000,
+      system: "あなたはJSONのみを返すAPIです。説明文・前置き・コードブロック・マークダウンは一切含めず、純粋なJSONオブジェクト { ... } のみを返してください。",
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -158,23 +159,25 @@ ${custom_prompt?.trim() || "なし"}
     return NextResponse.json({ error: "AI呼び出しに失敗しました: " + String(err) }, { status: 500 });
   }
 
-  // JSON抽出
+  // JSON抽出（コードブロック・前後テキストを除去して最初の {...} を取り出す）
   let content = rawResponse.trim();
-  if (content.startsWith("```json")) content = content.slice(7);
-  else if (content.startsWith("```")) content = content.slice(3);
-  if (content.endsWith("```")) content = content.slice(0, -3);
-  content = content.trim();
-
+  content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) {
-    return NextResponse.json({ error: "AIの出力をパースできませんでした", raw: rawResponse.slice(0, 500) }, { status: 500 });
+    return NextResponse.json({
+      error: "AIの出力からJSONを取り出せませんでした",
+      raw: rawResponse.slice(0, 800),
+    }, { status: 500 });
   }
 
   let resultJson: Record<string, unknown>;
   try {
     resultJson = JSON.parse(match[0]);
   } catch {
-    return NextResponse.json({ error: "AIレスポンスのJSONパースに失敗しました" }, { status: 500 });
+    return NextResponse.json({
+      error: "AIレスポンスのJSONパースに失敗しました",
+      raw: match[0].slice(0, 800),
+    }, { status: 500 });
   }
 
   // 実行履歴を保存（失敗しても結果は返す）
