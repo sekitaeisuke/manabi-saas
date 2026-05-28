@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
     ? "縦断型（同グループ内の複数教室をまたいで配置可能）"
     : "専属型（各講師は自分の所属教室のみに配置）";
 
-  const schoolLines = (schools ?? []).map((s: { name: string; group_name: string | null }) =>
-    `・${s.name}${s.group_name ? `（グループ: ${s.group_name}）` : ""}`
+  const schoolLines = (schools ?? []).map((s: { id: string; name: string; group_name: string | null }) =>
+    `・${s.name} [school_id: ${s.id}]${s.group_name ? `（グループ: ${s.group_name}）` : ""}`
   ).join("\n");
 
   // 講師ごとに希望をまとめる
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     teacherMap.get(t.id)!.requests.push(r);
   }
 
-  const teacherLines = Array.from(teacherMap.entries()).map(([, v]) => {
+  const teacherLines = Array.from(teacherMap.entries()).map(([tid, v]) => {
     const reqs = v.requests.map((r: { date: string; slot_start: string; slot_end: string; availability: string; note: string | null }) =>
       `    ${r.date} ${r.slot_start}〜${r.slot_end}: ${
         r.availability === "preferred" ? "◎優先希望"
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
         : "×不可"
       }${r.note ? ` (備考: ${r.note})` : ""}`
     ).join("\n");
-    return `【${v.name}】所属: ${v.school}\n${reqs || "  希望なし（未提出）"}`;
+    return `【${v.name}】所属: ${v.school} [teacher_id: ${tid}]\n${reqs || "  希望なし（未提出）"}`;
   }).join("\n\n");
 
   const prompt = `あなたは学習塾のシフト管理の専門家です。
