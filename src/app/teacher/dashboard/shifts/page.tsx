@@ -14,9 +14,12 @@ const EVENT_ICON: Record<string, string> = {
 import { showToast } from "@/lib/toast";
 
 const SLOTS: { start: string; end: string; label: string }[] = [
-  { start: "15:00", end: "17:00", label: "15:00〜17:00" },
-  { start: "17:00", end: "19:00", label: "17:00〜19:00" },
-  { start: "19:00", end: "21:00", label: "19:00〜21:00" },
+  { start: "10:00", end: "12:00", label: "10:00〜12:00" },
+  { start: "12:00", end: "14:00", label: "12:00〜14:00" },
+  { start: "14:00", end: "16:00", label: "14:00〜16:00" },
+  { start: "16:00", end: "18:00", label: "16:00〜18:00" },
+  { start: "18:00", end: "20:00", label: "18:00〜20:00" },
+  { start: "20:00", end: "22:00", label: "20:00〜22:00" },
 ];
 
 const AVAIL_OPTIONS: { value: ShiftAvailability; label: string; color: string }[] = [
@@ -56,6 +59,9 @@ export default function ShiftRequestPage() {
   const [notes, setNotes] = useState<Map<CellKey, string>>(new Map());
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [patternDays, setPatternDays] = useState<number[]>([]);
+  const [patternSlots, setPatternSlots] = useState<string[]>([]);
+  const [patternAvail, setPatternAvail] = useState<ShiftAvailability>("available");
 
   // 自分のteacher_idを取得
   useEffect(() => {
@@ -99,7 +105,7 @@ export default function ShiftRequestPage() {
     const newCells = new Map<CellKey, ShiftAvailability>();
     const newNotes = new Map<CellKey, string>();
     for (const r of (existing ?? []) as ShiftRequest[]) {
-      const key: CellKey = `${r.date}_${r.slot_start}`;
+      const key: CellKey = `${r.date}_${r.slot_start.slice(0, 5)}`;
       newCells.set(key, r.availability);
       if (r.note) newNotes.set(key, r.note);
     }
@@ -190,6 +196,38 @@ export default function ShiftRequestPage() {
   const dates = period ? dateRange(period.start_date, period.end_date) : [];
   const isPast = period && period.deadline ? new Date(period.deadline) < new Date() : false;
 
+  const fillAll = (avail: ShiftAvailability) => {
+    const m = new Map<CellKey, ShiftAvailability>();
+    for (const date of dates) {
+      for (const slot of SLOTS) {
+        m.set(`${date}_${slot.start}`, avail);
+      }
+    }
+    setCells(m);
+  };
+
+  const clearAll = () => { setCells(new Map()); setNotes(new Map()); };
+
+  const togglePatternDay  = (d: number) =>
+    setPatternDays((prev)  => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]);
+  const togglePatternSlot = (s: string) =>
+    setPatternSlots((prev) => prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]);
+
+  const applyPattern = () => {
+    const m = new Map(cells);
+    for (const date of dates) {
+      const dayOfWeek = new Date(date).getDay();
+      if (patternDays.length > 0 && !patternDays.includes(dayOfWeek)) continue;
+      const targets = patternSlots.length > 0
+        ? SLOTS.filter((s) => patternSlots.includes(s.start))
+        : SLOTS;
+      for (const slot of targets) {
+        m.set(`${date}_${slot.start}`, patternAvail);
+      }
+    }
+    setCells(m);
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8 sm:px-6">
       <div className="mx-auto max-w-5xl">
@@ -263,6 +301,87 @@ export default function ShiftRequestPage() {
           </div>
         ) : (
           <>
+            {/* 一括入力パネル */}
+            <div className="mb-4 rounded-2xl bg-white p-4 shadow-sm space-y-3">
+              <h3 className="text-sm font-bold text-slate-700">一括入力</h3>
+
+              {/* 全体一括 */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-slate-500 min-w-[4em]">全日程:</span>
+                {AVAIL_OPTIONS.map((o) => (
+                  <button key={o.value} onClick={() => fillAll(o.value)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition hover:opacity-80 ${o.color}`}>
+                    {o.label}
+                  </button>
+                ))}
+                <button onClick={clearAll}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-500 hover:bg-slate-50 transition">
+                  全クリア
+                </button>
+              </div>
+
+              {/* 曜日・時間帯パターン */}
+              <div className="border-t border-slate-100 pt-3">
+                <p className="mb-2 text-xs font-semibold text-slate-500">
+                  曜日・時間帯パターンで入力
+                  <span className="ml-2 font-normal text-slate-400">— 曜日・時間帯を選んで希望を一括設定（未選択=全て対象）</span>
+                </p>
+                <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
+                  {/* 曜日 */}
+                  <div>
+                    <p className="mb-1 text-xs text-slate-400">曜日</p>
+                    <div className="flex gap-1">
+                      {["日","月","火","水","木","金","土"].map((d, i) => (
+                        <button key={i} onClick={() => togglePatternDay(i)}
+                          className={`h-8 w-8 rounded-lg text-xs font-bold transition
+                            ${patternDays.includes(i)
+                              ? i === 0 ? "bg-red-500 text-white" : i === 6 ? "bg-blue-500 text-white" : "bg-slate-800 text-white"
+                              : i === 0 ? "bg-red-50 text-red-500 hover:bg-red-100" : i === 6 ? "bg-blue-50 text-blue-500 hover:bg-blue-100" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            }`}>
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 時間帯 */}
+                  <div>
+                    <p className="mb-1 text-xs text-slate-400">時間帯</p>
+                    <div className="flex gap-1">
+                      {SLOTS.map((s) => (
+                        <button key={s.start} onClick={() => togglePatternSlot(s.start)}
+                          className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition whitespace-nowrap
+                            ${patternSlots.includes(s.start) ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 希望状態 */}
+                  <div>
+                    <p className="mb-1 text-xs text-slate-400">希望</p>
+                    <div className="flex gap-1">
+                      {AVAIL_OPTIONS.map((o) => (
+                        <button key={o.value} onClick={() => setPatternAvail(o.value)}
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition
+                            ${patternAvail === o.value
+                              ? o.color + " ring-2 ring-slate-400 ring-offset-1"
+                              : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"}`}>
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button onClick={applyPattern}
+                    className="rounded-xl bg-slate-800 px-5 py-2 text-sm font-semibold text-white hover:bg-slate-700 transition">
+                    適用
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* マトリクス表 */}
             <div className="overflow-x-auto rounded-2xl bg-white shadow-sm">
               <table className="w-full text-sm">

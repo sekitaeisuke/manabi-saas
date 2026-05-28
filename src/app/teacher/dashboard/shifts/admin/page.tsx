@@ -27,9 +27,12 @@ const EVENT_TYPE_OPTIONS: { value: EventType; label: string; icon: string; color
 ];
 
 const SLOTS = [
-  { start: "15:00", end: "17:00" },
-  { start: "17:00", end: "19:00" },
-  { start: "19:00", end: "21:00" },
+  { start: "10:00", end: "12:00" },
+  { start: "12:00", end: "14:00" },
+  { start: "14:00", end: "16:00" },
+  { start: "16:00", end: "18:00" },
+  { start: "18:00", end: "20:00" },
+  { start: "20:00", end: "22:00" },
 ];
 const AVAIL_COLOR: Record<string, string> = {
   preferred:   "bg-green-100 text-green-700",
