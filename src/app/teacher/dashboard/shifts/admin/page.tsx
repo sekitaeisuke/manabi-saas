@@ -322,7 +322,7 @@ function RequestsStep({ onNext }: { onNext: () => void }) {
   }, [periodId, periods]);
 
   const getCell = (teacherId: string, date: string, slotStart: string) =>
-    requests.find((r) => r.teacher_id === teacherId && r.date === date && r.slot_start === slotStart);
+    requests.find((r) => r.teacher_id === teacherId && r.date === date && r.slot_start.slice(0, 5) === slotStart);
 
   const dates = period ? dateRange(period.start_date, period.end_date) : [];
   const submittedIds = new Set(requests.map((r) => r.teacher_id));
