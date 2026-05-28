@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-export const maxDuration = 60;
+export const runtime = "edge";
+export const maxDuration = 30;
 
 async function callClaude(prompt: string): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 60;
+export const runtime = "edge";
+export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   const { prompt, schools } = await req.json() as {
