@@ -4,29 +4,121 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "edge";
 export const maxDuration = 30;
 
-async function callClaude(prompt: string): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 8000,
-      system: "あなたはJSONのみを返すAPIです。説明文・前置き・コードブロック・マークダウンは一切含めず、純粋なJSONオブジェクト { ... } のみを返してください。",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text().catch(() => "(読み取り不可)");
-    throw new Error(`Claude API ${res.status}: ${err}`);
+type School   = { id: string; name: string; group_name: string | null };
+type Teacher  = { id: string; name: string; school_id: string | null };
+type ReqRow   = {
+  date: string; slot_start: string; slot_end: string; availability: string;
+  teachers: (Teacher & { schools?: { name: string } | null }) | null;
+};
+type ShiftRow = {
+  date: string; slot_start: string; slot_end: string;
+  school_id: string; school_name: string;
+  teacher_id: string; teacher_name: string;
+  note?: string | null;
+};
+
+// ─── アルゴリズムによるシフト自動割り当て ──────────────────────
+function assignShifts(
+  requests: ReqRow[],
+  schools: School[],
+  mode: string,
+  customInstruction: string,
+): { shifts: ShiftRow[]; warnings: string[] } {
+  const warnings: string[] = [];
+
+  // ◎優先→○可の順にソート
+  const sorted = [...requests]
+    .filter((r) => r.availability !== "unavailable" && r.teachers)
+    .sort((a, b) => {
+      if (a.availability === "preferred" && b.availability !== "preferred") return -1;
+      if (b.availability === "preferred" && a.availability !== "preferred") return 1;
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.slot_start.localeCompare(b.slot_start);
+    });
+
+  const teacherSlotUsed  = new Set<string>(); // "teacher_id|date|slot_start" — 同時刻の重複防止
+  const schoolSlotFilled = new Set<string>(); // "school_id|date|slot_start"  — 教室ごとに1枠
+  const shifts: ShiftRow[] = [];
+
+  for (const r of sorted) {
+    const t = r.teachers!;
+    const slotStart = r.slot_start.slice(0, 5);
+    const slotEnd   = r.slot_end.slice(0, 5);
+    const teacherKey = `${t.id}|${r.date}|${slotStart}`;
+    if (teacherSlotUsed.has(teacherKey)) continue; // この講師はこの時間すでに配置済み
+
+    // 配置先教室を決定
+    let targetSchools: School[];
+    if (mode === "dedicated") {
+      targetSchools = t.school_id ? schools.filter((s) => s.id === t.school_id) : [];
+    } else {
+      // 縦断型: 自校を優先し、埋まっていれば他校へ
+      const homeFirst = [
+        ...schools.filter((s) => s.id === t.school_id),
+        ...schools.filter((s) => s.id !== t.school_id),
+      ];
+      targetSchools = homeFirst;
+    }
+
+    let assigned = false;
+    for (const school of targetSchools) {
+      const schoolKey = `${school.id}|${r.date}|${slotStart}`;
+      if (schoolSlotFilled.has(schoolKey)) continue; // この教室×時間はすでに埋まっている
+
+      teacherSlotUsed.add(teacherKey);
+      schoolSlotFilled.add(schoolKey);
+      shifts.push({
+        date: r.date,
+        slot_start: slotStart,
+        slot_end: slotEnd,
+        school_id: school.id,
+        school_name: school.name,
+        teacher_id: t.id,
+        teacher_name: t.name,
+        note: customInstruction ? `管理者指示: ${customInstruction.slice(0, 30)}` : null,
+      });
+      assigned = true;
+      break;
+    }
+
+    if (!assigned) {
+      warnings.push(`${t.name} の ${r.date} ${slotStart} は配置できませんでした（教室が埋まっているか未所属）`);
+    }
   }
-  const data = await res.json();
-  return data.content?.[0]?.text ?? "";
+
+  return { shifts, warnings };
 }
 
+// ─── Claude による短い要約のみ ─────────────────────────────────
+async function summarize(shifts: ShiftRow[], warnings: string[]): Promise<string> {
+  const body = JSON.stringify({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 200,
+    system: "50字以内の日本語テキストのみ返してください。",
+    messages: [{
+      role: "user",
+      content: `シフト自動割り当て結果: ${shifts.length}件配置、未配置警告${warnings.length}件。一言で要約してください。`,
+    }],
+  });
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+        "anthropic-version": "2023-06-01",
+      },
+      body,
+    });
+    if (!res.ok) return `${shifts.length}件のシフトを自動生成しました。`;
+    const data = await res.json();
+    return (data.content?.[0]?.text ?? "").trim() || `${shifts.length}件のシフトを自動生成しました。`;
+  } catch {
+    return `${shifts.length}件のシフトを自動生成しました。`;
+  }
+}
+
+// ─── POST ─────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const { period_id, custom_prompt } = await req.json() as {
     period_id: string;
@@ -43,7 +135,7 @@ export async function POST(req: NextRequest) {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
-  // 期間情報を取得
+  // 期間情報
   const { data: period, error: pErr } = await admin
     .from("shift_periods")
     .select("*, schools(id, name, group_name)")
@@ -53,126 +145,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "期間が見つかりません" }, { status: 404 });
   }
 
-  // 希望提出を全件取得（講師名・メール付き）
+  // 希望データ
   const { data: requests, error: rErr } = await admin
     .from("shift_requests")
-    .select("*, teachers(id, name, email, school_id, schools(name))")
+    .select("*, teachers(id, name, school_id, schools(name))")
     .eq("period_id", period_id)
-    .order("date")
-    .order("slot_start");
+    .order("date").order("slot_start");
   if (rErr) {
     return NextResponse.json({ error: "希望データの取得に失敗: " + rErr.message }, { status: 500 });
   }
 
-  // 同グループの教室一覧を取得
+  // 教室一覧
   const groupName = (period.schools as { group_name: string | null } | null)?.group_name;
   let schoolsQuery = admin.from("schools").select("id, name, group_name");
-  if (groupName) {
-    schoolsQuery = schoolsQuery.eq("group_name", groupName);
-  } else if (period.school_id) {
-    schoolsQuery = schoolsQuery.eq("id", period.school_id);
-  }
+  if (groupName)         schoolsQuery = schoolsQuery.eq("group_name", groupName);
+  else if (period.school_id) schoolsQuery = schoolsQuery.eq("id", period.school_id);
   const { data: schools } = await schoolsQuery;
 
-  // プロンプト構築
-  const modeLabel = period.assignment_mode === "flexible"
-    ? "縦断型（同グループ内の複数教室をまたいで配置可能）"
-    : "専属型（各講師は自分の所属教室のみに配置）";
+  // アルゴリズムでシフト割り当て
+  const { shifts, warnings } = assignShifts(
+    (requests ?? []) as ReqRow[],
+    (schools  ?? []) as School[],
+    period.assignment_mode,
+    custom_prompt?.trim() ?? "",
+  );
 
-  const schoolLines = (schools ?? []).map((s: { id: string; name: string; group_name: string | null }) =>
-    `・${s.name} [school_id: ${s.id}]${s.group_name ? `（グループ: ${s.group_name}）` : ""}`
-  ).join("\n");
+  // Claude で短い要約
+  const summary = await summarize(shifts, warnings);
 
-  // 講師ごとに希望をまとめる
-  const teacherMap = new Map<string, {
-    name: string; school: string; requests: typeof requests;
-  }>();
-  for (const r of requests ?? []) {
-    const t = r.teachers as { id: string; name: string; email: string; schools: { name: string } | null } | null;
-    if (!t) continue;
-    if (!teacherMap.has(t.id)) {
-      teacherMap.set(t.id, { name: t.name, school: t.schools?.name ?? "未所属", requests: [] });
-    }
-    teacherMap.get(t.id)!.requests.push(r);
-  }
-
-  const teacherLines = Array.from(teacherMap.entries()).map(([tid, v]) => {
-    const reqs = v.requests.map((r: { date: string; slot_start: string; slot_end: string; availability: string; note: string | null }) =>
-      `    ${r.date} ${r.slot_start}〜${r.slot_end}: ${
-        r.availability === "preferred" ? "◎優先希望"
-        : r.availability === "available" ? "○可"
-        : "×不可"
-      }${r.note ? ` (備考: ${r.note})` : ""}`
-    ).join("\n");
-    return `【${v.name}】所属: ${v.school} [teacher_id: ${tid}]\n${reqs || "  希望なし（未提出）"}`;
-  }).join("\n\n");
-
-  const prompt = `あなたは学習塾のシフト管理の専門家です。
-講師の希望に基づき、配置するシフトのみをJSONで出力してください。
-
-【配置モード】${modeLabel}
-
-【教室一覧】
-${schoolLines || "（教室情報なし）"}
-
-【講師の希望一覧（○可・◎優先のスロットのみ配置対象）】
-${teacherLines || "（希望提出なし）"}
-
-【配置ルール】
-- ◎優先希望を最優先で配置
-- ×不可には絶対に配置しない
-- 同一講師を同日同時刻に複数配置しない
-${period.assignment_mode === "dedicated"
-  ? "- 各講師は自分の所属教室のみに配置"
-  : "- 同グループ内の複数教室をまたいで配置可"
-}
-${custom_prompt?.trim() ? `- 追加指示: ${custom_prompt.trim()}` : ""}
-
-注意: shiftsには実際に配置するシフトのみ含める。空のスロットは含めない。
-summary・warnings・unassigned_slotsは簡潔に（50字以内）。
-
-{"shifts":[{"date":"YYYY-MM-DD","slot_start":"HH:MM","slot_end":"HH:MM","school_id":"UUID","school_name":"名前","teacher_id":"UUID","teacher_name":"名前","note":""}],"unassigned_slots":[],"warnings":[],"summary":""}`;
-
-  let rawResponse = "";
-  try {
-    rawResponse = await callClaude(prompt);
-  } catch (err) {
-    return NextResponse.json({ error: "AI呼び出しに失敗しました: " + String(err) }, { status: 500 });
-  }
-
-  // JSON抽出（コードブロック・前後テキストを除去して最初の {...} を取り出す）
-  let content = rawResponse.trim();
-  content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
-  const match = content.match(/\{[\s\S]*\}/);
-  if (!match) {
-    return NextResponse.json({
-      error: "AIの出力からJSONを取り出せませんでした",
-      raw: rawResponse.slice(0, 800),
-    }, { status: 500 });
-  }
-
-  let resultJson: Record<string, unknown>;
-  try {
-    resultJson = JSON.parse(match[0]);
-  } catch {
-    return NextResponse.json({
-      error: "AIレスポンスのJSONパースに失敗しました",
-      raw: match[0].slice(0, 800),
-    }, { status: 500 });
-  }
-
-  // 実行履歴を保存（失敗しても結果は返す）
-  const { data: aiRun, error: runErr } = await admin.from("shift_ai_runs").insert({
+  // 実行履歴保存
+  await admin.from("shift_ai_runs").insert({
     period_id,
     custom_prompt: custom_prompt ?? null,
     assignment_mode: period.assignment_mode,
-    raw_response: rawResponse,
-    result_json: resultJson,
+    raw_response: summary,
+    result_json: { shifts, warnings, summary },
   }).select("id").single();
-  if (runErr) console.error("AI実行履歴の保存失敗（非致命的）:", runErr);
 
-  return NextResponse.json({
-    run_id: aiRun?.id ?? null,
-    ...resultJson,
-  });
+  return NextResponse.json({ shifts, warnings, summary, unassigned_slots: [] });
 }
