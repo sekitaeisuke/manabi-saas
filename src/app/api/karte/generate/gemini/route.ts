@@ -35,7 +35,7 @@ ${JSON.stringify(draft, null, 2)}
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           responseMimeType: "application/json",
-          maxOutputTokens: 8192,
+          maxOutputTokens: 65536,
         },
       }),
     }

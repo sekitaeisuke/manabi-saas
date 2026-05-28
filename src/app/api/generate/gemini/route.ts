@@ -39,7 +39,7 @@ ${instructions || "なし"}
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           responseMimeType: "application/json",
-          maxOutputTokens: 8192,
+          maxOutputTokens: 65536,
         },
       }),
     }
