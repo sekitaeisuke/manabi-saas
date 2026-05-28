@@ -74,8 +74,15 @@ export async function POST(req: NextRequest) {
     const rows = student_ids.map((sid: string) => ({ parent_id: parent.id, student_id: sid }));
     const { error: linkErr } = await admin.from("parent_student_links").insert(rows);
     if (linkErr) {
+      // ロールバック: 作成した保護者レコードを削除
+      await admin.from("parents").delete().eq("id", parent.id);
+      if (!authAlreadyExisted) {
+        await admin.auth.admin.deleteUser(authUserId!).catch((e) => {
+          console.error("ロールバック中のAuth削除失敗（手動対応が必要）:", authUserId, e);
+        });
+      }
       return NextResponse.json(
-        { error: `保護者は作成しましたが生徒紐付けに失敗: ${linkErr.message}`, parent_id: parent.id },
+        { error: `生徒紐付けに失敗したため保護者の作成を取り消しました: ${linkErr.message}` },
         { status: 500 }
       );
     }

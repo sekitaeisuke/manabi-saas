@@ -1,4 +1,5 @@
 "use client";
+import { showToast } from "@/lib/toast";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
@@ -133,7 +134,7 @@ export default function ParentsPage() {
       .update({ name: editForm.name, phone: editForm.phone || null })
       .eq("id", editing.id);
     setEditBusy(false);
-    if (error) { alert(`更新失敗: ${error.message}`); return; }
+    if (error) { showToast(`更新失敗: ${error.message}`, "error"); return; }
     fetchAll();
     setEditing((prev) => prev ? { ...prev, name: editForm.name, phone: editForm.phone || null } : prev);
   };
@@ -148,9 +149,9 @@ export default function ParentsPage() {
     setLinkBusy(false);
     if (error) {
       if (error.code === "23505") {
-        alert("既に紐付け済みです");
+        showToast("既に紐付け済みです", "info");
       } else {
-        alert(`紐付け失敗: ${error.message}`);
+        showToast(`紐付け失敗: ${error.message}`, "error");
       }
       return;
     }
@@ -187,7 +188,7 @@ export default function ParentsPage() {
       .delete()
       .eq("parent_id", editing.id)
       .eq("student_id", studentId);
-    if (error) { alert(`解除失敗: ${error.message}`); return; }
+    if (error) { showToast(`解除失敗: ${error.message}`, "error"); return; }
     setEditing((prev) => prev
       ? { ...prev, students: prev.students.filter((s) => s.id !== studentId) }
       : prev);
@@ -202,10 +203,10 @@ export default function ParentsPage() {
       body: JSON.stringify({ parent_id: p.id }),
     });
     const json = await res.json();
-    if (!res.ok) { alert(`削除失敗: ${json.error ?? "unknown"}`); return; }
+    if (!res.ok) { showToast(`削除失敗: ${json.error ?? "unknown"}`, "error"); return; }
     if (editing?.id === p.id) setEditing(null);
-    if (json.note) alert(json.note);
-    if (json.auth_error) alert(`parents 行は削除しましたが Auth ユーザ削除に失敗: ${json.auth_error}`);
+    if (json.note) showToast(json.note, "info");
+    if (json.auth_error) showToast(`Auth ユーザ削除に失敗: ${json.auth_error}`, "error");
     fetchAll();
   };
 

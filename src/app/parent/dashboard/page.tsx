@@ -59,9 +59,12 @@ export default function ParentOverviewPage() {
       .order("created_at", { ascending: false })
       .limit(20);
     const filtered = (ann ?? []).filter((a) => {
-      const gradeOk  = !a.target_grade     || a.target_grade     === s?.grade;
-      const schoolOk = !a.target_school_id || a.target_school_id === s?.school_id;
-      return gradeOk && schoolOk;
+      // 対象指定がない（全体向け）は常に表示
+      if (!a.target_grade && !a.target_school_id) return true;
+      // 学年 OR 校舎のいずれかが一致すれば表示
+      const gradeOk  = !!a.target_grade     && a.target_grade     === s?.grade;
+      const schoolOk = !!a.target_school_id && a.target_school_id === s?.school_id;
+      return gradeOk || schoolOk;
     });
     setAnnouncements(filtered.slice(0, 5) as Announcement[]);
 
@@ -163,7 +166,7 @@ export default function ParentOverviewPage() {
                 </Link>
               </div>
               {upcoming.length === 0 ? (
-                <p className="text-sm text-slate-500">予定されている授業はありません。</p>
+                <p className="text-sm text-slate-500">予定されている授業はありません。授業日時は講師にご確認ください。</p>
               ) : (
                 <div className="space-y-3">
                   {upcoming.map((l) => (

@@ -154,3 +154,99 @@ export type Diagnosis = {
   quality_score: number;
   report_html: string | null;
 };
+
+// ── 出勤怠管理 ──────────────────────────────────────────────
+
+export type AttendanceStatus = "present" | "absent" | "late" | "early_leave";
+export type AttendanceEntryMethod = "face" | "manual";
+
+export type AttendanceRecord = {
+  id:                  string;
+  teacher_id:          string;
+  school_id:           string | null;
+  work_date:           string;
+  clock_in:            string | null;
+  clock_out:           string | null;
+  break_minutes:       number;
+  transportation_fee:  number;
+  transportation_note: string | null;
+  notes:               string | null;
+  entry_method:        AttendanceEntryMethod;
+  status:              AttendanceStatus;
+  created_at:          string;
+  updated_at:          string;
+};
+
+// ── シフト管理 ──────────────────────────────────────────────
+
+export type ShiftAvailability = "available" | "preferred" | "unavailable";
+export type AssignmentMode    = "flexible" | "dedicated";
+export type ShiftPeriodStatus = "open" | "closed" | "published";
+
+export type ShiftPeriod = {
+  id:              string;
+  school_id:       string | null;
+  label:           string;
+  start_date:      string;
+  end_date:        string;
+  deadline:        string | null;
+  assignment_mode: AssignmentMode;
+  status:          ShiftPeriodStatus;
+  created_by:      string | null;
+  created_at:      string;
+};
+
+export type ShiftRequest = {
+  id:           string;
+  period_id:    string;
+  teacher_id:   string;
+  date:         string;
+  slot_start:   string;
+  slot_end:     string;
+  availability: ShiftAvailability;
+  note:         string | null;
+  submitted_at: string;
+};
+
+export type ShiftAssignment = {
+  id:         string;
+  period_id:  string;
+  teacher_id: string;
+  school_id:  string;
+  date:       string;
+  slot_start: string;
+  slot_end:   string;
+  status:     "draft" | "confirmed";
+  note:       string | null;
+  created_at: string;
+};
+
+export type EventType = "event" | "exam" | "holiday" | "class" | "info";
+
+export type ShiftEvent = {
+  id:                  string;
+  school_id:           string | null;
+  period_id:           string | null;
+  date:                string;
+  start_time:          string | null;
+  end_time:            string | null;
+  title:               string;
+  description:         string | null;
+  event_type:          EventType;
+  visible_to_teachers: boolean;
+  visible_to_parents:  boolean;
+  visible_to_students: boolean;
+  created_by:          string | null;
+  created_at:          string;
+};
+
+export type ShiftAiRun = {
+  id:              string;
+  period_id:       string;
+  custom_prompt:   string | null;
+  assignment_mode: AssignmentMode;
+  raw_response:    string | null;
+  result_json:     unknown;
+  executed_by:     string | null;
+  executed_at:     string;
+};

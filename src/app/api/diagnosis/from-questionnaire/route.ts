@@ -180,7 +180,7 @@ HTMLのみを返してください（説明文・JSONは不要）。`;
   }
 
   // Save report HTML and scores back to the questionnaire_responses row
-  await supabase.from("questionnaire_responses").update({
+  const { error: updateErr } = await supabase.from("questionnaire_responses").update({
     habit_score: habitScore,
     method_score: methodScore,
     verbal_score: verbalScore,
@@ -188,6 +188,10 @@ HTMLのみを返してください（説明文・JSONは不要）。`;
     report_html: reportHtml,
     status: "analyzed",
   }).eq("session_id", session_id);
+  if (updateErr) {
+    console.error("questionnaire_responses update failed:", updateErr);
+    return NextResponse.json({ error: "診断結果の保存に失敗しました: " + updateErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({
     reportHtml,

@@ -1,4 +1,5 @@
 "use client";
+import { showToast } from "@/lib/toast";
 
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
@@ -548,7 +549,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
     });
     const data = await res.json();
     setIssuing(false);
-    if (data.error) { alert("エラー: " + data.error); return; }
+    if (data.error) { showToast("エラー: " + data.error, "error"); return; }
     setIssuedResult({ loginId: accountModal.loginId, password: accountModal.password });
     onRefresh();
   };
@@ -1221,7 +1222,7 @@ function HighSchoolsTab() {
   const copyRegisterUrl = () => {
     const url = `${window.location.origin}/school-register`;
     navigator.clipboard.writeText(url);
-    alert(`コピーしました:\n${url}`);
+    showToast("URLをコピーしました", "success");
   };
 
   const filtered = schools.filter((s) => {

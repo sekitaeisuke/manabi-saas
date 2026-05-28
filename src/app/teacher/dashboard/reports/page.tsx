@@ -1,4 +1,5 @@
 "use client";
+import { sanitizeHtml } from "@/lib/sanitize";
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
@@ -164,7 +165,7 @@ function ReportDetailView({ report, onBack, onUpdated }: {
 
         {report.report_html ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <div id="report-html" dangerouslySetInnerHTML={{ __html: report.report_html }} />
+            <div id="report-html" dangerouslySetInnerHTML={{ __html: sanitizeHtml(report.report_html) }} />
           </div>
         ) : (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-400">
@@ -662,7 +663,7 @@ function ManualReportForm({
               ✓ 報告書を生成・保存しました。一覧の「下書き」に追加されています。
             </div>
             <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-              <div id="manual-report-preview" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+              <div id="manual-report-preview" dangerouslySetInnerHTML={{ __html: sanitizeHtml(previewHtml) }} />
             </div>
             <div className="no-print flex justify-end gap-3">
               <button onClick={onCreated}

@@ -13,7 +13,8 @@ async function sendAdminEmail(school: {
   const key = process.env.RESEND_API_KEY;
   if (!key) return;
   const from = process.env.EMAIL_FROM ?? "noreply@manabi-navi.com";
-  const to   = process.env.ADMIN_EMAIL ?? "sekitaeisuke@kyouiku-koubou.com";
+  const to   = process.env.ADMIN_EMAIL;
+  if (!to) { console.warn("ADMIN_EMAIL 未設定のため管理者通知をスキップ"); return; }
   const subject = `【まなびナビ】新規学校登録: ${school.name}`;
   const html = `
 <h2>新規学校登録がありました</h2>
@@ -47,7 +48,7 @@ async function sendSchoolConfirmEmail(school: { name: string; id: string }, toEm
 <p>審査完了後（通常1〜3営業日）にご連絡いたします。</p>
 <p style="margin-top:12px;color:#666;font-size:12px">
   登録番号: ${school.id}<br>
-  お問い合わせ: sekitaeisuke@kyouiku-koubou.com
+  お問い合わせ: ${process.env.CONTACT_EMAIL ?? "info@manabi-navi.com"}
 </p>`;
   await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
   if (existing) {
     const msg = existing.status === "pending"
       ? "この学校名はすでに申請中です。審査完了までお待ちください。"
-      : "この学校名はすでに登録されています。修正のご依頼は sekitaeisuke@kyouiku-koubou.com までご連絡ください。";
+      : `この学校名はすでに登録されています。修正のご依頼は ${process.env.CONTACT_EMAIL ?? "info@manabi-navi.com"} までご連絡ください。`;
     return NextResponse.json({ error: msg, duplicate: true }, { status: 409 });
   }
 
@@ -118,12 +119,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "登録に失敗しました: " + error.message }, { status: 500 });
   }
 
-  // mailing_list のステータスを更新（送信済み校が登録した場合）
-  await supabaseAdmin
+  // mailing_list のステータスを更新（送信済み校が登録した場合・失敗しても本処理には影響しない）
+  const { error: mailingErr } = await supabaseAdmin
     .from("school_mailing_list")
     .update({ contact_status: "登録済", high_school_id: data.id })
     .eq("school_name", name.trim())
     .in("contact_status", ["送信済", "メール送信済", "フォーム送信済"]);
+  if (mailingErr) console.warn("school_mailing_list 更新失敗（非致命的）:", mailingErr);
 
   // 管理者通知（非同期・失敗しても無視）
   sendAdminEmail({

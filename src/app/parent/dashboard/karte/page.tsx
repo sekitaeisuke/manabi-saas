@@ -1,4 +1,5 @@
 "use client";
+import { sanitizeHtml } from "@/lib/sanitize";
 
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
@@ -83,7 +84,7 @@ export default function ParentKartePage() {
           )}
 
           <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-            <div id="plan-html" dangerouslySetInnerHTML={{ __html: selected.plan_html }} />
+            <div id="plan-html" dangerouslySetInnerHTML={{ __html: sanitizeHtml(selected.plan_html) }} />
           </div>
 
           {selected.teacher_notes && (

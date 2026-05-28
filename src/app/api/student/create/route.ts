@@ -36,7 +36,10 @@ export async function POST(req: NextRequest) {
       const admin = createClient(url, serviceRoleKey, {
         auth: { autoRefreshToken: false, persistSession: false },
       });
-      await admin.auth.admin.deleteUser(authUserId);
+      const { error: deleteErr } = await admin.auth.admin.deleteUser(authUserId);
+      if (deleteErr) {
+        console.error("ロールバック中のAuth削除失敗（手動対応が必要）:", authUserId, deleteErr);
+      }
     }
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, School, Test, Teacher } from "@/lib/supabase";
+import { showToast } from "@/lib/toast";
 
 type RescheduleReq = {
   id: string;
@@ -135,18 +136,39 @@ export default function CalendarPage() {
     setSchools(sc ?? []);
     setTests(t ?? []);
     setTeachers((tch as Teacher[]) ?? []);
-    setRescheduleReqs((rr as unknown as RescheduleReq[]) ?? []);
-    setAssignments(
-      (a ?? []).map((x: any) => ({
-        id: x.id,
-        student_id: x.student_id,
-        test_id: x.test_id,
-        session_id: x.session_id,
-        scheduled_date: x.scheduled_date,
-        url_token: x.test_sessions?.url_token ?? null,
-        test_title: x.tests?.title ?? "（不明）",
-        completed_at: x.completed_at ?? null,
+    setRescheduleReqs(
+      (rr ?? []).map((x) => ({
+        id: x.id as string,
+        lesson_id: x.lesson_id as string,
+        parent_id: (x.parent_id ?? null) as string | null,
+        student_id: x.student_id as string,
+        proposed_at: x.proposed_at as string,
+        reason: (x.reason ?? null) as string | null,
+        parents: Array.isArray(x.parents)
+          ? (x.parents[0] as { name: string; email: string } | undefined) ?? null
+          : (x.parents as { name: string; email: string } | null) ?? null,
       }))
+    );
+    type RawAssignment = {
+      id: string; student_id: string; test_id: string; session_id: string | null;
+      scheduled_date: string; completed_at: string | null;
+      test_sessions: { url_token: string; completed_at: string } | null;
+      tests: { title: string } | null;
+    };
+    setAssignments(
+      (a ?? []).map((x) => {
+        const raw = x as RawAssignment;
+        return {
+          id: raw.id,
+          student_id: raw.student_id,
+          test_id: raw.test_id,
+          session_id: raw.session_id,
+          scheduled_date: raw.scheduled_date,
+          url_token: raw.test_sessions?.url_token ?? null,
+          test_title: raw.tests?.title ?? "（不明）",
+          completed_at: raw.completed_at ?? null,
+        };
+      })
     );
     setLessons((ls as LessonRow[]) ?? []);
     setLoading(false);
@@ -277,7 +299,7 @@ export default function CalendarPage() {
     setRescheduleBusy(true);
     try {
       const { error: updateError } = await supabase.from("lessons").update({ status: "rescheduled" }).eq("id", editingLesson.id);
-      if (updateError) { alert("更新エラー: " + updateError.message); return; }
+      if (updateError) { showToast("更新エラー: " + updateError.message, "error"); return; }
 
       const { error: insertError } = await supabase.from("lessons").insert({
         student_id: editingLesson.student_id,
@@ -288,7 +310,7 @@ export default function CalendarPage() {
         scheduled_at: new Date(rescheduleAt).toISOString(),
         status: "scheduled",
       });
-      if (insertError) { alert("振替授業の作成エラー: " + insertError.message); return; }
+      if (insertError) { showToast("振替授業の作成エラー: " + insertError.message, "error"); return; }
 
       setEditingLesson(null);
       fetchData();
@@ -314,6 +336,8 @@ export default function CalendarPage() {
     setLessonBusy(false);
     if (error) { setLessonError(error.message); return; }
     setEditingLesson(null);
+    setLessonForm({ teacher_id: "", subject: "", scheduled_at: "", duration_minutes: 60, location: "", status: "scheduled", notes: "" });
+    setLessonError("");
     fetchData();
   };
 
@@ -332,15 +356,14 @@ export default function CalendarPage() {
     if (!modal || !selectedTestId) return;
     setAssigning(true);
     try {
-      const token =
-        Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+      const token = crypto.randomUUID().replace(/-/g, "");
       const { data: session, error } = await supabase
         .from("test_sessions")
         .insert({ test_id: selectedTestId, url_token: token })
         .select()
         .single();
 
-      if (error || !session) { alert("エラー: " + error?.message); return; }
+      if (error || !session) { showToast("エラー: " + (error?.message ?? "不明なエラー"), "error"); return; }
 
       const { error: assignError } = await supabase.from("student_test_assignments").insert({
         student_id: modal.student.id,
@@ -348,7 +371,7 @@ export default function CalendarPage() {
         session_id: session.id,
         scheduled_date: dateKey(modal.date),
       });
-      if (assignError) { alert("割当エラー: " + assignError.message); return; }
+      if (assignError) { showToast("割当エラー: " + assignError.message, "error"); return; }
 
       setGeneratedUrl(`${window.location.origin}/test/${token}`);
       fetchData();

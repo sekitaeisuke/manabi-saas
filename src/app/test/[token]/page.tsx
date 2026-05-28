@@ -1,4 +1,5 @@
 "use client";
+import { showToast } from "@/lib/toast";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
@@ -108,13 +109,13 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "不明なエラー" }));
-        alert(`提出に失敗しました: ${err.error ?? res.statusText}`);
+        showToast(`提出に失敗しました: ${err.error ?? res.statusText}`, "error");
         setPhase("qc");
         return;
       }
       setPhase("submitted");
     } catch {
-      alert("ネットワークエラーが発生しました。もう一度お試しください。");
+      showToast("ネットワークエラーが発生しました", "error");
       setPhase("qc");
     }
   };

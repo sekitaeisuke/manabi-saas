@@ -1,4 +1,5 @@
 "use client";
+import { sanitizeHtml } from "@/lib/sanitize";
 
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
@@ -105,7 +106,7 @@ export default function ParentDiagnosisPage() {
 
           {selected.report_html ? (
             <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-              <div id="q-html" dangerouslySetInnerHTML={{ __html: selected.report_html }} />
+              <div id="q-html" dangerouslySetInnerHTML={{ __html: sanitizeHtml(selected.report_html) }} />
             </div>
           ) : (
             <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-400">

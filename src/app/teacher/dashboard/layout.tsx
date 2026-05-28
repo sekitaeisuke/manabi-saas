@@ -7,7 +7,7 @@ import { Logo } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 
 type BadgeKey = "pending" | "unread" | "resched";
-type NavItem = { href: string; label: string; icon: React.ReactNode; badge?: BadgeKey };
+type NavItem = { href: string; label: string; icon: React.ReactNode; badge?: BadgeKey; adminOnly?: boolean };
 
 const NAV: NavItem[] = [
   { href: "/teacher/dashboard", label: "ダッシュボード", icon: (
@@ -40,6 +40,16 @@ const NAV: NavItem[] = [
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
     </svg>
   )},
+  { href: "/teacher/dashboard/shifts", label: "シフト希望", icon: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  )},
+  { href: "/teacher/dashboard/shifts/admin", label: "シフト管理", adminOnly: true, icon: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+    </svg>
+  )},
   { href: "/teacher/dashboard/calendar", label: "来塾カレンダー", badge: "resched", icon: (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -63,6 +73,11 @@ const NAV: NavItem[] = [
   { href: "/teacher/dashboard/attendance", label: "出退勤", icon: (
     <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )},
+  { href: "/teacher/dashboard/attendance/admin", label: "出勤怠集計", adminOnly: true, icon: (
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 11h.01M12 11h.01M15 11h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
     </svg>
   )},
   { href: "/teacher/dashboard/face-enrollment", label: "顔登録", icon: (
@@ -159,7 +174,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isActive = (href: string) =>
     href === "/teacher/dashboard" ? pathname === href : pathname.startsWith(href);
 
-  const Sidebar = ({ pending, unread, resched }: { pending: number; unread: number; resched: number }) => (
+  const Sidebar = ({ pending, unread, resched, role }: { pending: number; unread: number; resched: number; role: string }) => (
     <aside className="flex h-full flex-col bg-white">
       {/* ロゴ */}
       <div className="flex h-16 items-center border-b border-slate-100 px-5">
@@ -171,7 +186,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ナビゲーション */}
       <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
         <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">メニュー</p>
-        {NAV.map((item) => {
+        {NAV.filter((item) => !item.adminOnly || role === "admin").map((item) => {
           const active = isActive(item.href);
           const badgeMap: Record<BadgeKey, number> = { pending, unread, resched };
           const badge = item.badge ? badgeMap[item.badge] : 0;
@@ -224,7 +239,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen bg-slate-50">
       {/* PC サイドバー */}
       <div className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-slate-200 shadow-sm lg:block">
-        <Sidebar pending={pendingCount} unread={unreadMessages} resched={pendingReschedules} />
+        <Sidebar pending={pendingCount} unread={unreadMessages} resched={pendingReschedules} role={userRole} />
       </div>
 
       {/* モバイル オーバーレイ */}
@@ -232,7 +247,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-60">
-            <Sidebar pending={pendingCount} unread={unreadMessages} resched={pendingReschedules} />
+            <Sidebar pending={pendingCount} unread={unreadMessages} resched={pendingReschedules} role={userRole} />
           </div>
         </div>
       )}

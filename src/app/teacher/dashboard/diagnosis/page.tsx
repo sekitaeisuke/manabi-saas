@@ -1,4 +1,6 @@
 ﻿"use client";
+import { sanitizeHtml } from "@/lib/sanitize";
+import { showToast } from "@/lib/toast";
 
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
@@ -1113,7 +1115,7 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
 
   const approve = async () => {
     await save("approved");
-    alert("承認しました。");
+    showToast("承認しました", "success");
   };
 
   return (
@@ -1270,7 +1272,7 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
                 #diagnosis-report { font-size: 10pt; }
               }
             `}</style>
-            <div id="diagnosis-report" dangerouslySetInnerHTML={{ __html: reportHtml }} />
+            <div id="diagnosis-report" dangerouslySetInnerHTML={{ __html: sanitizeHtml(reportHtml) }} />
           </div>
         )}
 

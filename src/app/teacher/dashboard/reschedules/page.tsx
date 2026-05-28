@@ -1,4 +1,5 @@
 "use client";
+import { showToast } from "@/lib/toast";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
@@ -104,7 +105,7 @@ export default function ReschedulesPage() {
       responded_at: nowIso,
     }).eq("id", r.id);
 
-    if (e1) { alert(`承認失敗: ${e1.message}`); setBusy(null); return; }
+    if (e1) { showToast(`承認失敗: ${e1.message}`, "error"); setBusy(null); return; }
 
     const { error: e2 } = await supabase.from("lessons").update({
       scheduled_at: r.proposed_at,
@@ -112,7 +113,7 @@ export default function ReschedulesPage() {
     }).eq("id", r.lesson_id);
 
     if (e2) {
-      alert(`授業の更新に失敗: ${e2.message}（リクエスト状態は承認済みのまま）`);
+      showToast(`授業の更新に失敗: ${e2.message}`, "error");
     }
 
     await notifyParent(r, "approved", response);
@@ -132,7 +133,7 @@ export default function ReschedulesPage() {
       teacher_response: response || null,
       responded_at: new Date().toISOString(),
     }).eq("id", r.id);
-    if (error) { alert(`返答失敗: ${error.message}`); setBusy(null); return; }
+    if (error) { showToast(`返答失敗: ${error.message}`, "error"); setBusy(null); return; }
     await notifyParent(r, "rejected", response);
     setBusy(null);
     load();

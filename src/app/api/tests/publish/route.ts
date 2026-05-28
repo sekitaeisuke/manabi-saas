@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const token = crypto.randomUUID().replace(/-/g, "");
 
   const { data, error } = await supabase
     .from("test_sessions")
@@ -18,7 +18,12 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await supabase.from("tests").update({ status: "published" }).eq("id", test_id);
+  const { error: updateErr } = await supabase
+    .from("tests").update({ status: "published" }).eq("id", test_id);
+  if (updateErr) {
+    console.error("tests status update failed:", updateErr);
+    return NextResponse.json({ error: "テストの公開状態更新に失敗しました: " + updateErr.message }, { status: 500 });
+  }
 
   return NextResponse.json({ token: data.url_token });
 }

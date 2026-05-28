@@ -130,7 +130,10 @@ function ReschedulePageInner() {
         <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-slate-950">新規申請</h2>
           {lessons.length === 0 ? (
-            <p className="text-sm text-slate-500">振替可能な授業がありません。</p>
+            <div className="rounded-2xl bg-slate-50 px-5 py-6 text-center text-sm text-slate-500">
+              <p className="font-medium">振替可能な授業がありません。</p>
+              <p className="mt-1">授業が登録されると、ここから振替申請できます。</p>
+            </div>
           ) : (
             <div className="grid gap-4">
               <label className="block text-sm text-slate-700">

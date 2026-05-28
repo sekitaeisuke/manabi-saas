@@ -1,4 +1,5 @@
 "use client";
+import { showToast } from "@/lib/toast";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
@@ -47,23 +48,27 @@ export default function ParentMessagesPage() {
     if (!p) { setLoading(false); return; }
     setParent(p);
 
-    let q = supabase
+    // メッセージと教師リストを並列取得
+    let msgQuery = supabase
       .from("parent_messages")
       .select("*")
       .eq("parent_id", p.id)
       .order("created_at", { ascending: true });
-    if (selectedStudentId) q = q.eq("student_id", selectedStudentId);
+    if (selectedStudentId) msgQuery = msgQuery.eq("student_id", selectedStudentId);
 
-    const { data: msgs } = await q;
-    setMessages((msgs as Message[]) ?? []);
-
-    let teacherQuery = supabase.from("teachers").select("*");
+    // 生徒のschool_idが必要な場合のみ先に取得、それ以外は並列
+    let schoolId: string | null = null;
     if (selectedStudentId) {
       const { data: stu } = await supabase
         .from("students").select("school_id").eq("id", selectedStudentId).maybeSingle();
-      if (stu?.school_id) teacherQuery = teacherQuery.eq("school_id", stu.school_id);
+      schoolId = stu?.school_id ?? null;
     }
-    const { data: ts } = await teacherQuery.order("name");
+
+    let teacherQuery = supabase.from("teachers").select("*");
+    if (schoolId) teacherQuery = teacherQuery.eq("school_id", schoolId);
+
+    const [{ data: msgs }, { data: ts }] = await Promise.all([msgQuery, teacherQuery.order("name")]);
+    setMessages((msgs as Message[]) ?? []);
     setTeachers((ts as Teacher[]) ?? []);
 
     setLoading(false);
@@ -137,7 +142,7 @@ export default function ParentMessagesPage() {
       setReply("");
       loadAll();
     } else {
-      alert(`送信に失敗しました: ${error.message}`);
+      showToast(`送信に失敗しました: ${error.message}`, "error");
     }
   };
 
@@ -174,7 +179,7 @@ export default function ParentMessagesPage() {
       setActiveThread(threadId);
       loadAll();
     } else {
-      alert(`送信に失敗しました: ${error.message}`);
+      showToast(`送信に失敗しました: ${error.message}`, "error");
     }
   };
 

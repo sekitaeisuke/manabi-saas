@@ -1,4 +1,5 @@
 "use client";
+import { showToast } from "@/lib/toast";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
@@ -176,7 +177,7 @@ export default function MessagesPage() {
       parent_read: false,
     });
     setSending(false);
-    if (error) { alert(`送信失敗: ${error.message}`); return; }
+    if (error) { showToast(`送信失敗: ${error.message}`, "error"); return; }
     if (first.parent_id) {
       notify({
         actor_kind: "parent",
@@ -232,7 +233,7 @@ export default function MessagesPage() {
       student_read: false,
     });
     setStudentReplyBusy(false);
-    if (error) { alert(`送信失敗: ${error.message}`); return; }
+    if (error) { showToast(`送信失敗: ${error.message}`, "error"); return; }
     if (first.student_id) {
       notify({
         actor_kind: "student",
@@ -275,7 +276,7 @@ export default function MessagesPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ announcement_id: inserted.id }),
         keepalive: true,
-      }).catch(() => {});
+      }).catch((e) => { console.warn("通知送信失敗（ベストエフォート）:", e); });
     }
 
     setForm({ title: "", content: "", target_grade: "", target_school_id: "" });
@@ -342,7 +343,7 @@ export default function MessagesPage() {
       parent_read: false,
     });
     setSending(false);
-    if (error) { alert(`送信失敗: ${error.message}`); return; }
+    if (error) { showToast(`送信失敗: ${error.message}`, "error"); return; }
     notify({
       actor_kind: "parent",
       actor_id: newForm.parent_id,

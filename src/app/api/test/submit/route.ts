@@ -26,7 +26,10 @@ async function callClaude(prompt: string, maxTokens = 1500): Promise<string> {
       messages: [{ role: "user", content: prompt }],
     }),
   });
-  if (!res.ok) return "";
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "(読み取り不可)");
+    throw new Error(`Claude API ${res.status}: ${errText}`);
+  }
   const data = await res.json();
   return data.content?.[0]?.text ?? "";
 }
@@ -130,13 +133,15 @@ ${analysisSection}
       const match = text.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
-        // 記述式の採点結果を反映
+        const grades: unknown[] = Array.isArray(parsed.grades) ? parsed.grades : [];
+        // 記述式の採点結果を反映（ClaudeのgradesがshortAnswerQsと同サイズとは限らないため境界チェック）
         shortAnswerQs.forEach((q, i) => {
-          gradedMap[q.id] = parsed.grades?.[i] ?? false;
+          gradedMap[q.id] = i < grades.length ? Boolean(grades[i]) : false;
         });
         ai_analysis = parsed.analysis ?? "";
       }
-    } catch {
+    } catch (err) {
+      console.error("Claude採点エラー（正規化フォールバックで継続）:", err);
       // フォールバック：正規化比較
       shortAnswerQs.forEach((q) => {
         const a = answers.find((a) => a.question_id === q.id);
@@ -145,14 +150,10 @@ ${analysisSection}
           : false;
       });
     }
-  } else {
-    // 全問選択式で全問正解の場合
-    ai_analysis = "【全問正解】\nすべての問題を正解しました。非常に優秀な結果です！";
   }
 
-  // 全問正解の場合のメッセージ
-  const allCorrect = Object.values(gradedMap).every((v) => v === true);
-  if (allCorrect && !ai_analysis) {
+  // 全問正解の場合のメッセージ（AI分析が得られなかった場合のフォールバック）
+  if (!ai_analysis && Object.values(gradedMap).every((v) => v === true)) {
     ai_analysis = "【全問正解】\nすべての問題を正解しました。非常に優秀な結果です！";
   }
 
@@ -165,6 +166,20 @@ ${analysisSection}
   const student_id = assignment?.student_id ?? null;
 
   // ── Step4: 採点結果を確定してDB保存 ──────────────────
+  // 重複送信チェック（同一session_idで既に回答が存在する場合は既存結果を返す）
+  const { data: existingResult } = await supabase
+    .from("results")
+    .select("score, total, percentage")
+    .eq("session_id", session_id)
+    .maybeSingle();
+  if (existingResult) {
+    return NextResponse.json({
+      score: existingResult.score,
+      total: existingResult.total,
+      percentage: existingResult.percentage,
+    });
+  }
+
   const gradedAnswers = answers.map((a) => ({
     question_id: a.question_id,
     answer: a.answer,
@@ -212,7 +227,7 @@ ${analysisSection}
       ai_analysis,
       status: "pending",
     });
-    if (qrErr) console.error("questionnaire_responses insert:", qrErr);
+    if (qrErr) console.error("questionnaire_responses insert（非致命的）:", qrErr);
   }
 
   return NextResponse.json({ score, total, percentage });

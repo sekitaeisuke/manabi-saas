@@ -147,14 +147,20 @@ HTMLを含むJSON形式で返してください:
   const match = content.match(/\{[\s\S]*\}/);
   if (!match) return NextResponse.json({ error: "分析に失敗しました" }, { status: 500 });
 
-  const result = JSON.parse(match[0]);
+  let result: Record<string, unknown>;
+  try {
+    result = JSON.parse(match[0]);
+  } catch (parseErr) {
+    console.error("analyze JSON.parse failed:", parseErr, "raw:", match[0].slice(0, 200));
+    return NextResponse.json({ error: "分析結果のパースに失敗しました" }, { status: 500 });
+  }
   // Strip code fences from reportHtml if Claude wrapped it
   if (typeof result.reportHtml === "string") {
-    result.reportHtml = result.reportHtml.trim();
-    if (result.reportHtml.startsWith("```html")) result.reportHtml = result.reportHtml.slice(7);
-    else if (result.reportHtml.startsWith("```")) result.reportHtml = result.reportHtml.slice(3);
-    if (result.reportHtml.endsWith("```")) result.reportHtml = result.reportHtml.slice(0, -3);
-    result.reportHtml = result.reportHtml.trim();
+    let html = result.reportHtml.trim();
+    if (html.startsWith("```html")) html = html.slice(7);
+    else if (html.startsWith("```")) html = html.slice(3);
+    if (html.endsWith("```")) html = html.slice(0, -3);
+    result.reportHtml = html.trim();
   }
   return NextResponse.json({ ...result, byDifficulty, scored });
 }

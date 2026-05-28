@@ -1,9 +1,11 @@
 "use client";
+import { sanitizeHtml } from "@/lib/sanitize";
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Test, Student } from "@/lib/supabase";
+import { showToast } from "@/lib/toast";
 import {
   CURRICULUM, GRADE_ORDER, SUBJECT_LIST,
   getAdjacentGrades, getUnitsForGrade,
@@ -25,11 +27,16 @@ type GeneratedQuestion = {
   points: number;
 };
 
+type ScoredAnswer = { isCorrect: boolean; points: number };
+type DifficultyStats = { earned: number; total: number; wrong: string[] };
+
 type AnalysisResult = {
   reportHtml: string;
   score: number;
   total: number;
   rate: number;
+  scored?: ScoredAnswer[];
+  byDifficulty?: Record<string, DifficultyStats>;
 };
 
 // ─── メインページ ─────────────────────────────────────
@@ -324,7 +331,7 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                         <div className="mt-2 flex items-center gap-2 pl-6">
                                           <input readOnly value={url}
                                             className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600" />
-                                          <button onClick={() => { navigator.clipboard.writeText(url); alert("URLをコピーしました"); }}
+                                          <button onClick={() => { navigator.clipboard.writeText(url); showToast("URLをコピーしました", "success"); }}
                                             className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 whitespace-nowrap">
                                             コピー
                                           </button>
@@ -464,8 +471,8 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   };
 
   const generate = async (step: "chatgpt" | "gemini" | "claude") => {
-    if (selectedUnits.length === 0) { alert("単元を1つ以上選択してください"); return; }
-    if (difficulties.length === 0) { alert("難易度を1つ以上選択してください"); return; }
+    if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
+    if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
     setGenerating(true);
     setErrorMsg("");
     try {
@@ -519,24 +526,24 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         body: JSON.stringify({ testType, title, subject, grade, questions, answers, studentName }),
       });
       const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      if (data.error) { showToast(data.error, "error"); return; }
       setAnalysis(data);
       setPhase("report");
     } catch {
-      alert("分析に失敗しました");
+      showToast("分析に失敗しました", "error");
     }
     setAnalyzing(false);
   };
 
   const saveTest = async () => {
-    if (!title || questions.length === 0) { alert("テスト名と問題が必要です"); return; }
+    if (!title || questions.length === 0) { showToast("テスト名と問題が必要です", "info"); return; }
     setSaving(true);
     const { data: test, error } = await supabase
       .from("tests")
       .insert({ title, subject, grade, difficulty: difficulties.join(","), status: "draft", type: testType })
       .select()
       .single();
-    if (error || !test) { alert("保存に失敗しました"); setSaving(false); return; }
+    if (error || !test) { showToast("保存に失敗しました", "error"); setSaving(false); return; }
     const { error: qErr } = await supabase.from("questions").insert(
       questions.map((q, i) => ({
         test_id: test.id,
@@ -548,7 +555,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         points: q.points ?? 1,
       }))
     );
-    if (qErr) { alert("問題の保存に失敗しました: " + qErr.message); setSaving(false); return; }
+    if (qErr) { showToast("問題の保存に失敗しました: " + qErr.message, "error"); setSaving(false); return; }
     setSaving(false);
     onSaved();
   };
@@ -568,7 +575,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       status: "draft",
     });
     setSaving(false);
-    if (error) { alert("報告書の保存に失敗しました: " + error.message); return; }
+    if (error) { showToast("報告書の保存に失敗しました: " + error.message, "error"); return; }
     setReportSaved(true);
   };
 
@@ -635,7 +642,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             #test-body td, #test-body th { border: 1px solid #cbd5e1; padding: 6px 10px; }
             #test-body th { background: #f8fafc; font-weight: bold; }
           `}</style>
-          <div dangerouslySetInnerHTML={{ __html: generatedHtml }} />
+          <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(generatedHtml) }} />
         </div>
       </div>
     );
@@ -735,10 +742,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               <button
                 onClick={() => {
                   const wrongQuestions = questions
-                    .map((q, i) => ({ q, scored: (analysis as unknown as { scored: { isCorrect: boolean }[] }).scored?.[i] }))
+                    .map((q, i) => ({ q, scored: analysis.scored?.[i] }))
                     .filter((x) => x.scored && !x.scored.isCorrect)
                     .map((x) => x.q.text.slice(0, 40));
-                  const byDiff = (analysis as unknown as { byDifficulty: Record<string, { earned: number; total: number }> }).byDifficulty ?? {};
+                  const byDiff = analysis.byDifficulty ?? {};
                   sessionStorage.setItem("diagnosisTestData", JSON.stringify({
                     score: analysis.score,
                     total: analysis.total,
@@ -774,7 +781,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             .report-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
             .report-body td, .report-body th { border: 1px solid #e2e8f0; padding: 6px 10px; }
           `}</style>
-          <div className="report-body" dangerouslySetInnerHTML={{ __html: analysis.reportHtml }} />
+          <div className="report-body" dangerouslySetInnerHTML={{ __html: sanitizeHtml(analysis.reportHtml) }} />
         </div>
       </div>
     );

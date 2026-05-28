@@ -155,10 +155,11 @@ export async function POST(req: NextRequest) {
         const msg = e instanceof Error ? e.message : String(e);
         // 410 Gone / 404 Not Found → subscription 失効。preferences をクリア。
         if (statusCode === 410 || statusCode === 404) {
-          await supabase.from("notification_preferences")
+          const { error: cleanupErr } = await supabase.from("notification_preferences")
             .update({ push_enabled: false, push_endpoint: null })
             .eq("actor_kind", payload.actor_kind)
             .eq("actor_id", payload.actor_id);
+          if (cleanupErr) console.error("push subscription cleanup failed:", cleanupErr);
           await log("push", "failed", pref.push_endpoint, `subscription expired (${statusCode})`);
           results.push = { status: "failed", error: `expired (${statusCode})` };
         } else {
@@ -171,15 +172,38 @@ export async function POST(req: NextRequest) {
     results.push = { status: "disabled" };
   }
 
-  // LINE（未実装）
+  // LINE Messaging API
   if (pref.line_enabled) {
     if (!pref.line_user_id) {
       await log("line", "skipped", null, "line_user_id 未登録");
       results.line = { status: "skipped", error: "no line user id" };
     } else {
-      // TODO: LINE Messaging API を使って実装
-      await log("line", "skipped", pref.line_user_id, "LINE 連携 未実装");
-      results.line = { status: "stub" };
+      const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+      if (!lineToken) {
+        await log("line", "skipped", pref.line_user_id, "LINE_CHANNEL_ACCESS_TOKEN 未設定");
+        results.line = { status: "skipped", error: "LINE_CHANNEL_ACCESS_TOKEN 未設定" };
+      } else {
+        const lineText = `${payload.subject}\n\n${payload.body_text}${payload.link ? `\n\n${payload.link}` : ""}`;
+        const lineRes = await fetch("https://api.line.me/v2/bot/message/push", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${lineToken}`,
+          },
+          body: JSON.stringify({
+            to: pref.line_user_id,
+            messages: [{ type: "text", text: lineText }],
+          }),
+        });
+        if (lineRes.ok) {
+          await log("line", "sent", pref.line_user_id, null);
+          results.line = { status: "sent" };
+        } else {
+          const errText = await lineRes.text().catch(() => "(読み取り不可)");
+          await log("line", "failed", pref.line_user_id, `LINE API ${lineRes.status}: ${errText}`);
+          results.line = { status: "failed", error: errText };
+        }
+      }
     }
   } else {
     results.line = { status: "disabled" };

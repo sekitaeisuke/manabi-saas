@@ -1,4 +1,6 @@
 "use client";
+import { sanitizeHtml } from "@/lib/sanitize";
+import { showToast } from "@/lib/toast";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
@@ -329,7 +331,7 @@ function KarteDetail({ plan, onBack, onUpdated }: {
               #learning-plan h2 { page-break-after: avoid; }
             }
           `}</style>
-          <div id="learning-plan" dangerouslySetInnerHTML={{ __html: plan.plan_html }} />
+          <div id="learning-plan" dangerouslySetInnerHTML={{ __html: sanitizeHtml(plan.plan_html) }} />
         </div>
       </div>
     </div>
@@ -397,7 +399,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
   };
 
   const generate = async () => {
-    if (!studentName) { alert("生徒名を入力してください"); return; }
+    if (!studentName) { showToast("生徒名を入力してください", "info"); return; }
     setGenStep(1);
     setGenError("");
     setPlanHtml("");
@@ -622,7 +624,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                       #karte-preview td, #karte-preview th { border:1px solid #e5e7eb; padding:5px 8px; }
                       #karte-preview th { background:#f5f3ff; font-weight:700; color:#3730a3; }
                     `}</style>
-                    <div id="karte-preview" dangerouslySetInnerHTML={{ __html: planHtml }} />
+                    <div id="karte-preview" dangerouslySetInnerHTML={{ __html: sanitizeHtml(planHtml) }} />
                   </div>
                   <div className="mt-3 flex gap-2">
                     <button onClick={generate} disabled={genStep >= 1 && genStep <= 3}
@@ -681,7 +683,7 @@ function TextbookManager({ onBack }: { onBack: () => void }) {
       publisher: publisher || null, description: description || null, type,
     });
     setSaving(false);
-    if (error) { alert("追加に失敗しました: " + error.message); return; }
+    if (error) { showToast("追加に失敗しました: " + error.message, "error"); return; }
     setName(""); setPublisher(""); setDescription(""); setShowForm(false);
     fetchTextbooks();
   };
