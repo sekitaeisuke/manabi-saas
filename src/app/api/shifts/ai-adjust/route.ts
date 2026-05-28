@@ -14,7 +14,7 @@ async function callClaude(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: "あなたはJSONのみを返すAPIです。説明文・前置き・コードブロック・マークダウンは一切含めず、純粋なJSONオブジェクト { ... } のみを返してください。",
       messages: [{ role: "user", content: prompt }],
     }),
@@ -108,50 +108,30 @@ export async function POST(req: NextRequest) {
   }).join("\n\n");
 
   const prompt = `あなたは学習塾のシフト管理の専門家です。
-以下の情報をもとに、最適なシフト表を作成してください。
+講師の希望に基づき、配置するシフトのみをJSONで出力してください。
 
-【シフト期間】
-期間名: ${period.label}
-対象日: ${period.start_date} 〜 ${period.end_date}
-配置モード: ${modeLabel}
+【配置モード】${modeLabel}
 
 【教室一覧】
 ${schoolLines || "（教室情報なし）"}
 
-【講師の希望一覧】
+【講師の希望一覧（○可・◎優先のスロットのみ配置対象）】
 ${teacherLines || "（希望提出なし）"}
 
 【配置ルール】
-- "◎優先希望"を最大限優先してください
-- "×不可"は絶対に配置しないでください
-- "○可"は必要に応じて配置してください
-- 同一講師を同日同時刻に複数教室に配置しないでください
+- ◎優先希望を最優先で配置
+- ×不可には絶対に配置しない
+- 同一講師を同日同時刻に複数配置しない
 ${period.assignment_mode === "dedicated"
-  ? "- 専属型: 各講師は自分の所属教室のみに配置してください"
-  : "- 縦断型: 同グループ内の複数教室をまたいで配置して構いません"
+  ? "- 各講師は自分の所属教室のみに配置"
+  : "- 同グループ内の複数教室をまたいで配置可"
 }
+${custom_prompt?.trim() ? `- 追加指示: ${custom_prompt.trim()}` : ""}
 
-【管理者からの追加指示】
-${custom_prompt?.trim() || "なし"}
+注意: shiftsには実際に配置するシフトのみ含める。空のスロットは含めない。
+summary・warnings・unassigned_slotsは簡潔に（50字以内）。
 
-以下のJSON形式のみで返してください（説明文・コードブロック不要）:
-{
-  "shifts": [
-    {
-      "date": "YYYY-MM-DD",
-      "slot_start": "HH:MM",
-      "slot_end": "HH:MM",
-      "school_id": "教室のUUID（教室一覧から選択）",
-      "school_name": "教室名",
-      "teacher_id": "講師のUUID",
-      "teacher_name": "講師名",
-      "note": "備考（任意）"
-    }
-  ],
-  "unassigned_slots": ["配置できなかったスロットの説明"],
-  "warnings": ["注意点・懸念事項"],
-  "summary": "シフト調整の概要（200字程度）"
-}`;
+{"shifts":[{"date":"YYYY-MM-DD","slot_start":"HH:MM","slot_end":"HH:MM","school_id":"UUID","school_name":"名前","teacher_id":"UUID","teacher_name":"名前","note":""}],"unassigned_slots":[],"warnings":[],"summary":""}`;
 
   let rawResponse = "";
   try {
