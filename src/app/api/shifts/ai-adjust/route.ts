@@ -13,8 +13,8 @@ async function callClaude(prompt: string): Promise<string> {
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8000,
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4000,
       system: "あなたはJSONのみを返すAPIです。説明文・前置き・コードブロック・マークダウンは一切含めず、純粋なJSONオブジェクト { ... } のみを返してください。",
       messages: [{ role: "user", content: prompt }],
     }),
