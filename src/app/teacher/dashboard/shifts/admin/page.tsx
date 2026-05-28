@@ -429,24 +429,32 @@ function AiStep({ onNext }: { onNext: () => void }) {
       });
   }, []);
 
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+
   const handleRun = async () => {
     if (!periodId) { showToast("期間を選択してください", "info"); return; }
     setRunning(true);
     setResult(null);
+    setErrorDetail(null);
     try {
       const res = await fetch("/api/shifts/ai-adjust", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period_id: periodId, custom_prompt: customPrompt }),
       });
-      const data = await res.json();
+      let data: Record<string, unknown> = {};
+      const text = await res.text();
+      try { data = JSON.parse(text); } catch { data = { error: `JSONパース失敗: ${text.slice(0, 300)}` }; }
       if (!res.ok || data.error) {
-        showToast("AI調整に失敗しました: " + (data.error ?? ""), "error");
+        const detail = [data.error, data.raw].filter(Boolean).join("\n---\n") as string;
+        setErrorDetail(detail);
+        showToast("AI調整に失敗しました", "error");
         return;
       }
-      setResult(data);
+      setResult(data as { shifts: AiShiftRow[]; warnings: string[]; summary: string });
       showToast("AIシフト案を生成しました", "success");
     } catch (err) {
+      setErrorDetail(String(err));
       showToast("通信エラー: " + String(err), "error");
     } finally {
       setRunning(false);
@@ -511,6 +519,13 @@ function AiStep({ onNext }: { onNext: () => void }) {
           </button>
         </div>
       </section>
+
+      {errorDetail && (
+        <section className="rounded-2xl border-2 border-red-200 bg-red-50 p-5">
+          <p className="mb-2 text-sm font-bold text-red-700">エラー詳細（このメッセージを共有してください）</p>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-white p-3 text-xs text-red-600">{errorDetail}</pre>
+        </section>
+      )}
 
       {result && (
         <section className="rounded-2xl bg-white p-6 shadow-sm">
