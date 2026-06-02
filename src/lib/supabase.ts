@@ -19,7 +19,7 @@ export type Test = {
 export type Question = {
   id: string;
   test_id: string;
-  type: "multiple-choice" | "short-answer";
+  type: "multiple-choice" | "short-answer" | "multi-select";
   text: string;
   options: string[] | null;
   correct_answer: string | null;

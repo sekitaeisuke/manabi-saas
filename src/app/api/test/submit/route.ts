@@ -66,8 +66,17 @@ export async function POST(req: NextRequest) {
   for (const q of questions) {
     const a = answers.find((a) => a.question_id === q.id);
     if (!a) { gradedMap[q.id] = null; continue; }
-    if (q.type === "multiple-choice" && q.correct_answer) {
-      gradedMap[q.id] = normalize(a.answer) === normalize(q.correct_answer);
+    if ((q.type === "multiple-choice" || q.type === "multi-select") && q.correct_answer) {
+      if (q.correct_answer.includes(",")) {
+        // 複数選択：順序を無視して集合比較
+        const correctSet = new Set(q.correct_answer.split(",").map((s) => normalize(s.trim())));
+        const answerSet  = new Set((a.answer || "").split(",").map((s) => normalize(s.trim())));
+        gradedMap[q.id] =
+          correctSet.size === answerSet.size &&
+          [...correctSet].every((c) => answerSet.has(c));
+      } else {
+        gradedMap[q.id] = normalize(a.answer) === normalize(q.correct_answer);
+      }
     } else {
       gradedMap[q.id] = null; // 記述式はAI採点待ち
     }
