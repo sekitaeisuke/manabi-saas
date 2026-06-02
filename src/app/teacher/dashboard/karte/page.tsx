@@ -386,10 +386,16 @@ function SelectDiagnosisStep({
   onManual: () => void;
   onBack: () => void;
 }) {
+  const [search, setSearch] = useState("");
+
   const statusLabel = (s: DiagnosisResponse["status"]) =>
     s === "analyzed" ? "分析済" : "承認済";
   const statusColor = (s: DiagnosisResponse["status"]) =>
     s === "analyzed" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700";
+
+  const filtered = search.trim()
+    ? unlinked.filter((r) => r.student_name.includes(search.trim()))
+    : unlinked;
 
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-8">
@@ -408,6 +414,18 @@ function SelectDiagnosisStep({
             一覧に戻る
           </button>
         </div>
+
+        {!loading && unlinked.length > 0 && (
+          <div className="mb-4">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="生徒名で絞り込み..."
+              autoFocus
+              className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+            />
+          </div>
+        )}
 
         {loading ? (
           <div className="space-y-3">
@@ -431,9 +449,13 @@ function SelectDiagnosisStep({
               多層診断でAI分析・承認済みのテストがここに表示されます
             </p>
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-10 text-center text-slate-500">
+            <p className="font-semibold text-slate-700">「{search}」に一致する生徒がいません</p>
+          </div>
         ) : (
           <div className="space-y-3">
-            {unlinked.map((r) => {
+            {filtered.map((r) => {
               const initial = r.student_name.charAt(0);
               const bg = AVATAR_COLORS[(r.student_name.charCodeAt(0) ?? 0) % AVATAR_COLORS.length];
               return (
