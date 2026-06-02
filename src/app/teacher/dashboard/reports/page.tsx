@@ -182,6 +182,18 @@ function ReportDetailView({ report, onBack, onUpdated }: {
           </div>
         )}
 
+        {/* 送信済みの場合の案内 */}
+        {status === "sent" && (
+          <div className="no-print rounded-2xl border border-green-200 bg-green-50 px-5 py-3 flex items-start gap-3">
+            <span className="text-green-500 text-lg shrink-0">✅</span>
+            <div className="text-sm text-green-800">
+              <p className="font-semibold">この報告書は送信済みです（保護者に届いています）</p>
+              <p className="mt-0.5 text-xs">「お子様へのメッセージ」や「講師コメント」を追加・編集して
+              <strong>「保存する」</strong>を押すと、保護者の画面にすぐ反映されます。</p>
+            </div>
+          </div>
+        )}
+
         <div className="no-print rounded-3xl border-2 border-yellow-300 bg-yellow-50 p-6 shadow-sm">
           <div className="mb-3 flex items-center gap-2">
             <span className="text-xl">⭐</span>
@@ -211,22 +223,33 @@ function ReportDetailView({ report, onBack, onUpdated }: {
             placeholder="例：今回の授業で特に頑張っていた点、次回に向けた具体的なアドバイス..."
             className="w-full rounded-2xl border border-indigo-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400"
           />
-          <div className="mt-4 flex flex-wrap justify-end gap-3">
-            <button onClick={() => save()} disabled={saving}
-              className="rounded-xl border border-slate-300 bg-white px-5 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40">
-              {saving ? "保存中..." : "コメントを保存"}
-            </button>
-            {status !== "sent" && (
-              <button onClick={() => save("sent")} disabled={saving || !report.report_html}
-                className="rounded-xl bg-green-600 px-6 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">
-                {saving ? "処理中..." : "✓ 送信完了にする"}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            {/* 下書きに戻す */}
+            {status === "sent" && (
+              <button onClick={() => save("draft")} disabled={saving}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs text-slate-400 hover:bg-slate-50 disabled:opacity-40 transition">
+                下書きに戻す
               </button>
             )}
-            {status === "sent" && (
-              <span className="rounded-xl bg-green-100 px-5 py-2 text-sm font-semibold text-green-700">
-                送信済み
-              </span>
-            )}
+            <div className="flex flex-wrap gap-3 ml-auto">
+              {status === "sent" ? (
+                <button onClick={() => save()} disabled={saving}
+                  className="rounded-xl bg-green-600 px-6 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40 transition">
+                  {saving ? "保存中..." : "保存する（保護者に即反映）"}
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => save()} disabled={saving}
+                    className="rounded-xl border border-slate-300 bg-white px-5 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+                    {saving ? "保存中..." : "コメントを保存"}
+                  </button>
+                  <button onClick={() => save("sent")} disabled={saving || !report.report_html}
+                    className="rounded-xl bg-green-600 px-6 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">
+                    {saving ? "処理中..." : "✓ 送信完了にする"}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
