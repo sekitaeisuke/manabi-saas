@@ -164,20 +164,44 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [publishedUrls, setPublishedUrls] = useState<Record<string, string>>({});
   const [sessionTokens, setSessionTokens] = useState<Record<string, string>>({});
+  // test_id → { token, session_id }
+  const [sessionData, setSessionData] = useState<Record<string, { token: string; session_id: string }>>({});
+  // 割り当て済み一覧
+  const [assignments, setAssignments] = useState<{ id: string; test_session_id: string; student_id: string; student_name: string }[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [startModal, setStartModal] = useState<Test | null>(null);
   const [selectedStudent, setSelectedStudent] = useState("");
   const [starting, setStarting] = useState(false);
+  const [assignSuccess, setAssignSuccess] = useState<{ studentName: string; token: string } | null>(null);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [openSubfolders, setOpenSubfolders] = useState<Set<string>>(new Set());
 
+  const loadSessionsAndAssignments = async () => {
+    const [{ data: sessions }, { data: assigns }] = await Promise.all([
+      supabase.from("test_sessions").select("id, test_id, url_token"),
+      supabase.from("test_assignments").select("id, test_session_id, student_id, students(name)"),
+    ]);
+    const sMap: Record<string, { token: string; session_id: string }> = {};
+    (sessions ?? []).forEach((s: { id: string; test_id: string; url_token: string }) => {
+      sMap[s.test_id] = { token: s.url_token, session_id: s.id };
+    });
+    setSessionData(sMap);
+    const tokenMap: Record<string, string> = {};
+    Object.entries(sMap).forEach(([k, v]) => { tokenMap[k] = v.token; });
+    setSessionTokens(tokenMap);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setAssignments((assigns ?? []).map((a: any) => ({
+      id: a.id,
+      test_session_id: a.test_session_id,
+      student_id: a.student_id,
+      student_name: Array.isArray(a.students) ? (a.students[0]?.name ?? "?") : (a.students?.name ?? "?"),
+    })));
+  };
+
   useEffect(() => {
     supabase.from("students").select("*").order("name").then(({ data }) => setStudents(data ?? []));
-    supabase.from("test_sessions").select("test_id, url_token").then(({ data }) => {
-      const map: Record<string, string> = {};
-      (data ?? []).forEach((s: { test_id: string; url_token: string }) => { map[s.test_id] = s.url_token; });
-      setSessionTokens(map);
-    });
+    loadSessionsAndAssignments();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 初回：全フォルダを開いた状態にする
@@ -215,12 +239,14 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
     setPublishing(null);
   };
 
-  const startTest = async () => {
+  const assignTest = async () => {
     if (!startModal || !selectedStudent) return;
     setStarting(true);
 
     // 1. セッション (token) を取得または作成
-    let token = sessionTokens[startModal.id];
+    let token = sessionData[startModal.id]?.token;
+    let sessionId = sessionData[startModal.id]?.session_id;
+
     if (!token) {
       const res = await fetch("/api/tests/publish", {
         method: "POST",
@@ -230,40 +256,52 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
       const data = await res.json();
       if (!data.token) { setStarting(false); return; }
       token = data.token as string;
+      const { data: sess } = await supabase
+        .from("test_sessions").select("id").eq("url_token", token).maybeSingle();
+      sessionId = sess?.id ?? "";
+      setSessionData((prev) => ({ ...prev, [startModal.id]: { token, session_id: sessionId ?? "" } }));
       setSessionTokens((prev) => ({ ...prev, [startModal.id]: token }));
       onRefresh();
     }
 
-    // 2. test_session の id を取得
-    const { data: sessionRow } = await supabase
-      .from("test_sessions")
-      .select("id")
-      .eq("url_token", token)
-      .maybeSingle();
-
-    // 3. 生徒ID を解決し test_assignments に記録（未登録の場合のみ）
+    // 2. 生徒ID を解決し test_assignments に記録（未登録の場合のみ）
     const student = students.find((s) => s.name === selectedStudent);
-    if (sessionRow && student) {
+    if (sessionId && student) {
       const { data: existing } = await supabase
-        .from("test_assignments")
-        .select("id")
-        .eq("test_session_id", sessionRow.id)
+        .from("test_assignments").select("id")
+        .eq("test_session_id", sessionId)
         .eq("student_id", student.id)
         .maybeSingle();
       if (!existing) {
-        await supabase.from("test_assignments").insert({
-          test_session_id: sessionRow.id,
-          student_id: student.id,
-        });
+        const { data: newAssign } = await supabase
+          .from("test_assignments")
+          .insert({ test_session_id: sessionId, student_id: student.id })
+          .select("id").single();
+        if (newAssign) {
+          setAssignments((prev) => [...prev, {
+            id: newAssign.id,
+            test_session_id: sessionId!,
+            student_id: student.id,
+            student_name: selectedStudent,
+          }]);
+        }
+      } else {
+        showToast(`${selectedStudent}さんにはすでに割り当て済みです`, "info");
+        setStarting(false);
+        return;
       }
     }
 
-    // 4. テストURLを開く
-    const url = `/test/${token}?studentName=${encodeURIComponent(selectedStudent)}`;
-    window.open(url, "_blank");
+    // 3. 成功ステートを表示（新タブは開かない）
+    setAssignSuccess({ studentName: selectedStudent, token: token ?? "" });
     setStarting(false);
-    setStartModal(null);
     setSelectedStudent("");
+  };
+
+  const removeAssignment = async (assignmentId: string) => {
+    await supabase.from("test_assignments").delete().eq("id", assignmentId);
+    setAssignments((prev) => prev.filter((a) => a.id !== assignmentId));
+    showToast("割り当てを解除しました", "info");
   };
 
   if (loading) return (
@@ -343,9 +381,13 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                             {sub.tests.map((test) => {
                               const st = statusLabel[test.status] ?? statusLabel.draft;
                               const url = publishedUrls[test.id];
+                              const testSessionId = sessionData[test.id]?.session_id;
+                              const assignedStudents = testSessionId
+                                ? assignments.filter((a) => a.test_session_id === testSessionId)
+                                : [];
                               return (
                                 <div key={test.id} className="px-4 py-3">
-                                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                                  <div className="flex items-start justify-between gap-3 flex-wrap">
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 flex-wrap">
                                         <svg className="h-4 w-4 shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -355,6 +397,23 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
                                       </div>
                                       <p className="mt-0.5 text-xs text-slate-400 pl-6">{test.grade}</p>
+
+                                      {/* 割り当て済み生徒バッジ */}
+                                      {assignedStudents.length > 0 && (
+                                        <div className="mt-2 pl-6 flex flex-wrap gap-1.5 items-center">
+                                          <span className="text-xs text-slate-400">割り当て済み:</span>
+                                          {assignedStudents.map((a) => (
+                                            <span key={a.id}
+                                              className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                                              {a.student_name}
+                                              <button
+                                                onClick={() => removeAssignment(a.id)}
+                                                className="text-indigo-300 hover:text-red-500 transition ml-0.5 leading-none">✕</button>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+
                                       {url && (
                                         <div className="mt-2 flex items-center gap-2 pl-6">
                                           <input readOnly value={url}
@@ -367,9 +426,9 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                       )}
                                     </div>
                                     <div className="flex gap-1.5 flex-wrap justify-end shrink-0">
-                                      <button onClick={() => { setStartModal(test); setSelectedStudent(""); }}
+                                      <button onClick={() => { setStartModal(test); setSelectedStudent(""); setAssignSuccess(null); }}
                                         className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
-                                        受験する
+                                        生徒に割り当てる
                                       </button>
                                       {test.status === "draft" && (
                                         <button onClick={() => publish(test.id)} disabled={publishing === test.id}
@@ -398,48 +457,109 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
         })}
       </div>
 
-      {/* 生徒選択モーダル */}
+      {/* 生徒割り当てモーダル */}
       {startModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="w-96 rounded-3xl bg-white p-8 shadow-xl">
-            <h3 className="mb-1 text-lg font-bold text-slate-900">生徒を選択して受験開始</h3>
-            <p className="mb-5 text-sm text-slate-500">{startModal.title}（{startModal.subject} ・ {startModal.grade}）</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) { setStartModal(null); setAssignSuccess(null); setSelectedStudent(""); } }}>
+          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-2xl">
 
-            {students.length === 0 ? (
-              <p className="mb-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                生徒が登録されていません。多層診断ページから生徒を追加してください。
-              </p>
-            ) : (
-              <div className="mb-5 space-y-2">
-                <label className="text-sm font-medium text-slate-700">生徒名</label>
-                <select
-                  value={selectedStudent}
-                  onChange={(e) => setSelectedStudent(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                >
-                  <option value="">生徒を選択してください...</option>
-                  {students.map((s) => (
-                    <option key={s.id} value={s.name}>{s.name}（{s.grade}）</option>
-                  ))}
-                </select>
+            {assignSuccess ? (
+              /* ── 割り当て完了ステート ── */
+              <div className="text-center">
+                <div className="mb-4 text-6xl">✅</div>
+                <h3 className="text-xl font-bold text-slate-900">割り当て完了！</h3>
+                <p className="mt-3 text-sm text-slate-600">
+                  <strong className="text-indigo-700">{assignSuccess.studentName}</strong>さんのダッシュボードに
+                  テストが表示されます。
+                </p>
+
+                <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-left text-sm text-blue-800">
+                  <p className="font-semibold mb-1.5">📱 生徒への案内</p>
+                  <p>生徒が自分のダッシュボードを開くと<br />
+                  「受験するテスト」に表示されます。<br />
+                  生徒は自分のペースで受験できます。</p>
+                </div>
+
+                <div className="mt-6 space-y-2">
+                  <button
+                    onClick={() => { setAssignSuccess(null); setSelectedStudent(""); }}
+                    className="w-full rounded-2xl bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-700 transition">
+                    別の生徒にも割り当てる
+                  </button>
+                  <button
+                    onClick={() => window.open(`/test/${assignSuccess.token}?studentName=${encodeURIComponent(assignSuccess.studentName)}`, "_blank")}
+                    className="w-full rounded-2xl border border-slate-200 py-3 text-sm text-slate-600 hover:bg-slate-50 transition">
+                    今すぐ一緒に受験させる場合はこちら →
+                  </button>
+                  <button
+                    onClick={() => { setStartModal(null); setAssignSuccess(null); setSelectedStudent(""); }}
+                    className="w-full rounded-2xl border border-slate-100 py-2.5 text-sm text-slate-400 hover:bg-slate-50 transition">
+                    閉じる
+                  </button>
+                </div>
               </div>
-            )}
+            ) : (
+              /* ── 生徒選択ステート ── */
+              <>
+                <h3 className="mb-1 text-lg font-bold text-slate-900">生徒にテストを割り当てる</h3>
+                <p className="mb-1 text-sm font-medium text-indigo-700">{startModal.title}</p>
+                <p className="mb-5 text-xs text-slate-400">{startModal.subject} ・ {startModal.grade}</p>
 
-            <div className="flex gap-3">
-              <button
-                onClick={startTest}
-                disabled={!selectedStudent || starting}
-                className="flex-1 rounded-xl bg-indigo-600 py-2.5 font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
-              >
-                {starting ? "準備中..." : "受験を開始する →"}
-              </button>
-              <button
-                onClick={() => { setStartModal(null); setSelectedStudent(""); }}
-                className="flex-1 rounded-xl border border-slate-300 bg-white py-2.5 text-slate-700 hover:bg-slate-50"
-              >
-                キャンセル
-              </button>
-            </div>
+                <div className="mb-3 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-500">
+                  割り当てると生徒のダッシュボードに表示され、生徒が自分で受験できます。
+                </div>
+
+                {students.length === 0 ? (
+                  <p className="mb-5 rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+                    生徒が登録されていません。
+                  </p>
+                ) : (
+                  <div className="mb-5 space-y-2">
+                    <label className="text-sm font-semibold text-slate-700">生徒を選択</label>
+                    <select
+                      value={selectedStudent}
+                      onChange={(e) => setSelectedStudent(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                      autoFocus
+                    >
+                      <option value="">生徒を選択してください...</option>
+                      {students.map((s) => {
+                        const testSessionId = sessionData[startModal.id]?.session_id;
+                        const alreadyAssigned = testSessionId
+                          ? assignments.some((a) => a.test_session_id === testSessionId && a.student_id === s.id)
+                          : false;
+                        return (
+                          <option key={s.id} value={s.name} disabled={alreadyAssigned}>
+                            {s.name}（{s.grade}）{alreadyAssigned ? " ✓割り当て済み" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={assignTest}
+                    disabled={!selectedStudent || starting}
+                    className="flex-1 rounded-xl bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-700 disabled:opacity-40 transition"
+                  >
+                    {starting
+                      ? <span className="flex items-center justify-center gap-2">
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                          処理中...
+                        </span>
+                      : "割り当てる"}
+                  </button>
+                  <button
+                    onClick={() => { setStartModal(null); setSelectedStudent(""); }}
+                    className="flex-1 rounded-xl border border-slate-200 py-3 text-slate-600 hover:bg-slate-50 transition"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
