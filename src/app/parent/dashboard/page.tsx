@@ -30,6 +30,15 @@ type LatestDiagnosis = {
   created_at: string;
 };
 
+type LatestKarte = {
+  id: string;
+  subject: string;
+  grade: string;
+  test_percentage: number | null;
+  teacher_notes: string | null;
+  created_at: string;
+};
+
 type Announcement = {
   id: string;
   title: string;
@@ -47,6 +56,7 @@ export default function ParentOverviewPage() {
   const [upcoming, setUpcoming] = useState<UpcomingLesson[]>([]);
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
   const [latestDiagnosis, setLatestDiagnosis] = useState<LatestDiagnosis | null>(null);
+  const [latestKarte, setLatestKarte] = useState<LatestKarte | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -111,6 +121,18 @@ export default function ParentOverviewPage() {
       .maybeSingle();
     setLatestDiagnosis((diag as LatestDiagnosis) ?? null);
 
+    if (s?.name) {
+      const { data: karte } = await supabase
+        .from("learning_plans")
+        .select("id, subject, grade, test_percentage, teacher_notes, created_at")
+        .eq("student_name", s.name)
+        .eq("status", "shared")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setLatestKarte((karte as LatestKarte) ?? null);
+    }
+
     setLoading(false);
   }, []);
 
@@ -163,7 +185,39 @@ export default function ParentOverviewPage() {
                 )}
               </section>
             )}
-            <section className="grid grid-cols-2 gap-3 md:grid-cols-3">
+
+            {latestKarte && (
+              <section className="rounded-3xl border-2 border-violet-300 bg-gradient-to-r from-violet-50 to-purple-50 p-6 shadow-sm">
+                <div className="mb-3 flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📋</span>
+                    <div>
+                      <p className="font-bold text-violet-900">学習カルテが共有されました</p>
+                      <p className="text-xs text-violet-600 mt-0.5">
+                        {latestKarte.created_at.slice(0, 10)} ・ {latestKarte.grade} ・ {latestKarte.subject}
+                        {latestKarte.test_percentage != null && (
+                          <span className="ml-2 font-semibold">診断 {latestKarte.test_percentage}%</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <Link
+                    href="/parent/dashboard/karte"
+                    className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700"
+                  >
+                    カルテを開く →
+                  </Link>
+                </div>
+                {latestKarte.teacher_notes && (
+                  <div className="rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-700 border border-violet-200">
+                    <p className="text-xs font-semibold text-violet-600 mb-1">講師より</p>
+                    <p className="leading-relaxed line-clamp-3 whitespace-pre-wrap">{latestKarte.teacher_notes}</p>
+                  </div>
+                )}
+              </section>
+            )}
+
+            <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <SummaryCard
                 title="未読メッセージ"
                 value={`${unread}件`}
@@ -181,6 +235,13 @@ export default function ParentOverviewPage() {
                 value={latestDiagnosis ? `${latestDiagnosis.test_percentage ?? "-"}%` : "なし"}
                 sub={latestDiagnosis ? (latestDiagnosis.subject ?? "—") : "診断テスト受験後に共有されます"}
                 href="/parent/dashboard/diagnosis"
+              />
+              <SummaryCard
+                title="学習カルテ"
+                value={latestKarte ? latestKarte.subject : "なし"}
+                sub={latestKarte ? `${latestKarte.grade} ・ ${latestKarte.created_at.slice(0, 10)}` : "講師が作成・共有します"}
+                href="/parent/dashboard/karte"
+                tone={latestKarte ? "karte" : "default"}
               />
             </section>
 
@@ -257,16 +318,22 @@ export default function ParentOverviewPage() {
 
 function SummaryCard({
   title, value, sub, href, tone,
-}: { title: string; value: string; sub?: string; href: string; tone?: "default" | "alert" }) {
+}: { title: string; value: string; sub?: string; href: string; tone?: "default" | "alert" | "karte" }) {
   const isEmpty = value === "なし";
   return (
     <Link href={href}
-      className={`block rounded-3xl border bg-white p-6 shadow-sm transition hover:shadow-md ${
-        tone === "alert" ? "border-red-200" : "border-slate-200"
+      className={`block rounded-3xl border bg-white p-5 shadow-sm transition hover:shadow-md ${
+        tone === "alert" ? "border-red-200" :
+        tone === "karte" ? "border-violet-200" :
+        "border-slate-200"
       }`}>
-      <p className="text-sm font-semibold text-slate-500">{title}</p>
-      <p className={`mt-3 text-2xl font-bold ${tone === "alert" ? "text-red-600" : isEmpty ? "text-slate-400" : "text-slate-950"}`}>{value}</p>
-      {sub && <p className={`mt-2 truncate text-sm ${isEmpty ? "text-slate-400 italic" : "text-slate-600"}`}>{sub}</p>}
+      <p className="text-xs font-semibold text-slate-500">{title}</p>
+      <p className={`mt-2 text-xl font-bold truncate ${
+        tone === "alert" ? "text-red-600" :
+        tone === "karte" ? "text-violet-700" :
+        isEmpty ? "text-slate-400" : "text-slate-950"
+      }`}>{value}</p>
+      {sub && <p className={`mt-1.5 truncate text-xs ${isEmpty ? "text-slate-400 italic" : "text-slate-500"}`}>{sub}</p>}
     </Link>
   );
 }

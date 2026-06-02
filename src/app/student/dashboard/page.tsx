@@ -1,5 +1,6 @@
 "use client";
 
+import { sanitizeHtml } from "@/lib/sanitize";
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -7,7 +8,17 @@ import { Logo } from "@/components/Logo";
 import type { Student, ShiftEvent } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
-type Tab = "tests" | "messages" | "calendar" | "settings";
+type Tab = "tests" | "messages" | "calendar" | "karte" | "settings";
+
+type KartePlan = {
+  id: string;
+  subject: string;
+  grade: string;
+  test_percentage: number | null;
+  teacher_notes: string | null;
+  plan_html: string;
+  created_at: string;
+};
 
 const EVENT_COLORS: Record<string, string> = {
   event: "bg-purple-100 text-purple-700", exam: "bg-red-100 text-red-700",
@@ -52,6 +63,8 @@ export default function StudentDashboardPage() {
   const [sending, setSending] = useState(false);
   const [msgSent, setMsgSent] = useState(false);
   const [studentRef, setStudentRef] = useState<Student | null>(null);
+  const [kartes, setKartes] = useState<KartePlan[]>([]);
+  const [selectedKarte, setSelectedKarte] = useState<KartePlan | null>(null);
   const [activeMessageThread, setActiveMessageThread] = useState<string | null>(null);
   const [threadReply, setThreadReply] = useState("");
   const [calMonth, setCalMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -129,6 +142,16 @@ export default function StudentDashboardPage() {
       }
 
       await fetchMessages(studentData as Student);
+
+      // カルテ取得（共有済みのみ）
+      const { data: karteData } = await supabase
+        .from("learning_plans")
+        .select("id, subject, grade, test_percentage, teacher_notes, plan_html, created_at")
+        .eq("student_name", studentData.name)
+        .eq("status", "shared")
+        .order("created_at", { ascending: false });
+      setKartes((karteData as KartePlan[]) ?? []);
+
       setLoading(false);
     };
     init();
@@ -302,6 +325,21 @@ export default function StudentDashboardPage() {
             })()}
           </button>
           <button
+            onClick={() => { setTab("karte"); setSelectedKarte(null); }}
+            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
+              tab === "karte"
+                ? "bg-violet-600 text-white"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            カルテ
+            {kartes.length > 0 && tab !== "karte" && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 text-xs font-bold text-white">
+                {kartes.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => setTab("calendar")}
             className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
               tab === "calendar"
@@ -417,6 +455,96 @@ export default function StudentDashboardPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* カルテタブ */}
+        {tab === "karte" && (
+          <section>
+            {selectedKarte ? (
+              <div>
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-slate-900">{selectedKarte.subject} カルテ</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {selectedKarte.grade} ・ {selectedKarte.created_at.slice(0, 10)}
+                      {selectedKarte.test_percentage != null && (
+                        <span className="ml-2 font-semibold text-violet-700">診断 {selectedKarte.test_percentage}%</span>
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setSelectedKarte(null)}
+                    className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+                  >
+                    一覧に戻る
+                  </button>
+                </div>
+                {selectedKarte.teacher_notes && (
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-semibold text-amber-700 mb-1">先生より</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{selectedKarte.teacher_notes}</p>
+                  </div>
+                )}
+                <div className="rounded-3xl border border-violet-100 bg-white px-6 py-8 shadow-sm">
+                  <style>{`
+                    #karte-student h1 { font-size:1.2rem; font-weight:800; color:#1e1b4b; margin-bottom:16px; padding-bottom:8px; border-bottom:2px solid #7c3aed; }
+                    #karte-student h2 { font-size:1rem; font-weight:700; margin:20px 0 8px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
+                    #karte-student h3 { font-size:0.9rem; font-weight:600; margin:14px 0 4px; color:#1e293b; }
+                    #karte-student p, #karte-student li { line-height:1.85; font-size:0.875rem; color:#374151; }
+                    #karte-student ul, #karte-student ol { padding-left:1.4rem; margin:4px 0; }
+                    #karte-student table { border-collapse:collapse; width:100%; margin:8px 0; font-size:0.8rem; }
+                    #karte-student td, #karte-student th { border:1px solid #e5e7eb; padding:5px 8px; }
+                    #karte-student th { background:#f5f3ff; font-weight:700; color:#3730a3; }
+                    #karte-student strong { color:#1e293b; }
+                  `}</style>
+                  <div id="karte-student" dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedKarte.plan_html) }} />
+                </div>
+              </div>
+            ) : kartes.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+                <p className="text-3xl mb-3">📋</p>
+                <p className="font-semibold text-slate-700">まだカルテがありません</p>
+                <p className="mt-1 text-sm text-slate-400">
+                  先生が診断結果をもとにカルテを作成・共有すると、ここに表示されます。
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {kartes.map((k) => (
+                  <button
+                    key={k.id}
+                    onClick={() => setSelectedKarte(k)}
+                    className="w-full group rounded-3xl border border-violet-200 bg-white p-5 text-left shadow-sm transition hover:border-violet-400 hover:shadow-md"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-900">{k.subject} カルテ</span>
+                          <span className="text-sm text-slate-500">{k.grade}</span>
+                          {k.test_percentage != null && (
+                            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                              k.test_percentage >= 80 ? "bg-green-100 text-green-700" :
+                              k.test_percentage >= 60 ? "bg-blue-100 text-blue-700" :
+                              "bg-red-100 text-red-700"
+                            }`}>診断 {k.test_percentage}%</span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">{k.created_at.slice(0, 10)}</p>
+                        {k.teacher_notes && (
+                          <p className="mt-2 text-xs text-slate-500 line-clamp-1">
+                            先生より: {k.teacher_notes}
+                          </p>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-sm font-medium text-violet-600 group-hover:underline">
+                        開く →
+                      </span>
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
           </section>
