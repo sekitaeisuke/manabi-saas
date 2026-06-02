@@ -5,6 +5,8 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student } from "@/lib/supabase";
 import { notify, links } from "@/lib/notify";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { Skeleton } from "@/components/Skeleton";
 
 type Request = {
   id: string;
@@ -30,6 +32,7 @@ export default function ReschedulesPage() {
   const [loading, setLoading] = useState(true);
   const [responseDraft, setResponseDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<Request | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -125,16 +128,23 @@ export default function ReschedulesPage() {
   const reject = async (r: Request) => {
     const response = responseDraft[r.id] ?? "";
     if (!response.trim()) {
-      if (!confirm("講師からの返答が空ですが、このまま不可で返答しますか？")) return;
+      setRejectTarget(r);
+      return;
     }
+    await doReject(r);
+  };
+
+  const doReject = async (r: Request) => {
+    setRejectTarget(null);
+    const draftResponse = responseDraft[r.id] ?? "";
     setBusy(r.id);
     const { error } = await supabase.from("reschedule_requests").update({
       status: "rejected",
-      teacher_response: response || null,
+      teacher_response: draftResponse || null,
       responded_at: new Date().toISOString(),
     }).eq("id", r.id);
     if (error) { showToast(`返答失敗: ${error.message}`, "error"); setBusy(null); return; }
-    await notifyParent(r, "rejected", response);
+    await notifyParent(r, "rejected", draftResponse);
     setBusy(null);
     load();
   };
@@ -153,21 +163,53 @@ export default function ReschedulesPage() {
           {([
             { key: "pending",   label: "申請中" },
             { key: "responded", label: "対応済" },
-          ] as const).map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
-                tab === t.key ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              }`}>
-              {t.label}
-            </button>
-          ))}
+          ] as const).map((t) => {
+            const count = t.key === "pending" ? requests.filter((r) => r.status === "pending").length : 0;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)}
+                className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  tab === t.key ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}>
+                {t.label}
+                {count > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-xs font-bold leading-none ${
+                    tab === t.key ? "bg-white/30 text-white" : "bg-red-500 text-white"
+                  }`}>{count}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
+        {rejectTarget && (
+          <ConfirmModal
+            title="返答なしで却下しますか？"
+            message={"講師からの返答メッセージが空です。\nこのまま「不可」で返答しますか？"}
+            confirmLabel="このまま却下する"
+            cancelLabel="戻る"
+            danger
+            onConfirm={() => doReject(rejectTarget)}
+            onCancel={() => setRejectTarget(null)}
+          />
+        )}
+
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+          <div className="space-y-4">
+            {[1, 2].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-3">
+                <div className="flex gap-3"><Skeleton className="h-5 w-16 rounded-full" /><Skeleton className="h-4 w-32" /></div>
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="h-4 w-64" />
+                <div className="flex gap-2 pt-2"><Skeleton className="h-9 w-28 rounded-xl" /><Skeleton className="h-9 w-20 rounded-xl" /></div>
+              </div>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            該当するリクエストはありません
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-4xl mb-3">{tab === "pending" ? "✅" : "📋"}</p>
+            <p className="font-semibold text-slate-700">
+              {tab === "pending" ? "申請中のリクエストはありません" : "対応済みのリクエストはありません"}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -209,12 +251,14 @@ export default function ReschedulesPage() {
                     />
                     <div className="flex flex-wrap justify-end gap-2">
                       <button onClick={() => reject(r)} disabled={busy === r.id}
-                        className="rounded-2xl border border-red-200 bg-red-50 px-5 py-2 text-sm font-semibold text-red-600 hover:bg-red-100 disabled:opacity-40">
-                        不可で返答
+                        className="rounded-2xl border-2 border-red-200 bg-white px-5 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40 transition">
+                        ✕ 不可で返答
                       </button>
                       <button onClick={() => approve(r)} disabled={busy === r.id}
-                        className="rounded-2xl bg-green-600 px-5 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40">
-                        {busy === r.id ? "処理中..." : "承認して授業を更新"}
+                        className="flex items-center gap-2 rounded-2xl bg-green-600 px-6 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-green-700 active:scale-95 disabled:opacity-40 transition">
+                        {busy === r.id
+                          ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />処理中...</>
+                          : <><span>✓</span><span>承認して日時を変更</span></>}
                       </button>
                     </div>
                   </div>

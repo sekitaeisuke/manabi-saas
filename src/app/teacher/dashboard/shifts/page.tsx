@@ -62,6 +62,7 @@ export default function ShiftRequestPage() {
   const [patternDays, setPatternDays] = useState<number[]>([]);
   const [patternSlots, setPatternSlots] = useState<string[]>([]);
   const [patternAvail, setPatternAvail] = useState<ShiftAvailability>("available");
+  const [dirty, setDirty] = useState(false);
 
   // 自分のteacher_idを取得
   useEffect(() => {
@@ -116,22 +117,15 @@ export default function ShiftRequestPage() {
 
   useEffect(() => { loadRequests(); }, [loadRequests]);
 
-  const toggle = (date: string, slot_start: string) => {
-    const key: CellKey = `${date}_${slot_start}`;
-    const cur = cells.get(key);
-    const next: ShiftAvailability =
-      cur === undefined    ? "available"
-      : cur === "available"  ? "preferred"
-      : cur === "preferred"  ? "unavailable"
-      : undefined as never;
-    if (next === undefined) {
-      const m = new Map(cells);
-      m.delete(key);
-      setCells(m);
-    } else {
-      setCells(new Map(cells).set(key, next));
-    }
-  };
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   const cycleOrder: (ShiftAvailability | "none")[] = ["none","available","preferred","unavailable"];
 
@@ -145,12 +139,13 @@ export default function ShiftRequestPage() {
     const n = new Map(notes);
     if (next === "none") {
       m.delete(key);
-      n.delete(key); // notesも同時に削除して同期
+      n.delete(key);
     } else {
       m.set(key, next as ShiftAvailability);
     }
     setCells(m);
     setNotes(n);
+    setDirty(true);
   };
 
   const handleSave = async () => {
@@ -190,6 +185,7 @@ export default function ShiftRequestPage() {
     }
 
     showToast("シフト希望を保存しました", "success");
+    setDirty(false);
     setSaving(false);
   };
 
@@ -204,9 +200,10 @@ export default function ShiftRequestPage() {
       }
     }
     setCells(m);
+    setDirty(true);
   };
 
-  const clearAll = () => { setCells(new Map()); setNotes(new Map()); };
+  const clearAll = () => { setCells(new Map()); setNotes(new Map()); setDirty(true); };
 
   const togglePatternDay  = (d: number) =>
     setPatternDays((prev)  => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]);
@@ -226,6 +223,7 @@ export default function ShiftRequestPage() {
       }
     }
     setCells(m);
+    setDirty(true);
   };
 
   return (
@@ -433,11 +431,19 @@ export default function ShiftRequestPage() {
             </div>
 
             {!isPast && (
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex items-center justify-end gap-3">
+                {dirty && !saving && (
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600">
+                    <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
+                    未保存の変更があります
+                  </span>
+                )}
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="rounded-2xl bg-blue-600 px-8 py-3 font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                  className={`rounded-2xl px-8 py-3 font-semibold text-white shadow-sm transition disabled:opacity-50 ${
+                    dirty ? "bg-blue-600 hover:bg-blue-700" : "bg-slate-400 cursor-default"
+                  }`}
                 >
                   {saving ? "保存中..." : "希望を保存する"}
                 </button>

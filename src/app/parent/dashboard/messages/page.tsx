@@ -1,11 +1,12 @@
 "use client";
 import { showToast } from "@/lib/toast";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Teacher } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
 import { notify, links } from "@/lib/notify";
+import { Skeleton } from "@/components/Skeleton";
 
 type Message = {
   id: string;
@@ -34,6 +35,7 @@ export default function ParentMessagesPage() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [newForm, setNewForm] = useState({ teacher_id: "", subject: "", message: "" });
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -98,6 +100,10 @@ export default function ParentMessagesPage() {
     () => threads.find((t) => t.id === activeThread) ?? null,
     [threads, activeThread]
   );
+
+  useEffect(() => {
+    if (activeThread) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
+  }, [activeThread, messages]);
 
   const openThread = async (threadId: string) => {
     setActiveThread(threadId);
@@ -201,7 +207,24 @@ export default function ParentMessagesPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+          <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <Skeleton className="mb-2 h-4 w-36" />
+                  <Skeleton className="mb-1 h-3 w-24" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              ))}
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className={`flex ${i % 2 === 0 ? "justify-end" : "justify-start"}`}>
+                  <Skeleton className={`h-16 rounded-2xl ${i % 2 === 0 ? "w-2/3" : "w-1/2"}`} />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
             <div className="space-y-2">
@@ -233,37 +256,74 @@ export default function ParentMessagesPage() {
                   左からスレッドを選択するか、「新規メッセージ」を作成してください。
                 </div>
               ) : (
-                <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="mb-4 text-lg font-bold text-slate-950">{active.subject}</h2>
-                  <div className="space-y-3">
-                    {active.msgs.map((m) => {
+                <div className="flex flex-col rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  {/* スレッドヘッダー */}
+                  <div className="border-b border-slate-100 px-6 py-4">
+                    <h2 className="font-bold text-slate-950">{active.subject}</h2>
+                    <p className="mt-0.5 text-xs text-slate-400">{active.msgs.length}件のメッセージ</p>
+                  </div>
+
+                  {/* メッセージ一覧 */}
+                  <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-h-[60vh]">
+                    {active.msgs.map((m, idx) => {
                       const fromParent = m.direction === "parent_to_teacher";
+                      const showDate = idx === 0 ||
+                        new Date(m.created_at).toDateString() !==
+                        new Date(active.msgs[idx - 1].created_at).toDateString();
                       return (
-                        <div key={m.id} className={`flex ${fromParent ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
-                            fromParent ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-900"
-                          }`}>
-                            <p className={`mb-1 text-xs font-semibold ${fromParent ? "text-blue-100" : "text-slate-500"}`}>
-                              {fromParent ? "保護者" : teacherName(m.teacher_id)} ・ {new Date(m.created_at).toLocaleString("ja-JP")}
-                            </p>
-                            <p className="whitespace-pre-wrap leading-7">{m.message}</p>
+                        <div key={m.id}>
+                          {showDate && (
+                            <div className="flex items-center gap-3 my-2">
+                              <div className="flex-1 h-px bg-slate-100" />
+                              <span className="text-xs text-slate-400 shrink-0">
+                                {new Date(m.created_at).toLocaleDateString("ja-JP", { month: "long", day: "numeric" })}
+                              </span>
+                              <div className="flex-1 h-px bg-slate-100" />
+                            </div>
+                          )}
+                          <div className={`flex ${fromParent ? "justify-end" : "justify-start"}`}>
+                            <div className={`max-w-[78%] space-y-1`}>
+                              <p className={`text-[11px] font-semibold px-1 ${fromParent ? "text-right text-slate-400" : "text-slate-400"}`}>
+                                {fromParent ? "あなた" : teacherName(m.teacher_id)}
+                              </p>
+                              <div className={`rounded-2xl px-4 py-3 text-sm leading-7 ${
+                                fromParent
+                                  ? "bg-blue-600 text-white rounded-tr-sm"
+                                  : "bg-slate-100 text-slate-900 rounded-tl-sm"
+                              }`}>
+                                <p className="whitespace-pre-wrap">{m.message}</p>
+                              </div>
+                              <p className={`text-[10px] text-slate-400 px-1 ${fromParent ? "text-right" : ""}`}>
+                                {new Date(m.created_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                                {!fromParent && m.parent_read && <span className="ml-1 text-blue-400">既読</span>}
+                              </p>
+                            </div>
                           </div>
                         </div>
                       );
                     })}
+                    <div ref={chatEndRef} />
                   </div>
-                  <div className="mt-6 border-t border-slate-200 pt-4">
+
+                  {/* 返信エリア */}
+                  <div className="border-t border-slate-100 px-6 py-4 bg-slate-50">
                     <textarea
                       value={reply}
                       onChange={(e) => setReply(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendReply(); }
+                      }}
                       rows={3}
-                      placeholder="返信を入力..."
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-400"
+                      placeholder="返信を入力… (Ctrl+Enter で送信)"
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-blue-400"
                     />
-                    <div className="mt-3 flex justify-end">
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="text-xs text-slate-400">Ctrl+Enter で送信</span>
                       <button onClick={sendReply} disabled={sending || !reply.trim()}
-                        className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
-                        {sending ? "送信中..." : "返信を送信"}
+                        className="flex items-center gap-2 rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 transition">
+                        {sending
+                          ? <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />送信中</>
+                          : "返信を送信"}
                       </button>
                     </div>
                   </div>

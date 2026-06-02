@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { ShiftPeriod, ShiftRequest, ShiftAssignment, ShiftEvent, EventType, AssignmentMode } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
+import { triggerConfetti } from "@/lib/confetti";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 // ─── 型 ──────────────────────────────────────────────────────
 type Teacher = { id: string; name: string; email: string | null; school_id: string | null };
@@ -344,14 +346,32 @@ function RequestsStep({ onNext }: { onNext: () => void }) {
         </div>
 
         {/* 提出状況サマリー */}
-        <div className="mb-4 rounded-2xl bg-slate-50 px-4 py-3 flex flex-wrap items-center gap-3 text-sm">
-          <span className="font-semibold text-slate-700">提出済: {submittedIds.size}/{teachers.length}名</span>
-          {submittedIds.size < teachers.length && (
-            <span className="text-slate-400">未提出:</span>
+        <div className="mb-4 rounded-2xl bg-slate-50 px-4 py-4 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-semibold text-slate-700">希望提出状況</span>
+            <span className="font-bold text-slate-900">
+              {submittedIds.size} / {teachers.length} 名
+              {submittedIds.size === teachers.length && <span className="ml-2 text-green-600">✓ 全員提出済み</span>}
+            </span>
+          </div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${
+                submittedIds.size === teachers.length ? "bg-green-500" : "bg-blue-500"
+              }`}
+              style={{ width: teachers.length > 0 ? `${(submittedIds.size / teachers.length) * 100}%` : "0%" }}
+            />
+          </div>
+          {teachers.filter((t) => !submittedIds.has(t.id)).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-xs text-slate-400">未提出:</span>
+              {teachers.filter((t) => !submittedIds.has(t.id)).map((t) => (
+                <span key={t.id} className="rounded-full border border-red-200 bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-600">
+                  {t.name}
+                </span>
+              ))}
+            </div>
           )}
-          {teachers.filter((t) => !submittedIds.has(t.id)).map((t) => (
-            <span key={t.id} className="rounded-full bg-red-100 border border-red-200 px-2.5 py-0.5 text-xs font-semibold text-red-600">{t.name}</span>
-          ))}
         </div>
 
         {loading ? (
@@ -590,6 +610,25 @@ function AiStep({ onNext }: { onNext: () => void }) {
   );
 }
 
+// 講師ごとの固定カラーパレット
+const TEACHER_PALETTE = [
+  "bg-violet-100 text-violet-800 border-violet-200",
+  "bg-blue-100 text-blue-800 border-blue-200",
+  "bg-teal-100 text-teal-800 border-teal-200",
+  "bg-amber-100 text-amber-800 border-amber-200",
+  "bg-rose-100 text-rose-800 border-rose-200",
+  "bg-lime-100 text-lime-800 border-lime-200",
+  "bg-cyan-100 text-cyan-800 border-cyan-200",
+  "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200",
+  "bg-orange-100 text-orange-800 border-orange-200",
+  "bg-indigo-100 text-indigo-800 border-indigo-200",
+];
+
+function makeTeacherColorMap(ids: string[]): Record<string, string> {
+  const sorted = [...new Set(ids)].sort();
+  return Object.fromEntries(sorted.map((id, i) => [id, TEACHER_PALETTE[i % TEACHER_PALETTE.length]]));
+}
+
 // ─── STEP 4: 確認・確定 ───────────────────────────────────────
 function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
   const [periods, setPeriods] = useState<ShiftPeriod[]>([]);
@@ -599,6 +638,8 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
   const [schools, setSchools] = useState<School[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [publishConfirm, setPublishConfirm] = useState(false);
 
   useEffect(() => {
     supabase.from("shift_periods").select("*").order("created_at", { ascending: false })
@@ -627,14 +668,14 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
   useEffect(() => { loadAssignments(); }, [loadAssignments]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm("このシフトを削除しますか？")) return;
     await supabase.from("shift_assignments").delete().eq("id", id);
     setAssignments((prev) => prev.filter((a) => a.id !== id));
+    setDeleteConfirmId(null);
     showToast("削除しました", "success");
   };
 
   const handleConfirm = async () => {
-    if (!confirm(`このシフトを確定・公開しますか？\n講師全員に確定シフトとして表示されます。`)) return;
+    setPublishConfirm(false);
     setConfirming(true);
     const rows = assignments.map((a) => ({
       date: a.date, slot_start: a.slot_start, slot_end: a.slot_end,
@@ -648,8 +689,8 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
     const data = await res.json();
     setConfirming(false);
     if (!res.ok || data.error) { showToast("確定失敗: " + data.error, "error"); return; }
-    const notifiedCount = new Set(rows.map((r) => r.teacher_id)).size;
-    showToast(`シフトを確定・公開しました（${data.count}件）。${notifiedCount}名の講師に通知を送信しました。`, "success");
+    triggerConfetti();
+    showToast(`シフトを確定・公開しました（${data.count}件）`, "success", 4500);
     loadAssignments();
   };
 
@@ -657,8 +698,29 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
   const schoolName  = (id: string) => schools.find((s) => s.id === id)?.name ?? id;
 
   const isPublished = periods.find((p) => p.id === periodId)?.status === "published";
+  const teacherColorMap = makeTeacherColorMap(assignments.map((a) => a.teacher_id));
 
   return (
+    <>
+    {deleteConfirmId && (
+      <ConfirmModal
+        title="シフトを削除"
+        message="このシフト割り当てを削除しますか？"
+        confirmLabel="削除する"
+        danger
+        onConfirm={() => handleDelete(deleteConfirmId)}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
+    )}
+    {publishConfirm && (
+      <ConfirmModal
+        title="シフトを確定・公開"
+        message={"このシフトを確定・公開しますか？\n講師全員に確定シフトとして表示されます。"}
+        confirmLabel="確定・公開する"
+        onConfirm={handleConfirm}
+        onCancel={() => setPublishConfirm(false)}
+      />
+    )}
     <div className="space-y-6">
       <section className="rounded-2xl bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -670,7 +732,7 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
             </select>
           </div>
           {!isPublished && assignments.length > 0 && (
-            <button onClick={handleConfirm} disabled={confirming}
+            <button onClick={() => setPublishConfirm(true)} disabled={confirming}
               className="rounded-2xl bg-green-600 px-8 py-3.5 text-base font-bold text-white shadow-md hover:bg-green-700 active:scale-95 disabled:opacity-50">
               {confirming
                 ? <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"/>確定中...</span>
@@ -713,39 +775,47 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {assignments.map((a) => (
-                  <tr key={a.id} className="border-b border-slate-50">
-                    <td className="py-1.5 pr-4 text-slate-700 whitespace-nowrap">
-                      {a.date.slice(5).replace("-","/")}({["日","月","火","水","木","金","土"][new Date(a.date).getDay()]})
-                    </td>
-                    <td className="py-1.5 pr-4 text-slate-600 whitespace-nowrap">{a.slot_start}〜{a.slot_end}</td>
-                    <td className="py-1.5 pr-4 font-medium text-slate-800">
-                      {(a.schools as School | undefined)?.name ?? schoolName(a.school_id)}
-                    </td>
-                    <td className="py-1.5 pr-4 text-slate-700">
-                      {(a.teachers as Teacher | undefined)?.name ?? teacherName(a.teacher_id)}
-                    </td>
-                    <td className="py-1.5 pr-4">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold
-                        ${a.status === "confirmed" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                        {a.status === "confirmed" ? "確定" : "ドラフト"}
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-4 text-xs text-slate-400">{a.note ?? ""}</td>
-                    {!isPublished && (
-                      <td className="py-1.5">
-                        <button onClick={() => handleDelete(a.id)}
-                          className="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50">削除</button>
+                {assignments.map((a) => {
+                  const tColor = teacherColorMap[a.teacher_id] ?? TEACHER_PALETTE[0];
+                  const tName = (a.teachers as Teacher | undefined)?.name ?? teacherName(a.teacher_id);
+                  return (
+                    <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                      <td className="py-2 pr-4 text-slate-700 whitespace-nowrap text-sm">
+                        {a.date.slice(5).replace("-","/")}
+                        <span className="ml-1 text-xs text-slate-400">({["日","月","火","水","木","金","土"][new Date(a.date).getDay()]})</span>
                       </td>
-                    )}
-                  </tr>
-                ))}
+                      <td className="py-2 pr-4 text-slate-600 whitespace-nowrap text-sm">{a.slot_start.slice(0,5)}〜{a.slot_end.slice(0,5)}</td>
+                      <td className="py-2 pr-4 font-medium text-slate-800 text-sm">
+                        {(a.schools as School | undefined)?.name ?? schoolName(a.school_id)}
+                      </td>
+                      <td className="py-2 pr-4">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${tColor}`}>
+                          {tName}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold
+                          ${a.status === "confirmed" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
+                          {a.status === "confirmed" ? "確定" : "ドラフト"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-4 text-xs text-slate-400">{a.note ?? ""}</td>
+                      {!isPublished && (
+                        <td className="py-2">
+                          <button onClick={() => setDeleteConfirmId(a.id)}
+                            className="rounded-lg px-2 py-1 text-xs text-red-400 hover:bg-red-50 transition-colors">削除</button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
     </div>
+    </>
   );
 }
 

@@ -5,6 +5,14 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student } from "@/lib/supabase";
+import { Skeleton } from "@/components/Skeleton";
+
+const LESSON_STATUS_JA: Record<string, string> = {
+  scheduled: "予定",
+  completed: "実施済",
+  canceled: "中止",
+  rescheduled: "振替済",
+};
 
 type ParentLinked = { id: string; name: string; email: string; phone: string | null };
 type LessonRow = { id: string; subject: string | null; scheduled_at: string; status: string; teacher_id: string | null };
@@ -102,7 +110,51 @@ export default function StudentDetailPage() {
   useEffect(() => { load(); }, [load]);
 
   if (loading) {
-    return <div className="px-6 py-10 text-slate-400">読み込み中...</div>;
+    return (
+      <div className="px-6 py-10">
+        <div className="mx-auto max-w-6xl space-y-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-4 w-36" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-10 w-24 rounded-2xl" />
+              <Skeleton className="h-10 w-28 rounded-2xl" />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {[1, 2].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-12 w-full rounded-xl" />
+                <Skeleton className="h-12 w-full rounded-xl" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            {[1, 2].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-10 w-full rounded-xl" />
+                <Skeleton className="h-10 w-full rounded-xl" />
+                <Skeleton className="h-10 w-3/4 rounded-xl" />
+              </div>
+            ))}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-10 w-full rounded-xl" />
+                <Skeleton className="h-10 w-full rounded-xl" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
   if (!student) {
     return (
@@ -179,7 +231,7 @@ export default function StudentDetailPage() {
                     <p className="font-semibold text-slate-900">
                       {new Date(l.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" })}
                     </p>
-                    <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {l.status}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {LESSON_STATUS_JA[l.status] ?? l.status}</p>
                   </li>
                 ))}
               </ul>
@@ -196,7 +248,7 @@ export default function StudentDetailPage() {
                     <p className="font-semibold text-slate-900">
                       {new Date(l.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" })}
                     </p>
-                    <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {l.status}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {LESSON_STATUS_JA[l.status] ?? l.status}</p>
                   </li>
                 ))}
               </ul>

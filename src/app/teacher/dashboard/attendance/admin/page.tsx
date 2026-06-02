@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { AttendanceRecord } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 type Teacher = { id: string; name: string; email: string | null };
 
@@ -36,6 +37,7 @@ export default function AttendanceAdminPage() {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing]   = useState<AttendanceRecord | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ clock_in:"", clock_out:"", break_minutes:0, transportation_fee:0, transportation_note:"", notes:"" });
 
   useEffect(() => {
@@ -135,10 +137,10 @@ export default function AttendanceAdminPage() {
   };
 
   const deleteRec = async (id: string) => {
-    if (!confirm("この記録を削除しますか？\n出勤・退勤・交通費すべて削除されます。")) return;
     const { error } = await supabase.from("attendance_records").delete().eq("id", id);
     if (error) { showToast("削除失敗: " + error.message, "error"); return; }
     showToast("削除しました", "success");
+    setDeleteConfirmId(null);
     load();
   };
 
@@ -270,7 +272,7 @@ export default function AttendanceAdminPage() {
                               <td className="py-2 text-xs text-slate-400 max-w-[8rem] truncate">{r.notes ?? r.transportation_note ?? ""}</td>
                               <td className="py-2 text-right whitespace-nowrap">
                                 <button onClick={() => startEdit(r)} className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 border border-blue-200">編集</button>
-                                <button onClick={() => deleteRec(r.id)} className="ml-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 border border-red-200">削除</button>
+                                <button onClick={() => setDeleteConfirmId(r.id)} className="ml-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 border border-red-200">削除</button>
                               </td>
                             </tr>
                           ))}
@@ -294,6 +296,17 @@ export default function AttendanceAdminPage() {
           )}
         </div>
       </div>
+
+      {deleteConfirmId && (
+        <ConfirmModal
+          title="記録を削除"
+          message={"この出勤記録を削除しますか？\n出勤・退勤・交通費すべて削除されます。"}
+          confirmLabel="削除する"
+          danger
+          onConfirm={() => deleteRec(deleteConfirmId)}
+          onCancel={() => setDeleteConfirmId(null)}
+        />
+      )}
 
       {/* 編集モーダル */}
       {editing && (

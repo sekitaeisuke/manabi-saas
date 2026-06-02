@@ -140,7 +140,25 @@ CREATE TABLE learning_plans (
 
         {/* カード一覧 */}
         {loading ? (
-          <div className="py-20 text-center text-slate-400">読み込み中...</div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[1,2,3,4,5,6].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3 animate-pulse">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-slate-200 shrink-0" />
+                  <div className="space-y-1.5 flex-1">
+                    <div className="h-4 w-24 bg-slate-200 rounded" />
+                    <div className="h-3 w-16 bg-slate-100 rounded" />
+                  </div>
+                </div>
+                <div className="h-3 w-full bg-slate-100 rounded" />
+                <div className="h-3 w-3/4 bg-slate-100 rounded" />
+                <div className="flex gap-2 pt-1">
+                  <div className="h-6 w-16 rounded-full bg-slate-100" />
+                  <div className="h-6 w-20 rounded-full bg-slate-100" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-20 text-center text-slate-500">
             <p className="text-5xl mb-4">📋</p>

@@ -75,7 +75,7 @@ function assignShifts(
         school_name: school.name,
         teacher_id: t.id,
         teacher_name: t.name,
-        note: customInstruction ? `管理者指示: ${customInstruction.slice(0, 30)}` : null,
+        note: null,
       });
       assigned = true;
       break;
@@ -90,14 +90,17 @@ function assignShifts(
 }
 
 // ─── Claude による短い要約のみ ─────────────────────────────────
-async function summarize(shifts: ShiftRow[], warnings: string[]): Promise<string> {
+async function summarize(shifts: ShiftRow[], warnings: string[], customInstruction: string): Promise<string> {
+  const instructionPart = customInstruction.trim()
+    ? `\n管理者追加指示（参考）: 「${customInstruction.slice(0, 100)}」`
+    : "";
   const body = JSON.stringify({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 200,
     system: "50字以内の日本語テキストのみ返してください。",
     messages: [{
       role: "user",
-      content: `シフト自動割り当て結果: ${shifts.length}件配置、未配置警告${warnings.length}件。一言で要約してください。`,
+      content: `シフト自動割り当て結果: ${shifts.length}件配置、未配置警告${warnings.length}件。${instructionPart}\n一言で要約してください。`,
     }],
   });
   try {
@@ -158,8 +161,19 @@ export async function POST(req: NextRequest) {
   // 教室一覧
   const groupName = (period.schools as { group_name: string | null } | null)?.group_name;
   let schoolsQuery = admin.from("schools").select("id, name, group_name");
-  if (groupName)         schoolsQuery = schoolsQuery.eq("group_name", groupName);
-  else if (period.school_id) schoolsQuery = schoolsQuery.eq("id", period.school_id);
+  if (groupName) {
+    schoolsQuery = schoolsQuery.eq("group_name", groupName);
+  } else if (period.school_id) {
+    schoolsQuery = schoolsQuery.eq("id", period.school_id);
+  } else {
+    // フォールバック: 希望を提出した講師の所属教室に絞る
+    const teacherSchoolIds = [...new Set(
+      (requests ?? []).map((r) => (r.teachers as { school_id: string | null } | null)?.school_id).filter(Boolean) as string[]
+    )];
+    if (teacherSchoolIds.length > 0) {
+      schoolsQuery = schoolsQuery.in("id", teacherSchoolIds);
+    }
+  }
   const { data: schools } = await schoolsQuery;
 
   // アルゴリズムでシフト割り当て
@@ -171,7 +185,7 @@ export async function POST(req: NextRequest) {
   );
 
   // Claude で短い要約
-  const summary = await summarize(shifts, warnings);
+  const summary = await summarize(shifts, warnings, custom_prompt?.trim() ?? "");
 
   // 実行履歴保存
   await admin.from("shift_ai_runs").insert({

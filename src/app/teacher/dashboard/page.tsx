@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { Skeleton } from "@/components/Skeleton";
 
 type Counts = {
   students: number;
@@ -296,7 +297,18 @@ export default function TeacherDashboardPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <h2 className="mb-4 text-sm font-semibold text-slate-900">直近のアクティビティ</h2>
           {loading ? (
-            <p className="text-sm text-slate-400">読み込み中...</p>
+            <div className="space-y-2">
+              {[1,2,3,4].map((i) => (
+                <div key={i} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-2 w-2 rounded-full" />
+                    <Skeleton className="h-4 flex-1" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                  <Skeleton className="mt-1.5 h-3 w-3/4" />
+                </div>
+              ))}
+            </div>
           ) : activity.length === 0 ? (
             <p className="text-sm text-slate-400">記録されたアクティビティはありません。</p>
           ) : (
@@ -364,21 +376,47 @@ export default function TeacherDashboardPage() {
   );
 }
 
+function useCountUp(target: number, active: boolean, duration = 700): number {
+  const [display, setDisplay] = useState(0);
+  const rafRef = useRef<number>(0);
+  useEffect(() => {
+    if (!active || target === 0) { setDisplay(target); return; }
+    setDisplay(0);
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(eased * target));
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [target, active, duration]);
+  return display;
+}
+
 function KpiCard({
   label, value, loading, alert, href,
 }: { label: string; value: number | undefined; loading: boolean; alert?: boolean; href?: string }) {
   const v = value ?? 0;
-  const tone = alert && v > 0 ? "border-red-200 bg-red-50" : "border-slate-200 bg-white";
-  const text = alert && v > 0 ? "text-red-700" : "text-slate-900";
+  const displayed = useCountUp(v, !loading);
+  const hasAlert = alert && v > 0;
+  const tone = hasAlert ? "border-red-200 bg-red-50 hover:border-red-300" : "border-slate-200 bg-white hover:border-slate-300";
+  const text = hasAlert ? "text-red-700" : "text-slate-900";
   const content = (
-    <div className={`rounded-2xl border ${tone} p-4 shadow-sm`}>
+    <div className={`rounded-2xl border ${tone} p-4 shadow-sm transition-all duration-200 ${href ? "hover:-translate-y-0.5 hover:shadow-md" : ""}`}>
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">{label}</p>
-      <p className={`mt-2 text-2xl font-bold ${text}`}>
-        {loading ? <span className="inline-block h-6 w-12 animate-pulse rounded bg-slate-200" /> : v.toLocaleString()}
+      <p className={`mt-2 text-2xl font-bold tabular-nums transition-all ${text}`}>
+        {loading
+          ? <span className="inline-block h-6 w-12 animate-pulse rounded bg-slate-200" />
+          : displayed.toLocaleString()}
       </p>
+      {hasAlert && (
+        <span className="mt-1 inline-block h-1 w-full rounded-full bg-red-300/50" />
+      )}
     </div>
   );
-  return href ? <Link href={href} className="block transition hover:-translate-y-0.5">{content}</Link> : content;
+  return href ? <Link href={href}>{content}</Link> : content;
 }
 
 function KindDot({ kind }: { kind: ActivityItem["kind"] }) {

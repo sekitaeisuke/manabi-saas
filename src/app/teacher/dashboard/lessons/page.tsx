@@ -3,7 +3,9 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, Teacher, School } from "@/lib/supabase";
-import { Toast } from "@/components/Toast";
+import { showToast } from "@/lib/toast";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { Skeleton } from "@/components/Skeleton";
 
 type RescheduleReq = {
   id: string;
@@ -68,7 +70,7 @@ export default function TeacherLessonsPage() {
   const [rescheduleReqs, setRescheduleReqs] = useState<RescheduleReq[]>([]);
   const [reqResponse, setReqResponse] = useState("");
   const [reqActing, setReqActing] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Lesson | null>(null);
 
   const fetchRefs = useCallback(async () => {
     const [{ data: s }, { data: sc }, { data: t }] = await Promise.all([
@@ -90,7 +92,21 @@ export default function TeacherLessonsPage() {
       end.setDate(end.getDate() + 1);
       q = q.lt("scheduled_at", end.toISOString());
     }
-    if (filterStudent) q = q.eq("student_id", filterStudent);
+    if (filterStudent) {
+      q = q.eq("student_id", filterStudent);
+    } else if (filterSchool) {
+      const { data: schoolStudents } = await supabase
+        .from("students").select("id").eq("school_id", filterSchool);
+      const ids = (schoolStudents ?? []).map((s: { id: string }) => s.id);
+      if (ids.length > 0) {
+        q = q.in("student_id", ids);
+      } else {
+        setLessons([]);
+        setRescheduleReqs([]);
+        setLoading(false);
+        return;
+      }
+    }
     const [{ data }, { data: rr }] = await Promise.all([
       q,
       supabase
@@ -101,7 +117,7 @@ export default function TeacherLessonsPage() {
     setLessons((data as Lesson[]) ?? []);
     setRescheduleReqs((rr as unknown as RescheduleReq[]) ?? []);
     setLoading(false);
-  }, [filterFrom, filterTo, filterStudent]);
+  }, [filterFrom, filterTo, filterStudent, filterSchool]);
 
   useEffect(() => { fetchRefs(); }, [fetchRefs]);
   useEffect(() => { fetchLessons(); }, [fetchLessons]);
@@ -158,7 +174,7 @@ export default function TeacherLessonsPage() {
     setReqResponse("");
     setCreating(false);
     setEditing(null);
-    setToast("振替申請を承認しました");
+    showToast("振替申請を承認しました", "success");
     fetchLessons();
   };
 
@@ -172,7 +188,7 @@ export default function TeacherLessonsPage() {
     setReqResponse("");
     setCreating(false);
     setEditing(null);
-    setToast("振替申請を却下しました");
+    showToast("振替申請を却下しました", "info");
     fetchLessons();
   };
 
@@ -226,8 +242,14 @@ export default function TeacherLessonsPage() {
   };
 
   const remove = async (l: Lesson) => {
-    if (!confirm(`「${studentName(l.student_id)} ・ ${new Date(l.scheduled_at).toLocaleString("ja-JP")}」を削除しますか？`)) return;
-    await supabase.from("lessons").delete().eq("id", l.id);
+    setDeleteTarget(l);
+  };
+
+  const doRemove = async () => {
+    if (!deleteTarget) return;
+    await supabase.from("lessons").delete().eq("id", deleteTarget.id);
+    setDeleteTarget(null);
+    showToast("削除しました", "success");
     fetchLessons();
   };
 
@@ -278,10 +300,26 @@ export default function TeacherLessonsPage() {
         </section>
 
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+          <div className="space-y-2 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            {[1,2,3,4,5].map((i) => (
+              <div key={i} className="flex items-center gap-4 py-2 border-b border-slate-50">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 flex-1" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-7 w-20 rounded-lg" />
+              </div>
+            ))}
+          </div>
         ) : lessons.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            該当する授業はありません
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-4xl mb-3">📅</p>
+            <p className="font-semibold text-slate-700">該当する授業はありません</p>
+            <p className="mt-1 text-sm text-slate-400">フィルターを変更するか、授業を追加してください。</p>
+            <button onClick={openCreate}
+              className="mt-5 rounded-2xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition">
+              ＋ 授業を追加
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -437,7 +475,17 @@ export default function TeacherLessonsPage() {
           </div>
         )}
       </div>
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+
+      {deleteTarget && (
+        <ConfirmModal
+          title="授業を削除"
+          message={`「${studentName(deleteTarget.student_id)} ・ ${new Date(deleteTarget.scheduled_at).toLocaleString("ja-JP")}」を削除しますか？`}
+          confirmLabel="削除する"
+          danger
+          onConfirm={doRemove}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,9 +1,11 @@
 "use client";
 import { showToast } from "@/lib/toast";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { notify, links } from "@/lib/notify";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { Skeleton } from "@/components/Skeleton";
 
 type Tab = "inbox" | "students" | "announcements";
 
@@ -71,6 +73,11 @@ export default function MessagesPage() {
   const [form, setForm] = useState({ title: "", content: "", target_grade: "", target_school_id: "" });
   const [saving, setSaving] = useState(false);
   const [schools, setSchools] = useState<School[]>([]);
+  const [deleteAnnoId, setDeleteAnnoId] = useState<string | null>(null);
+  const [deleteThreadConfirm, setDeleteThreadConfirm] = useState(false);
+  const [deleteStudentThreadConfirm, setDeleteStudentThreadConfirm] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const studentChatEndRef = useRef<HTMLDivElement>(null);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [showNew, setShowNew] = useState(false);
@@ -143,6 +150,13 @@ export default function MessagesPage() {
     [studentThreads, activeStudentThreadId]
   );
 
+  useEffect(() => {
+    if (activeThreadId) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+  }, [activeThreadId, messages]);
+  useEffect(() => {
+    if (activeStudentThreadId) setTimeout(() => studentChatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+  }, [activeStudentThreadId, studentMessages]);
+
   const openThread = async (threadId: string) => {
     setActiveThreadId(threadId);
     const toMark = messages
@@ -194,10 +208,10 @@ export default function MessagesPage() {
 
   const deleteThread = async () => {
     if (!active) return;
-    if (!confirm("このスレッドを削除しますか？")) return;
     const ids = active.msgs.map((m) => m.id);
     await supabase.from("parent_messages").delete().in("id", ids);
     setActiveThreadId(null);
+    setDeleteThreadConfirm(false);
     fetchAll();
   };
 
@@ -250,15 +264,16 @@ export default function MessagesPage() {
 
   const deleteStudentThread = async () => {
     if (!activeStudent) return;
-    if (!confirm("このスレッドを削除しますか？")) return;
     const ids = activeStudent.msgs.map((m) => m.id);
     await supabase.from("student_messages").delete().in("id", ids);
     setActiveStudentThreadId(null);
+    setDeleteStudentThreadConfirm(false);
     fetchAll();
   };
 
   const saveAnnouncement = async () => {
-    if (!form.title || !form.content) return;
+    if (!form.title.trim()) { showToast("タイトルを入力してください", "info"); return; }
+    if (!form.content.trim()) { showToast("本文を入力してください", "info"); return; }
     setSaving(true);
     const { data: { user } } = await supabase.auth.getUser();
     const { data: inserted } = await supabase.from("announcements").insert({
@@ -282,13 +297,15 @@ export default function MessagesPage() {
     setForm({ title: "", content: "", target_grade: "", target_school_id: "" });
     setShowForm(false);
     setSaving(false);
+    showToast("お知らせを配信しました", "success");
     fetchAll();
   };
 
   const deleteAnnouncement = async (id: string) => {
-    if (!confirm("このお知らせを削除しますか？")) return;
     await supabase.from("announcements").delete().eq("id", id);
     setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    setDeleteAnnoId(null);
+    showToast("削除しました", "info");
   };
 
   const openNew = async () => {
@@ -406,9 +423,40 @@ export default function MessagesPage() {
           </button>
         </div>
 
+        {deleteAnnoId && (
+          <ConfirmModal title="お知らせを削除" message="このお知らせを削除しますか？" confirmLabel="削除する" danger
+            onConfirm={() => deleteAnnouncement(deleteAnnoId)} onCancel={() => setDeleteAnnoId(null)} />
+        )}
+        {deleteThreadConfirm && (
+          <ConfirmModal title="スレッドを削除" message="このスレッドのすべてのメッセージを削除しますか？" confirmLabel="削除する" danger
+            onConfirm={deleteThread} onCancel={() => setDeleteThreadConfirm(false)} />
+        )}
+        {deleteStudentThreadConfirm && (
+          <ConfirmModal title="スレッドを削除" message="このスレッドのすべてのメッセージを削除しますか？" confirmLabel="削除する" danger
+            onConfirm={deleteStudentThread} onCancel={() => setDeleteStudentThreadConfirm(false)} />
+        )}
+
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-500">
-            読み込み中...
+          <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
+            <div className="space-y-2">
+              {[1,2,3,4].map((i) => (
+                <div key={i} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Skeleton className="h-4 w-28" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                  <Skeleton className="h-3 w-40" />
+                  <Skeleton className="h-3 w-full" />
+                </div>
+              ))}
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 space-y-4">
+              {[1,2,3].map((i) => (
+                <div key={i} className={`flex ${i%2===0?"justify-end":"justify-start"}`}>
+                  <Skeleton className={`h-20 rounded-2xl ${i%2===0?"w-2/3":"w-1/2"}`} />
+                </div>
+              ))}
+            </div>
           </div>
         ) : tab === "inbox" ? (
           <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
@@ -475,8 +523,8 @@ export default function MessagesPage() {
                         </a>
                       )}
                     </div>
-                    <button onClick={deleteThread}
-                      className="shrink-0 rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                    <button onClick={() => setDeleteThreadConfirm(true)}
+                      className="shrink-0 rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition">
                       スレッド削除
                     </button>
                   </div>
@@ -565,8 +613,8 @@ export default function MessagesPage() {
                       <h2 className="text-lg font-bold text-slate-900">{activeStudent.subject}</h2>
                       <p className="mt-1 text-sm text-slate-600">{activeStudent.first.student_name}</p>
                     </div>
-                    <button onClick={deleteStudentThread}
-                      className="shrink-0 rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                    <button onClick={() => setDeleteStudentThreadConfirm(true)}
+                      className="shrink-0 rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition">
                       スレッド削除
                     </button>
                   </div>
@@ -705,8 +753,8 @@ export default function MessagesPage() {
                           <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{a.content}</p>
                           <p className="mt-3 text-xs text-slate-400">{new Date(a.created_at).toLocaleString("ja-JP")}</p>
                         </div>
-                        <button onClick={() => deleteAnnouncement(a.id)}
-                          className="shrink-0 rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                        <button onClick={() => setDeleteAnnoId(a.id)}
+                          className="shrink-0 rounded-xl border border-red-200 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition">
                           削除
                         </button>
                       </div>

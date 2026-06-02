@@ -3,6 +3,9 @@ import { sanitizeHtml } from "@/lib/sanitize";
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { showToast } from "@/lib/toast";
+import { triggerConfetti } from "@/lib/confetti";
+import { Skeleton } from "@/components/Skeleton";
 import { GRADE_ORDER, SUBJECT_LIST } from "@/lib/curriculum";
 
 type LessonReport = {
@@ -96,18 +99,24 @@ function ReportDetailView({ report, onBack, onUpdated }: {
       message_to_child: messageToChild || null,
     };
     if (nextStatus) update.status = nextStatus;
-    const { data } = await supabase
+    const { error } = await supabase
       .from("lesson_reports")
       .update(update)
-      .eq("id", report.id)
-      .select()
-      .single();
-    if (data) {
-      const updated = { ...report, ...update };
-      if (nextStatus) setStatus(nextStatus);
-      onUpdated(updated as LessonReport);
-    }
+      .eq("id", report.id);
     setSaving(false);
+    if (error) {
+      showToast("保存に失敗しました: " + error.message, "error");
+      return;
+    }
+    const updated = { ...report, ...update };
+    if (nextStatus) setStatus(nextStatus);
+    onUpdated(updated as LessonReport);
+    if (nextStatus === "sent") {
+      triggerConfetti();
+      showToast("報告書を送信完了しました！", "success", 4000);
+    } else {
+      showToast("保存しました", "success");
+    }
   };
 
   return (
@@ -237,6 +246,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<LessonReport | null>(null);
   const [filter, setFilter] = useState<"all" | "draft" | "sent">("all");
+  const [studentFilter, setStudentFilter] = useState<string>("all");
   const [showManualForm, setShowManualForm] = useState(false);
 
   const fetchReports = useCallback(async () => {
@@ -275,9 +285,12 @@ export default function ReportsPage() {
     );
   }
 
+  const studentNames = [...new Set(reports.map((r) => r.student_name))].sort();
+
   const filtered = reports.filter((r) => {
-    if (filter === "draft") return r.status === "draft";
-    if (filter === "sent")  return r.status === "sent";
+    if (filter === "draft" && r.status !== "draft") return false;
+    if (filter === "sent"  && r.status !== "sent")  return false;
+    if (studentFilter !== "all" && r.student_name !== studentFilter) return false;
     return true;
   });
 
@@ -299,7 +312,7 @@ export default function ReportsPage() {
           </button>
         </div>
 
-        <div className="mb-6 flex gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
           {([
             { key: "all",   label: "すべて" },
             { key: "draft", label: "未送信" },
@@ -321,14 +334,55 @@ export default function ReportsPage() {
           ))}
         </div>
 
+        {studentNames.length > 0 && (
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-400">生徒:</span>
+            <button
+              onClick={() => setStudentFilter("all")}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                studentFilter === "all" ? "bg-slate-800 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}>
+              全員
+            </button>
+            {studentNames.map((name) => (
+              <button key={name} onClick={() => setStudentFilter(name)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                  studentFilter === name ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}>
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
+
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+          <div className="space-y-3">
+            {[1,2,3].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 space-y-3">
+                    <div className="flex gap-2"><Skeleton className="h-5 w-14" /><Skeleton className="h-5 w-20" /></div>
+                    <Skeleton className="h-6 w-36" />
+                    <Skeleton className="h-4 w-56" />
+                  </div>
+                  <Skeleton className="h-10 w-24 rounded-2xl" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : filtered.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            <p>報告書がありません。</p>
-            <p className="mt-1 text-sm text-slate-400">
-              授業確認テストの採点後「報告書を保存」を押すと、ここに表示されます。
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-4xl mb-3">📄</p>
+            <p className="font-semibold text-slate-700">
+              {studentFilter !== "all" ? `${studentFilter} さんの報告書がありません` : "報告書がありません"}
             </p>
+            <p className="mt-1 text-sm text-slate-400">
+              テストの採点後「報告書を保存」を押すか、手動で作成してください。
+            </p>
+            <button onClick={() => setShowManualForm(true)}
+              className="mt-5 rounded-2xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition">
+              + 手動で報告書を作成
+            </button>
           </div>
         ) : (
           <div className="space-y-3">
@@ -378,6 +432,23 @@ export default function ReportsPage() {
   );
 }
 
+// ── テンプレート管理（localStorage）──────────────────────────
+const TEMPLATE_KEY = "manabi_report_templates";
+type Template = { id: string; name: string; subject: string; learningContent: string; learningMethod: string };
+
+function loadTemplates(): Template[] {
+  if (typeof window === "undefined") return [];
+  try { return JSON.parse(localStorage.getItem(TEMPLATE_KEY) ?? "[]"); } catch { return []; }
+}
+function saveTemplateToStorage(name: string, data: Omit<Template, "id" | "name">) {
+  const all = loadTemplates().filter((t) => t.name !== name);
+  all.unshift({ id: Date.now().toString(), name, ...data });
+  localStorage.setItem(TEMPLATE_KEY, JSON.stringify(all.slice(0, 6)));
+}
+function deleteTemplateFromStorage(id: string) {
+  localStorage.setItem(TEMPLATE_KEY, JSON.stringify(loadTemplates().filter((t) => t.id !== id)));
+}
+
 // ── 手動報告書作成フォーム ────────────────────────────────
 function ManualReportForm({
   onBack,
@@ -388,22 +459,26 @@ function ManualReportForm({
 }) {
   const [students, setStudents] = useState<{ id: string; name: string; grade: string }[]>([]);
   const [studentName, setStudentName] = useState("");
+  const [studentId, setStudentId] = useState<string | null>(null);
   const [grade, setGrade] = useState("中1");
   const [subject, setSubject] = useState("数学");
   const [learningContent, setLearningContent] = useState("");
   const [learningMethod, setLearningMethod] = useState("");
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [showTemplateSave, setShowTemplateSave] = useState(false);
+  const [templateName, setTemplateName] = useState("");
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [messageToChild, setMessageToChild] = useState("");
   const [teacherNotes, setTeacherNotes] = useState("");
   const [generating, setGenerating] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     supabase.from("students").select("id, name, grade").order("name").then(({ data }) => {
       setStudents(data ?? []);
     });
+    setTemplates(loadTemplates());
   }, []);
 
   const toggleItem = (item: string) => {
@@ -418,7 +493,8 @@ function ManualReportForm({
   const selectStudent = (name: string) => {
     setStudentName(name);
     const s = students.find((s) => s.name === name);
-    if (s) setGrade(s.grade);
+    if (s) { setGrade(s.grade); setStudentId(s.id); }
+    else setStudentId(null);
   };
 
   const generate = async () => {
@@ -426,7 +502,6 @@ function ManualReportForm({
     setError("");
     setGenerating(true);
     setPreviewHtml("");
-    setSaved(false);
     try {
       // Step1: Claude でHTMLを生成
       const res = await fetch("/api/reports/generate-manual", {
@@ -452,6 +527,7 @@ function ManualReportForm({
         test_subject: subject,
         test_grade: grade,
         student_name: studentName.trim(),
+        student_id: studentId || null,
         report_html: data.reportHtml,
         teacher_notes: teacherNotes || null,
         message_to_child: messageToChild || null,
@@ -464,7 +540,6 @@ function ManualReportForm({
       if (dbErr) { setError("報告書の保存に失敗しました: " + dbErr.message); return; }
 
       setPreviewHtml(data.reportHtml);
-      setSaved(true);
     } catch (e) {
       setError("エラー: " + String(e));
     } finally {
@@ -552,9 +627,63 @@ function ManualReportForm({
           </div>
         </div>
 
+        {/* テンプレート */}
+        {templates.length > 0 && (
+          <div className="no-print rounded-3xl border border-indigo-100 bg-indigo-50 p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-indigo-900">保存済みテンプレート</h2>
+              <span className="text-xs text-indigo-500">{templates.length}件</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {templates.map((t) => (
+                <div key={t.id} className="flex items-center gap-1 rounded-2xl border border-indigo-200 bg-white px-3 py-1.5 text-xs shadow-sm">
+                  <button onClick={() => {
+                    setSubject(t.subject);
+                    setLearningContent(t.learningContent);
+                    setLearningMethod(t.learningMethod);
+                    showToast(`「${t.name}」を読み込みました`, "success");
+                  }} className="font-semibold text-indigo-700 hover:text-indigo-900">
+                    {t.name}
+                  </button>
+                  <button onClick={() => {
+                    deleteTemplateFromStorage(t.id);
+                    setTemplates(loadTemplates());
+                    showToast("テンプレートを削除しました", "info");
+                  }} className="ml-1 text-slate-300 hover:text-red-400">✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 学習内容・方法 */}
         <div className="no-print rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-          <h2 className="font-semibold text-slate-900">授業内容</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-slate-900">授業内容</h2>
+            {!showTemplateSave ? (
+              <button onClick={() => setShowTemplateSave(true)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50 transition">
+                テンプレートに保存
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input value={templateName} onChange={(e) => setTemplateName(e.target.value)}
+                  placeholder="テンプレート名" autoFocus
+                  className="w-36 rounded-xl border border-slate-200 px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-indigo-400" />
+                <button onClick={() => {
+                  if (!templateName.trim()) return;
+                  saveTemplateToStorage(templateName.trim(), { subject, learningContent, learningMethod });
+                  setTemplates(loadTemplates());
+                  setShowTemplateSave(false);
+                  setTemplateName("");
+                  showToast("テンプレートを保存しました", "success");
+                }} className="rounded-xl bg-indigo-600 px-3 py-1 text-xs font-semibold text-white hover:bg-indigo-700">
+                  保存
+                </button>
+                <button onClick={() => setShowTemplateSave(false)} className="text-xs text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+            )}
+          </div>
           <label className="grid gap-1 text-sm text-slate-700">
             学習内容（what）
             <textarea
@@ -673,7 +802,6 @@ function ManualReportForm({
               <button
                 onClick={() => {
                   setPreviewHtml("");
-                  setSaved(false);
                   setStudentName("");
                   setLearningContent("");
                   setLearningMethod("");

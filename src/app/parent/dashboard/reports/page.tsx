@@ -4,6 +4,7 @@ import { sanitizeHtml } from "@/lib/sanitize";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
+import { Skeleton } from "@/components/Skeleton";
 
 type Report = {
   id: string;
@@ -38,12 +39,14 @@ export default function ParentReportsPage() {
   const load = useCallback(async () => {
     if (!selectedId) return;
     setLoading(true);
-    const { data: stu } = await supabase.from("students").select("name").eq("id", selectedId).maybeSingle();
+    const { data: stu } = await supabase
+      .from("students").select("name, grade").eq("id", selectedId).maybeSingle();
     if (!stu) { setLoading(false); return; }
     const { data } = await supabase
       .from("lesson_reports")
       .select("*")
       .eq("student_name", stu.name)
+      .eq("test_grade", stu.grade)
       .eq("status", "sent")
       .order("created_at", { ascending: false });
     setReports((data as Report[]) ?? []);
@@ -148,16 +151,36 @@ export default function ParentReportsPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 space-y-3">
+                    <Skeleton className="h-4 w-20" />
+                    <Skeleton className="h-6 w-48" />
+                    <Skeleton className="h-4 w-32" />
+                    <div className="flex gap-2">
+                      <Skeleton className="h-6 w-20 rounded-full" />
+                      <Skeleton className="h-6 w-16 rounded-full" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-10 w-16 rounded-2xl" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : reports.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            まだ報告書は届いていません。
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-4xl mb-3">📄</p>
+            <p className="font-semibold text-slate-700">まだ報告書は届いていません</p>
+            <p className="mt-2 text-sm text-slate-400">授業後に先生が作成すると、こちらに表示されます。</p>
           </div>
         ) : (
           <div className="space-y-3">
             {reports.map((r) => (
               <div key={r.id}
-                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md">
+                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md cursor-pointer"
+                onClick={() => setSelected(r)}>
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
                     <p className="mb-1 text-xs text-slate-400">{r.created_at.slice(0, 10)}</p>
@@ -165,7 +188,7 @@ export default function ParentReportsPage() {
                     <p className="mt-0.5 text-sm text-slate-500">
                       {r.test_subject && `${r.test_subject} ・ `}{r.test_grade}
                     </p>
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
                       {r.percentage != null && (
                         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${scoreClass(r.percentage)}`}>
                           正答率：{r.percentage}%
@@ -176,12 +199,16 @@ export default function ParentReportsPage() {
                           {r.score}/{r.total}点
                         </span>
                       )}
+                      {r.message_to_child && (
+                        <span className="flex items-center gap-1 rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-700">
+                          ⭐ 先生からのメッセージあり
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <button onClick={() => setSelected(r)}
-                    className="shrink-0 rounded-2xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
+                  <span className="shrink-0 rounded-2xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white">
                     開く
-                  </button>
+                  </span>
                 </div>
               </div>
             ))}

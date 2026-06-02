@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
+import { Skeleton } from "@/components/Skeleton";
 
 type UpcomingLesson = {
   id: string;
@@ -18,6 +19,7 @@ type LatestReport = {
   test_title: string;
   test_subject: string | null;
   percentage: number | null;
+  message_to_child: string | null;
   created_at: string;
 };
 
@@ -40,6 +42,7 @@ type Announcement = {
 export default function ParentOverviewPage() {
   const [selectedId] = useSelectedStudentId();
   const [student, setStudent] = useState<Student | null>(null);
+  const [messageToChild, setMessageToChild] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const [upcoming, setUpcoming] = useState<UpcomingLesson[]>([]);
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
@@ -57,11 +60,9 @@ export default function ParentOverviewPage() {
       .from("announcements")
       .select("id, title, content, target_grade, target_school_id, created_at")
       .order("created_at", { ascending: false })
-      .limit(20);
+      .limit(100);
     const filtered = (ann ?? []).filter((a) => {
-      // 対象指定がない（全体向け）は常に表示
       if (!a.target_grade && !a.target_school_id) return true;
-      // 学年 OR 校舎のいずれかが一致すれば表示
       const gradeOk  = !!a.target_grade     && a.target_grade     === s?.grade;
       const schoolOk = !!a.target_school_id && a.target_school_id === s?.school_id;
       return gradeOk || schoolOk;
@@ -89,13 +90,15 @@ export default function ParentOverviewPage() {
     if (s?.name) {
       const { data: rep } = await supabase
         .from("lesson_reports")
-        .select("id, test_title, test_subject, percentage, created_at")
+        .select("id, test_title, test_subject, percentage, message_to_child, created_at")
         .eq("student_name", s.name)
+        .eq("test_grade", s.grade)
         .eq("status", "sent")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       setLatestReport((rep as LatestReport) ?? null);
+      setMessageToChild((rep as LatestReport | null)?.message_to_child ?? null);
     }
 
     const { data: diag } = await supabase
@@ -132,11 +135,34 @@ export default function ParentOverviewPage() {
         </div>
 
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">
-            読み込み中...
+          <div className="grid gap-6">
+            <div className="rounded-3xl border border-yellow-200 bg-yellow-50 p-6">
+              <Skeleton className="mb-3 h-4 w-32" />
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="mt-2 h-5 w-3/4" />
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+              {[1,2,3].map((i) => <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6"><Skeleton className="mb-3 h-4 w-24" /><Skeleton className="h-8 w-16" /></div>)}
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-white p-8"><Skeleton className="mb-4 h-6 w-40" />{[1,2].map((i)=><Skeleton key={i} className="mb-3 h-16 rounded-2xl w-full" />)}</div>
           </div>
         ) : (
           <div className="grid gap-6">
+            {messageToChild && (
+              <section className="rounded-3xl border-2 border-yellow-300 bg-gradient-to-r from-yellow-50 to-amber-50 p-6 shadow-sm">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-2xl">⭐</span>
+                  <p className="font-bold text-yellow-900">先生からお子様へのメッセージ</p>
+                </div>
+                <p className="leading-relaxed text-slate-800">{messageToChild}</p>
+                {latestReport && (
+                  <p className="mt-3 text-xs text-yellow-700">
+                    {latestReport.created_at.slice(0,10)} の授業報告書より
+                    <Link href="/parent/dashboard/reports" className="ml-2 underline hover:text-yellow-900">報告書を開く →</Link>
+                  </p>
+                )}
+              </section>
+            )}
             <section className="grid grid-cols-2 gap-3 md:grid-cols-3">
               <SummaryCard
                 title="未読メッセージ"

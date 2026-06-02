@@ -6,6 +6,9 @@ import type { AttendanceRecord } from "@/lib/supabase";
 import { FaceCamera } from "@/components/FaceCamera";
 import { findMatch } from "@/lib/faceRecognition";
 import { showToast } from "@/lib/toast";
+import { ConfirmModal } from "@/components/ConfirmModal";
+import { Skeleton } from "@/components/Skeleton";
+import { triggerConfetti } from "@/lib/confetti";
 import Link from "next/link";
 
 function calcWorkMinutes(rec: AttendanceRecord): number {
@@ -21,7 +24,8 @@ function fmtTime(iso: string | null): string {
   return new Date(iso).toLocaleTimeString("ja-JP", { hour:"2-digit", minute:"2-digit" });
 }
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 type InputMode = "select" | "face" | "manual";
@@ -44,7 +48,8 @@ export default function AttendancePage() {
   const [breakMin, setBreakMin]           = useState("0");
   const [noteText, setNoteText]           = useState("");
   const [faceRetryCount, setFaceRetryCount] = useState(0);
-  const [showDetails, setShowDetails]     = useState(false);
+  const [showDetails, setShowDetails]     = useState(true);
+  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
 
   const today   = todayStr();
   const ym      = today.slice(0, 7);
@@ -88,7 +93,8 @@ export default function AttendancePage() {
     if (!data) { showToast("記録の取得に失敗しました", "error"); return; }
     setTodayRec(data as AttendanceRecord);
     setMode("select");
-    showToast("出勤しました！", "success");
+    triggerConfetti();
+    showToast("出勤しました！今日もよろしくお願いします", "success", 4000);
     load();
   };
 
@@ -114,7 +120,7 @@ export default function AttendancePage() {
     setShowForm(false);
     setShowDetails(false);
     setTransportFee(""); setTransportNote(""); setBreakMin("0"); setNoteText("");
-    showToast("退勤しました！お疲れさまでした。", "success");
+    showToast("退勤しました！お疲れさまでした", "success", 4000);
     load();
   };
 
@@ -140,8 +146,11 @@ export default function AttendancePage() {
   };
 
   // 退勤取り消し（誤打刻対応）
-  const cancelClockOut = async () => {
-    if (!todayRec || !confirm("本日の退勤記録を取り消しますか？\n（出勤記録は残ります）")) return;
+  const cancelClockOut = () => { setConfirmCancelOpen(true); };
+
+  const doCancelClockOut = async () => {
+    setConfirmCancelOpen(false);
+    if (!todayRec) return;
     setBusy(true);
     const { error } = await supabase.from("attendance_records").update({
       clock_out: null, break_minutes: 0, transportation_fee: 0,
@@ -298,9 +307,15 @@ export default function AttendancePage() {
             </div>
           </div>
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-6 text-slate-400">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-blue-500" />
-              <span className="text-sm">読み込み中...</span>
+            <div className="space-y-2 py-2">
+              {[1,2,3].map((i) => (
+                <div key={i} className="flex items-center gap-3 py-2">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-4 flex-1" />
+                  <Skeleton className="h-4 w-12" />
+                  <Skeleton className="h-4 w-14" />
+                </div>
+              ))}
             </div>
           ) : monthRecs.length === 0 ? (
             <div className="rounded-2xl bg-slate-50 py-8 text-center">
@@ -326,6 +341,18 @@ export default function AttendancePage() {
           )}
         </div>
       </div>
+
+      {confirmCancelOpen && (
+        <ConfirmModal
+          title="退勤記録を取り消す"
+          message={"本日の退勤記録を取り消しますか？\n出勤記録は残ります。"}
+          confirmLabel="取り消す"
+          cancelLabel="戻る"
+          danger
+          onConfirm={doCancelClockOut}
+          onCancel={() => setConfirmCancelOpen(false)}
+        />
+      )}
 
       {/* 退勤フォーム（スライドアップ） */}
       {showForm && (
