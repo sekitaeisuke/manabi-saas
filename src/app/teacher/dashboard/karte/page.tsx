@@ -23,6 +23,22 @@ type DiagnosisPreset = {
   sessionId: string;
 };
 
+type DiagnosisResponse = {
+  id: string;
+  session_id: string;
+  student_name: string;
+  grade: string | null;
+  subject: string | null;
+  test_score: number | null;
+  test_total: number | null;
+  test_percentage: number | null;
+  habit_score: number | null;
+  method_score: number | null;
+  ai_analysis: string | null;
+  status: "pending" | "analyzed" | "approved";
+  created_at: string;
+};
+
 // 生徒名から一定のアバターカラーを返す
 const AVATAR_COLORS = [
   "bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-rose-500",
@@ -356,8 +372,129 @@ function KarteDetail({ plan, onBack, onUpdated }: {
   );
 }
 
+// ─── 診断テスト選択ステップ ────────────────────────────────
+function SelectDiagnosisStep({
+  unlinked,
+  loading,
+  onSelect,
+  onManual,
+  onBack,
+}: {
+  unlinked: DiagnosisResponse[];
+  loading: boolean;
+  onSelect: (r: DiagnosisResponse) => void;
+  onManual: () => void;
+  onBack: () => void;
+}) {
+  const statusLabel = (s: DiagnosisResponse["status"]) =>
+    s === "analyzed" ? "分析済" : "承認済";
+  const statusColor = (s: DiagnosisResponse["status"]) =>
+    s === "analyzed" ? "bg-blue-100 text-blue-700" : "bg-green-100 text-green-700";
+
+  return (
+    <div className="min-h-screen bg-slate-50 px-6 py-8">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-950">カルテを作成</h1>
+            <p className="mt-0.5 text-sm text-slate-500">
+              カルテと紐づいていない多層診断テストを選択してください
+            </p>
+          </div>
+          <button
+            onClick={onBack}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            一覧に戻る
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm animate-pulse">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-slate-200 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-32 rounded bg-slate-200" />
+                    <div className="h-3 w-24 rounded bg-slate-100" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : unlinked.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center text-slate-500">
+            <p className="text-4xl mb-3">📋</p>
+            <p className="font-semibold text-slate-700">カルテ未作成の診断テストはありません</p>
+            <p className="mt-1 text-sm text-slate-400">
+              多層診断でAI分析・承認済みのテストがここに表示されます
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {unlinked.map((r) => {
+              const initial = r.student_name.charAt(0);
+              const bg = AVATAR_COLORS[(r.student_name.charCodeAt(0) ?? 0) % AVATAR_COLORS.length];
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => onSelect(r)}
+                  className="w-full group rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-violet-300 hover:shadow-md"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${bg} text-lg font-bold text-white shadow-sm`}>
+                      {initial}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900">{r.student_name}</span>
+                        <span className="text-sm text-slate-500">{r.grade} ・ {r.subject}</span>
+                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${statusColor(r.status)}`}>
+                          {statusLabel(r.status)}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-3 text-xs text-slate-500">
+                        <span>受験日: {r.created_at.slice(0, 10)}</span>
+                        {r.test_percentage != null && (
+                          <span className={`font-semibold ${
+                            r.test_percentage >= 80 ? "text-green-700" :
+                            r.test_percentage >= 60 ? "text-blue-700" : "text-red-700"
+                          }`}>テスト {r.test_percentage}%</span>
+                        )}
+                        {r.habit_score != null && <span>学習習慣 {r.habit_score}</span>}
+                        {r.method_score != null && <span>学習法 {r.method_score}</span>}
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-sm font-medium text-violet-600 group-hover:underline">
+                      このテストでカルテを作成 →
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-6 text-center">
+          <button
+            onClick={onManual}
+            className="rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            診断テストを使わず手入力で作成する
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── カルテ作成フロー ──────────────────────────────────────
 function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () => void }) {
+  const [flowStep, setFlowStep] = useState<"select" | "form">("select");
+  const [unlinked, setUnlinked] = useState<DiagnosisResponse[]>([]);
+  const [loadingUnlinked, setLoadingUnlinked] = useState(true);
+
   const [preset, setPreset] = useState<DiagnosisPreset | null>(null);
   const [studentName, setStudentName] = useState("");
   const [grade, setGrade] = useState("中1");
@@ -379,25 +516,65 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
 
+  const applyPresetData = useCallback((data: DiagnosisPreset) => {
+    setPreset(data);
+    setStudentName(data.studentName);
+    setGrade(data.grade || "中1");
+    setSubject(data.subject || "数学");
+    setTestScore(data.testScore != null ? String(data.testScore) : "");
+    setTestTotal(data.testTotal != null ? String(data.testTotal) : "");
+    setHabitScore(data.habitScore != null ? String(data.habitScore) : "");
+    setMethodScore(data.methodScore != null ? String(data.methodScore) : "");
+    setAiAnalysis(data.aiAnalysis ?? "");
+    setDiagnosisSessionId(data.sessionId);
+  }, []);
+
   useEffect(() => {
+    // sessionStorageから遷移してきた場合はフォームに直行
     const raw = sessionStorage.getItem("karteFromDiagnosis");
     if (raw) {
       try {
         const data: DiagnosisPreset = JSON.parse(raw);
-        setPreset(data);
-        setStudentName(data.studentName);
-        setGrade(data.grade || "中1");
-        setSubject(data.subject || "数学");
-        setTestScore(data.testScore != null ? String(data.testScore) : "");
-        setTestTotal(data.testTotal != null ? String(data.testTotal) : "");
-        setHabitScore(data.habitScore != null ? String(data.habitScore) : "");
-        setMethodScore(data.methodScore != null ? String(data.methodScore) : "");
-        setAiAnalysis(data.aiAnalysis ?? "");
-        setDiagnosisSessionId(data.sessionId);
+        applyPresetData(data);
         sessionStorage.removeItem("karteFromDiagnosis");
+        setFlowStep("form");
       } catch { /* ignore */ }
     }
-  }, []);
+
+    // 未紐づけの診断テストを取得
+    (async () => {
+      const [{ data: responses }, { data: plans }] = await Promise.all([
+        supabase
+          .from("questionnaire_responses")
+          .select("id, session_id, student_name, grade, subject, test_score, test_total, test_percentage, habit_score, method_score, ai_analysis, status, created_at")
+          .in("status", ["analyzed", "approved"])
+          .order("created_at", { ascending: false }),
+        supabase
+          .from("learning_plans")
+          .select("diagnosis_session_id")
+          .not("diagnosis_session_id", "is", null),
+      ]);
+      const linkedIds = new Set((plans ?? []).map((p: { diagnosis_session_id: string }) => p.diagnosis_session_id));
+      setUnlinked(((responses ?? []) as DiagnosisResponse[]).filter((r) => !linkedIds.has(r.session_id)));
+      setLoadingUnlinked(false);
+    })();
+  }, [applyPresetData]);
+
+  const selectResponse = (r: DiagnosisResponse) => {
+    applyPresetData({
+      studentName: r.student_name,
+      grade: r.grade || "中1",
+      subject: r.subject || "数学",
+      testScore: r.test_score,
+      testTotal: r.test_total,
+      testPercentage: r.test_percentage,
+      habitScore: r.habit_score,
+      methodScore: r.method_score,
+      aiAnalysis: r.ai_analysis,
+      sessionId: r.session_id,
+    });
+    setFlowStep("form");
+  };
 
   useEffect(() => {
     supabase.from("textbooks").select("*").order("subject").order("name")
@@ -499,6 +676,18 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
     setTimeout(() => { setSaved(false); onSaved(); }, 1200);
   };
 
+  if (flowStep === "select") {
+    return (
+      <SelectDiagnosisStep
+        unlinked={unlinked}
+        loading={loadingUnlinked}
+        onSelect={selectResponse}
+        onManual={() => setFlowStep("form")}
+        onBack={onBack}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 px-6 py-8">
       <div className="mx-auto max-w-6xl">
@@ -512,10 +701,16 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
               </p>
             )}
           </div>
-          <button onClick={onBack}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
-            一覧に戻る
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setFlowStep("select")}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
+              ← 診断テスト選択に戻る
+            </button>
+            <button onClick={onBack}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
+              一覧に戻る
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-5">
