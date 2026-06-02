@@ -169,7 +169,13 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
         <p>・担当講師が内容を確認・承認します</p>
         <p>・保護者アプリの「多層診断」に結果が届きます</p>
       </div>
-      <p className="mt-5 text-slate-400 text-sm">このページは閉じても大丈夫です。</p>
+      <a
+        href="/student/dashboard"
+        className="mt-6 block w-full rounded-2xl bg-indigo-600 py-3 text-center font-semibold text-white hover:bg-indigo-700 transition"
+      >
+        ダッシュボードに戻る
+      </a>
+      <p className="mt-3 text-slate-400 text-sm">このページは閉じても大丈夫です。</p>
     </Center>
   );
 
