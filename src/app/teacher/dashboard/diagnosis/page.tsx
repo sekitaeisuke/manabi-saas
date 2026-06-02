@@ -16,6 +16,12 @@ export default function DiagnosisPage() {
   const [selectedQResponse, setSelectedQResponse] = useState<QResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [schools, setSchools] = useState<{ id: string; name: string }[]>([]);
+
+  // フィルター
+  const [keyword, setKeyword]       = useState("");
+  const [filterGrade, setFilterGrade]   = useState("");
+  const [filterSchool, setFilterSchool] = useState("");
 
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -32,7 +38,26 @@ export default function DiagnosisPage() {
     setPendingCount(count ?? 0);
   }, []);
 
-  useEffect(() => { fetchStudents(); fetchPendingCount(); }, [fetchStudents, fetchPendingCount]);
+  useEffect(() => {
+    fetchStudents();
+    fetchPendingCount();
+    supabase.from("schools").select("id, name").order("name")
+      .then(({ data }) => setSchools(data ?? []));
+  }, [fetchStudents, fetchPendingCount]);
+
+  // フィルタリング済み生徒リスト
+  const filteredStudents = students.filter((s) => {
+    if (filterGrade  && s.grade     !== filterGrade)  return false;
+    if (filterSchool && s.school_id !== filterSchool) return false;
+    if (keyword) {
+      const kw = keyword.toLowerCase();
+      if (!s.name.toLowerCase().includes(kw) && !s.grade.toLowerCase().includes(kw)) return false;
+    }
+    return true;
+  });
+
+  const hasFilter = !!(keyword || filterGrade || filterSchool);
+  const clearFilter = () => { setKeyword(""); setFilterGrade(""); setFilterSchool(""); };
 
   const selectStudent = (student: Student) => {
     setSelectedStudent(student);
@@ -133,25 +158,109 @@ export default function DiagnosisPage() {
           </button>
         )}
 
+        {/* ─── 検索・フィルター ─── */}
+        {!loading && students.length > 0 && (
+          <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap gap-3">
+              {/* キーワード検索 */}
+              <div className="relative flex-1 min-w-[180px]">
+                <svg className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+                </svg>
+                <input
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  placeholder="名前で検索..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                />
+              </div>
+
+              {/* 学年フィルター */}
+              <select
+                value={filterGrade}
+                onChange={(e) => setFilterGrade(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              >
+                <option value="">全学年</option>
+                {GRADE_ORDER.map((g) => <option key={g} value={g}>{g}</option>)}
+              </select>
+
+              {/* 教室フィルター */}
+              {schools.length > 0 && (
+                <select
+                  value={filterSchool}
+                  onChange={(e) => setFilterSchool(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                >
+                  <option value="">全教室</option>
+                  {schools.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+                </select>
+              )}
+
+              {/* クリアボタン */}
+              {hasFilter && (
+                <button
+                  onClick={clearFilter}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50 transition"
+                >
+                  ✕ クリア
+                </button>
+              )}
+            </div>
+
+            {/* 件数表示 */}
+            {hasFilter && (
+              <p className="mt-2 text-xs text-slate-400">
+                {filteredStudents.length} 件 / 全 {students.length} 件
+              </p>
+            )}
+          </div>
+        )}
+
         {loading ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-500">読み込み中...</div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[1,2,3,4,5,6].map((i) => (
+              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm animate-pulse space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-full bg-slate-200" />
+                  <div className="h-5 w-24 rounded bg-slate-200" />
+                </div>
+                <div className="h-4 w-16 rounded bg-slate-100" />
+                <div className="h-3 w-28 rounded bg-slate-100" />
+              </div>
+            ))}
+          </div>
         ) : students.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
             生徒が登録されていません。「生徒を追加」から登録してください。
           </div>
+        ) : filteredStudents.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+            <p className="text-3xl mb-3">🔍</p>
+            <p className="font-semibold text-slate-700">条件に一致する生徒がいません</p>
+            <button onClick={clearFilter}
+              className="mt-4 rounded-2xl border border-slate-200 px-5 py-2 text-sm text-slate-500 hover:bg-slate-50 transition">
+              フィルターをクリア
+            </button>
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {students.map((s) => (
-              <button key={s.id} onClick={() => selectStudent(s)}
-                className="rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:border-indigo-300 hover:shadow-md">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="text-2xl">👤</span>
-                  <span className="font-bold text-slate-900">{s.name}</span>
-                </div>
-                <p className="text-sm text-slate-500">{s.grade}</p>
-                <p className="mt-2 text-xs text-slate-400">登録: {s.created_at.slice(0, 10)}</p>
-              </button>
-            ))}
+            {filteredStudents.map((s) => {
+              const schoolName = schools.find((sc) => sc.id === s.school_id)?.name;
+              return (
+                <button key={s.id} onClick={() => selectStudent(s)}
+                  className="rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:border-indigo-300 hover:shadow-md">
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="text-2xl">👤</span>
+                    <span className="font-bold text-slate-900">{s.name}</span>
+                  </div>
+                  <p className="text-sm text-slate-500">{s.grade}</p>
+                  {schoolName && <p className="mt-1 text-xs text-indigo-500">{schoolName}</p>}
+                  <p className="mt-1 text-xs text-slate-400">登録: {s.created_at.slice(0, 10)}</p>
+                </button>
+              );
+            })}
           </div>
         )}
       </main>
