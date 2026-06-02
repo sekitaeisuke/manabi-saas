@@ -44,8 +44,60 @@ type RawQuestion = {
   points: number;
 };
 
+function buildLessonReportHtml(p: {
+  title: string; subject: string; grade: string; studentName: string;
+  score: number; total: number; percentage: number; ai_analysis: string;
+  questions: RawQuestion[]; answers: RawAnswer[]; gradedMap: Record<string, boolean | null>;
+}): string {
+  const pct = p.percentage;
+  const pctColor = pct >= 80 ? "#059669" : pct >= 60 ? "#2563eb" : pct >= 40 ? "#d97706" : "#dc2626";
+  const wrongQs = p.questions.filter((q) => p.gradedMap[q.id] === false);
+  const correctCount = p.questions.filter((q) => p.gradedMap[q.id] === true).length;
+
+  const wrongRows = wrongQs.map((q, i) => {
+    const a = p.answers.find((a) => a.question_id === q.id);
+    return `<tr>
+      <td style="padding:6px 10px;border:1px solid #e2e8f0">${i + 1}. ${q.text}</td>
+      <td style="padding:6px 10px;border:1px solid #e2e8f0;color:#dc2626">${a?.answer ?? "未回答"}</td>
+      <td style="padding:6px 10px;border:1px solid #e2e8f0;color:#059669;font-weight:600">${q.correct_answer ?? "—"}</td>
+    </tr>`;
+  }).join("");
+
+  return `
+<h2>テスト結果</h2>
+<p>${p.subject}・${p.grade}・${p.studentName}さん</p>
+<div style="background:#f8fafc;border-radius:12px;padding:16px;margin:16px 0;border-left:4px solid ${pctColor}">
+  <p style="font-size:1.4rem;font-weight:800;color:${pctColor};margin:0">
+    ${p.score} / ${p.total}点　正答率 ${pct}%
+  </p>
+  <p style="margin:4px 0 0;font-size:0.85rem;color:#64748b">
+    正解 ${correctCount}問 ／ 不正解 ${wrongQs.length}問 ／ 全 ${p.questions.length}問
+  </p>
+</div>
+
+${p.ai_analysis ? `
+<h2>AI 分析レポート</h2>
+<div style="white-space:pre-wrap;line-height:1.8;color:#334155">${p.ai_analysis}</div>
+` : ""}
+
+${wrongQs.length > 0 ? `
+<h2>間違えた問題（${wrongQs.length}問）</h2>
+<table style="border-collapse:collapse;width:100%;font-size:0.875rem">
+  <thead>
+    <tr style="background:#f8fafc">
+      <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left">問題</th>
+      <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left">生徒の回答</th>
+      <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left">正解</th>
+    </tr>
+  </thead>
+  <tbody>${wrongRows}</tbody>
+</table>
+` : `<p style="color:#059669;font-weight:600">🎉 全問正解！素晴らしい結果です。</p>`}
+`.trim();
+}
+
 export async function POST(req: NextRequest) {
-  const { session_id, student_name, grade, subject, answers, questions, questionnaire } =
+  const { session_id, student_name, grade, subject, answers, questions, questionnaire, test_type, test_title } =
     await req.json() as {
       session_id: string;
       student_name: string;
@@ -54,7 +106,11 @@ export async function POST(req: NextRequest) {
       answers: RawAnswer[];
       questions: RawQuestion[];
       questionnaire: { a: Record<string, number>; b: Record<string, number>; c: Record<string, number> } | null;
+      test_type?: string;
+      test_title?: string;
     };
+
+  const isLessonTest = test_type === "lesson";
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -219,8 +275,30 @@ ${analysisSection}
     return NextResponse.json({ error: "結果の保存に失敗しました" }, { status: 500 });
   }
 
-  // アンケート＋AI分析を保存
-  if (questionnaire) {
+  // ── Step5: テストタイプ別の後処理 ──────────────────────
+  if (isLessonTest) {
+    // 学力テスト → 報告書ドラフトを自動作成
+    const reportHtml = buildLessonReportHtml({
+      title: test_title ?? subject,
+      subject, grade, studentName: student_name,
+      score, total, percentage, ai_analysis,
+      questions, answers, gradedMap,
+    });
+    await supabase.from("lesson_reports").insert({
+      test_title: test_title ?? `${subject} テスト`,
+      test_subject: subject,
+      test_grade: grade,
+      student_name,
+      student_id,
+      score,
+      total,
+      percentage,
+      report_html: reportHtml,
+      status: "draft",
+      report_source: "test",
+    });
+  } else if (questionnaire) {
+    // 多層分析テスト → アンケート＋AI分析を保存
     const qr_key = `${session_id}:${student_name}`;
     const { error: qrErr } = await supabase.from("questionnaire_responses").insert({
       session_id: qr_key,

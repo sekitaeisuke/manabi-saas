@@ -105,6 +105,8 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
           answers: answerRows,
           questions,
           questionnaire: { a: qaAnswers, b: qbAnswers, c: qcAnswers },
+          test_type: test?.type ?? "",
+          test_title: test?.title ?? "",
         }),
       });
       if (!res.ok) {
@@ -158,26 +160,42 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
   );
 
   // ── 提出完了 ──
-  if (phase === "submitted") return (
-    <Center>
-      <div className="text-6xl mb-4">✅</div>
-      <h1 className="text-2xl font-bold text-slate-900 mb-2">提出完了！</h1>
-      <p className="text-slate-600">{studentName}さんの回答を受け付けました。</p>
-      <div className="mt-6 rounded-2xl bg-blue-50 border border-blue-100 px-5 py-4 text-left text-sm text-blue-800 space-y-1.5">
-        <p className="font-semibold">これから行われること</p>
-        <p>・AI がテスト結果とアンケートを分析します</p>
-        <p>・担当講師が内容を確認・承認します</p>
-        <p>・保護者アプリの「多層診断」に結果が届きます</p>
-      </div>
-      <a
-        href="/student/dashboard"
-        className="mt-6 block w-full rounded-2xl bg-indigo-600 py-3 text-center font-semibold text-white hover:bg-indigo-700 transition"
-      >
-        ダッシュボードに戻る
-      </a>
-      <p className="mt-3 text-slate-400 text-sm">このページは閉じても大丈夫です。</p>
-    </Center>
-  );
+  if (phase === "submitted") {
+    const isLesson = test?.type === "lesson";
+    return (
+      <Center>
+        <div className="text-6xl mb-4">{isLesson ? "📝" : "✅"}</div>
+        <h1 className="text-2xl font-bold text-slate-900 mb-2">提出完了！</h1>
+        <p className="text-slate-600">{studentName}さんの回答を受け付けました。</p>
+
+        {isLesson ? (
+          /* 学力テスト用メッセージ */
+          <div className="mt-6 rounded-2xl bg-green-50 border border-green-100 px-5 py-4 text-left text-sm text-green-800 space-y-1.5">
+            <p className="font-semibold">これから行われること</p>
+            <p>・AI がテスト結果を採点・分析します</p>
+            <p>・担当講師が結果を確認して授業報告書を作成します</p>
+            <p>・完成した報告書は保護者アプリに届きます</p>
+          </div>
+        ) : (
+          /* 多層分析テスト用メッセージ */
+          <div className="mt-6 rounded-2xl bg-blue-50 border border-blue-100 px-5 py-4 text-left text-sm text-blue-800 space-y-1.5">
+            <p className="font-semibold">これから行われること</p>
+            <p>・AI がテスト結果とアンケートを分析します</p>
+            <p>・担当講師が内容を確認・承認します</p>
+            <p>・保護者アプリの「多層診断」に結果が届きます</p>
+          </div>
+        )}
+
+        <a
+          href="/student/dashboard"
+          className="mt-6 block w-full rounded-2xl bg-indigo-600 py-3 text-center font-semibold text-white hover:bg-indigo-700 transition"
+        >
+          ダッシュボードに戻る
+        </a>
+        <p className="mt-3 text-slate-400 text-sm">このページは閉じても大丈夫です。</p>
+      </Center>
+    );
+  }
 
   // ── 提出中 ──
   if (phase === "submitting") return (
