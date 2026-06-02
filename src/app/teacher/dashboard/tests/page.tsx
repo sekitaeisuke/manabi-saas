@@ -218,6 +218,8 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   const startTest = async () => {
     if (!startModal || !selectedStudent) return;
     setStarting(true);
+
+    // 1. セッション (token) を取得または作成
     let token = sessionTokens[startModal.id];
     if (!token) {
       const res = await fetch("/api/tests/publish", {
@@ -231,6 +233,32 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
       setSessionTokens((prev) => ({ ...prev, [startModal.id]: token }));
       onRefresh();
     }
+
+    // 2. test_session の id を取得
+    const { data: sessionRow } = await supabase
+      .from("test_sessions")
+      .select("id")
+      .eq("url_token", token)
+      .maybeSingle();
+
+    // 3. 生徒ID を解決し test_assignments に記録（未登録の場合のみ）
+    const student = students.find((s) => s.name === selectedStudent);
+    if (sessionRow && student) {
+      const { data: existing } = await supabase
+        .from("test_assignments")
+        .select("id")
+        .eq("test_session_id", sessionRow.id)
+        .eq("student_id", student.id)
+        .maybeSingle();
+      if (!existing) {
+        await supabase.from("test_assignments").insert({
+          test_session_id: sessionRow.id,
+          student_id: student.id,
+        });
+      }
+    }
+
+    // 4. テストURLを開く
     const url = `/test/${token}?studentName=${encodeURIComponent(selectedStudent)}`;
     window.open(url, "_blank");
     setStarting(false);

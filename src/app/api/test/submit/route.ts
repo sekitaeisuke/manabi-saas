@@ -159,18 +159,19 @@ ${analysisSection}
 
   // ── Step3: session_id から student_id を取得 ──────────
   const { data: assignment } = await supabase
-    .from("student_test_assignments")
+    .from("test_assignments")
     .select("student_id")
-    .eq("session_id", session_id)
+    .eq("test_session_id", session_id)
     .maybeSingle();
   const student_id = assignment?.student_id ?? null;
 
   // ── Step4: 採点結果を確定してDB保存 ──────────────────
-  // 重複送信チェック（同一session_idで既に回答が存在する場合は既存結果を返す）
+  // 重複送信チェック（同一session_id + student_name で既に回答済みの場合は既存結果を返す）
   const { data: existingResult } = await supabase
     .from("results")
     .select("score, total, percentage")
     .eq("session_id", session_id)
+    .eq("student_name", student_name)
     .maybeSingle();
   if (existingResult) {
     return NextResponse.json({

@@ -96,21 +96,24 @@ export default function StudentDashboardPage() {
 
       if (assignments && assignments.length > 0) {
         const sessionIds = assignments.map((a: { id: string; test_session_id: string }) => a.test_session_id);
-        const { data: sessions } = await supabase
-          .from("test_sessions")
-          .select("id, url_token, tests(title, subject, grade)")
-          .in("id", sessionIds);
-        const { data: responses } = await supabase
-          .from("questionnaire_responses")
-          .select("session_id, test_percentage")
-          .like("session_id", `%${studentData.name}%`);
+
+        const [{ data: sessions }, { data: results }] = await Promise.all([
+          supabase
+            .from("test_sessions")
+            .select("id, url_token, tests(title, subject, grade)")
+            .in("id", sessionIds),
+          supabase
+            .from("results")
+            .select("session_id, percentage")
+            .in("session_id", sessionIds)
+            .eq("student_name", studentData.name),
+        ]);
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const assembled: AssignedTest[] = (sessions ?? []).map((s: any) => {
           const testInfo = Array.isArray(s.tests) ? s.tests[0] : s.tests;
           const assignment = assignments.find((a: { id: string; test_session_id: string }) => a.test_session_id === s.id);
-          const response = (responses ?? []).find((r: { session_id: string; test_percentage: number | null }) =>
-            r.session_id.startsWith(s.id + ":") && r.session_id.endsWith(":" + studentData.name)
-          );
+          const result = (results ?? []).find((r: { session_id: string; percentage: number | null }) => r.session_id === s.id);
           return {
             assignment_id: assignment?.id ?? "",
             test_session_id: s.id,
@@ -118,8 +121,8 @@ export default function StudentDashboardPage() {
             test_title: testInfo?.title ?? "テスト",
             test_subject: testInfo?.subject ?? "",
             test_grade: testInfo?.grade ?? "",
-            completed: !!response,
-            percentage: response?.test_percentage ?? null,
+            completed: !!result,
+            percentage: result?.percentage ?? null,
           };
         });
         setTests(assembled);
