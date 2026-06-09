@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireTeacher, adminClient, authErrorResponse } from "@/lib/serverAuth";
+import { dispatchNotification } from "@/lib/server/dispatchNotification";
 
 type Announcement = {
   id: string;
@@ -9,32 +10,21 @@ type Announcement = {
   target_school_id: string | null;
 };
 
-async function dispatch(origin: string, opts: {
-  actor_kind: "parent" | "teacher" | "student";
-  actor_id: string;
-  event_type: string;
-  subject: string;
-  body_text: string;
-  link?: string;
-}) {
-  await fetch(`${origin}/api/notify`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
-  }).catch((e) => { console.error("dispatch failed:", opts.event_type, e); });
-}
-
 export async function POST(req: NextRequest) {
+  // 講師のみがお知らせ一斉送信を実行できる
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const origin = new URL(req.url).origin;
   const { announcement_id } = await req.json();
   if (!announcement_id) {
     return NextResponse.json({ error: "announcement_id は必須です" }, { status: 400 });
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = adminClient();
 
   const { data: a } = await supabase
     .from("announcements")
@@ -67,9 +57,9 @@ export async function POST(req: NextRequest) {
   const subject = `お知らせ：${ann.title}`;
   const body_text = ann.content;
 
-  // 並列に発火
+  // 並列に発火（内部 HTTP 中継を使わず共有関数を直接呼ぶ）
   await Promise.allSettled([
-    ...parentIds.map((pid) => dispatch(origin, {
+    ...parentIds.map((pid) => dispatchNotification({
       actor_kind: "parent",
       actor_id: pid,
       event_type: "announcement",
@@ -77,7 +67,7 @@ export async function POST(req: NextRequest) {
       body_text,
       link: `${origin}/parent/dashboard`,
     })),
-    ...studentIds.map((sid) => dispatch(origin, {
+    ...studentIds.map((sid) => dispatchNotification({
       actor_kind: "student",
       actor_id: sid,
       event_type: "announcement",

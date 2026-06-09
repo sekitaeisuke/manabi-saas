@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 type Question = {
   id: string;
@@ -18,6 +19,12 @@ type AnswerEntry = {
 };
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { testType, title, subject, grade, questions, answers, studentName } = await req.json();
 
   const scored: AnswerEntry[] = (questions as Question[]).map((q) => {

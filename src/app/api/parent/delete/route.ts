@@ -1,18 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { parent_id } = await req.json();
   if (!parent_id) {
     return NextResponse.json({ error: "parent_id は必須です" }, { status: 400 });
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+  // 講師として認可済み。RLS をバイパスして削除する（service role 必須）。
+  if (!serviceRoleKey) {
+    return NextResponse.json({
+      error: "SUPABASE_SERVICE_ROLE_KEY が未設定のため保護者を削除できません。",
+    }, { status: 500 });
+  }
+  const supabase = createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
   // 1) parents 行を取得して auth_user_id を確認
-  const supabase = createClient(url, anonKey);
   const { data: parent, error: getErr } = await supabase
     .from("parents")
     .select("id, auth_user_id")

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
+import { dispatchNotification } from "@/lib/server/dispatchNotification";
 
 type ShiftRow = {
   date:        string;
@@ -11,6 +13,12 @@ type ShiftRow = {
 };
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { period_id, shifts, status = "draft" } = await req.json() as {
     period_id: string;
     shifts: ShiftRow[];
@@ -70,21 +78,17 @@ export async function POST(req: NextRequest) {
     // 対象講師一覧（重複排除）
     const teacherIds = [...new Set(rows.map((r) => r.teacher_id))];
 
-    // 各講師に push / LINE 通知（ベストエフォート）
+    // 各講師に push / LINE 通知（ベストエフォート・共有関数を直接呼ぶ）
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://manabi-saas.vercel.app";
     await Promise.allSettled(
       teacherIds.map((tid) =>
-        fetch(`${appUrl}/api/notify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            actor_kind: "teacher",
-            actor_id:   tid,
-            event_type: "shift_confirmed",
-            subject:    `【シフト確定】${label}`,
-            body_text:  `${label}のシフトが確定・公開されました。マイページで確認してください。`,
-            link:       `${appUrl}/teacher/dashboard/shifts`,
-          }),
+        dispatchNotification({
+          actor_kind: "teacher",
+          actor_id:   tid,
+          event_type: "shift_confirmed",
+          subject:    `【シフト確定】${label}`,
+          body_text:  `${label}のシフトが確定・公開されました。マイページで確認してください。`,
+          link:       `${appUrl}/teacher/dashboard/shifts`,
         }).catch((e) => console.warn("通知送信失敗（ベストエフォート）:", e))
       )
     );

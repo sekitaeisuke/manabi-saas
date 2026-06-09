@@ -27,6 +27,20 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
+
+    // 講師として登録済みか検証（保護者/生徒アカウントの流入を防ぐ）
+    const { data: teacher } = await supabase
+      .from("teachers")
+      .select("id")
+      .eq("email", email)
+      .maybeSingle();
+    if (!teacher) {
+      await supabase.auth.signOut();
+      setError("このアカウントには講師権限がありません");
+      setLoading(false);
+      return;
+    }
+
     router.push("/teacher/dashboard");
   };
 

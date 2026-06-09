@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { adminClient, authErrorResponse } from "@/lib/serverAuth";
 
 // 全角→半角正規化（数字・英字・スペース）
 function normalize(s: string): string {
@@ -97,25 +97,57 @@ ${wrongQs.length > 0 ? `
 }
 
 export async function POST(req: NextRequest) {
-  const { session_id, student_name, grade, subject, answers, questions, questionnaire, test_type, test_title } =
+  // 公開（テストURLトークン）フロー。生徒回答は受け取るが、
+  // 設問・正答・配点はクライアント送信値を信用せずサーバ側 DB から取得して採点する。
+  const { session_id, student_name, answers, questionnaire } =
     await req.json() as {
       session_id: string;
       student_name: string;
-      grade: string;
-      subject: string;
       answers: RawAnswer[];
-      questions: RawQuestion[];
       questionnaire: { a: Record<string, number>; b: Record<string, number>; c: Record<string, number> } | null;
-      test_type?: string;
-      test_title?: string;
     };
 
-  const isLessonTest = test_type === "lesson";
+  if (!session_id || !student_name?.trim() || !Array.isArray(answers)) {
+    return NextResponse.json({ error: "session_id / student_name / answers は必須です" }, { status: 400 });
+  }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  let supabase;
+  try {
+    supabase = adminClient();
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
+  // セッションの実在確認 → 対応する test → 設問をサーバ側で取得
+  const { data: sessionRow } = await supabase
+    .from("test_sessions")
+    .select("id, test_id")
+    .eq("id", session_id)
+    .maybeSingle();
+  if (!sessionRow) {
+    return NextResponse.json({ error: "無効なテストセッションです" }, { status: 404 });
+  }
+
+  const { data: testRow } = await supabase
+    .from("tests")
+    .select("id, title, subject, grade, type")
+    .eq("id", sessionRow.test_id)
+    .maybeSingle();
+  if (!testRow) {
+    return NextResponse.json({ error: "対象のテストが見つかりません" }, { status: 404 });
+  }
+
+  const { data: questionsData } = await supabase
+    .from("questions")
+    .select("id, type, text, options, correct_answer, points, order_index")
+    .eq("test_id", sessionRow.test_id)
+    .order("order_index");
+  const questions = (questionsData ?? []) as RawQuestion[];
+
+  const grade = (testRow.grade as string | null) ?? "";
+  const subject = (testRow.subject as string | null) ?? "";
+  const test_title = (testRow.title as string | null) ?? "";
+  const isLessonTest = testRow.type === "lesson";
 
   // ── Step1: 選択式は即座に採点（正規化比較） ──────────
   const gradedMap: Record<string, boolean | null> = {};

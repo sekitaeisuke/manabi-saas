@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireTeacher, adminClient, authErrorResponse } from "@/lib/serverAuth";
 
 type SectionAnswers = Record<string, number>;
 
@@ -72,12 +72,15 @@ async function callClaude(prompt: string): Promise<string> {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { session_id } = await req.json() as { session_id: string };
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  const supabase = adminClient();
 
   // Fetch questionnaire response
   const { data: qr, error } = await supabase

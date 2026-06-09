@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { draft, studentName, grade, subject } = await req.json();
 
   const prompt = `あなたは日本の個別指導塾のベテラン教師です。

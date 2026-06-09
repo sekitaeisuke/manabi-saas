@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -25,6 +26,12 @@ async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { questions, subject, grade, title, testType, instructions } = await req.json();
 
   const typeLabel = testType === "diagnostic"

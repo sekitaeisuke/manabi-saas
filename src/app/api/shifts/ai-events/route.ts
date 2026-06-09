@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 export const runtime = "edge";
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { prompt, schools } = await req.json() as {
     prompt: string;
     schools: { id: string; name: string; group_name: string | null }[];

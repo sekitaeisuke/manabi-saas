@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 // ─── 正答位置の強制均等分散 ─────────────────────────────
 type AnyQuestion = { type: string; options?: string[] | null; correct_answer?: string | null } & Record<string, unknown>;
@@ -37,6 +38,12 @@ function redistributeAnswers(questions: AnyQuestion[]): AnyQuestion[] {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const { questions, subject, grade, difficulties, instructions } = await req.json();
 
   const diffLabels = (difficulties as string[]).map((d: string) => ({

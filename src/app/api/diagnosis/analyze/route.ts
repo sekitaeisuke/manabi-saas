@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 import type { VolumeRatings, QualityRatings } from "@/lib/supabase";
 
 const RATING_LABEL: Record<number, string> = { 4: "◎", 3: "○", 2: "△", 1: "×" };
@@ -12,6 +13,12 @@ function score(ratings: number[], max: number) {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const {
     studentName, grade, subject,
     testScore, testTotal, testRate,

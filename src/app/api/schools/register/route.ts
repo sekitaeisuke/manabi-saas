@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { adminClient, authErrorResponse } from "@/lib/serverAuth";
 
 async function sendAdminEmail(school: {
   id: string; name: string; school_type: string; prefecture: string;
@@ -58,6 +53,14 @@ async function sendSchoolConfirmEmail(school: { name: string; id: string }, toEm
 }
 
 export async function POST(req: NextRequest) {
+  // 学校自身による公開セルフ登録フォーム（status: pending として受け付け、後で審査）。
+  let supabaseAdmin;
+  try {
+    supabaseAdmin = adminClient();
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const body = await req.json();
 
   const {

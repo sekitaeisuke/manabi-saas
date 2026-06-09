@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-);
+import { requireTeacher, adminClient, authErrorResponse } from "@/lib/serverAuth";
 
 function estimateDeviationValue(
   testPercentage: number | null,
@@ -39,6 +34,13 @@ function targetSchoolLevels(grade: string | null): string[] {
 }
 
 export async function GET(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
+  const supabase = adminClient();
   const { searchParams } = new URL(req.url);
   const testPercentage = searchParams.get("test_percentage") ? Number(searchParams.get("test_percentage")) : null;
   const habitScore     = searchParams.get("habit_score")     ? Number(searchParams.get("habit_score"))     : null;

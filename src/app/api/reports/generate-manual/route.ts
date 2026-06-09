@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 const CHECKED_GROUPS = [
   {
@@ -30,6 +31,12 @@ const CHECKED_GROUPS = [
 ];
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const {
     studentName,
     grade,

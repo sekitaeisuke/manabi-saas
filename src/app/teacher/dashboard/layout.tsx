@@ -128,9 +128,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { router.replace("/login"); return; }
       const email = session.user.email ?? "";
+      const { data: teacher } = await supabase.from("teachers").select("role").eq("email", email).maybeSingle();
+      // 講師として登録されていないアカウント（保護者/生徒等）は締め出す
+      if (!teacher) { await supabase.auth.signOut(); router.replace("/login"); return; }
       setUserEmail(email);
-      const { data: teacher } = await supabase.from("teachers").select("role").eq("email", email).single();
-      if (teacher) setUserRole(teacher.role);
+      setUserRole(teacher.role);
       setChecking(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {

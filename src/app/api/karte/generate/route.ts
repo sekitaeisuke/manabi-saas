@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher, authErrorResponse } from "@/lib/serverAuth";
 
 type TextbookInput = {
   id: string;
@@ -11,6 +12,12 @@ type TextbookInput = {
 };
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireTeacher(req);
+  } catch (e) {
+    return authErrorResponse(e);
+  }
+
   const body = await req.json();
   const {
     studentName, grade, subject,
