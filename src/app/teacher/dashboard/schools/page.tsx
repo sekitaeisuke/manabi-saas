@@ -530,6 +530,8 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   };
 
   const openAccountModal = (s: Student) => {
+    // イベントハンドラ内での仮ログインID生成（render 中ではないため非決定でも問題なし）
+    // eslint-disable-next-line react-hooks/purity
     const auto = "s-" + Math.random().toString(36).slice(2, 7);
     setAccountModal({ studentId: s.id, studentName: s.name, loginId: s.login_id ?? auto, password: "" });
     setIssuedResult(null);

@@ -174,7 +174,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const isActive = (href: string) =>
     href === "/teacher/dashboard" ? pathname === href : pathname.startsWith(href);
 
-  const Sidebar = ({ pending, unread, resched, role }: { pending: number; unread: number; resched: number; role: string }) => (
+  // コンポーネント要素（<Sidebar/>）ではなく JSX を返す関数にして、再レンダー毎の再生成を避ける
+  const renderSidebar = () => (
     <aside className="flex h-full flex-col bg-white">
       {/* ロゴ */}
       <div className="flex h-16 items-center border-b border-slate-100 px-5">
@@ -186,9 +187,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* ナビゲーション */}
       <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
         <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">メニュー</p>
-        {NAV.filter((item) => !item.adminOnly || role === "admin").map((item) => {
+        {NAV.filter((item) => !item.adminOnly || userRole === "admin").map((item) => {
           const active = isActive(item.href);
-          const badgeMap: Record<BadgeKey, number> = { pending, unread, resched };
+          const badgeMap: Record<BadgeKey, number> = { pending: pendingCount, unread: unreadMessages, resched: pendingReschedules };
           const badge = item.badge ? badgeMap[item.badge] : 0;
           return (
             <Link key={item.href} href={item.href}
@@ -239,7 +240,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen bg-slate-50">
       {/* PC サイドバー */}
       <div className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-slate-200 shadow-sm lg:block">
-        <Sidebar pending={pendingCount} unread={unreadMessages} resched={pendingReschedules} role={userRole} />
+        {renderSidebar()}
       </div>
 
       {/* モバイル オーバーレイ */}
@@ -247,7 +248,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <div className="absolute inset-y-0 left-0 w-60">
-            <Sidebar pending={pendingCount} unread={unreadMessages} resched={pendingReschedules} role={userRole} />
+            {renderSidebar()}
           </div>
         </div>
       )}

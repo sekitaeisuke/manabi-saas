@@ -60,21 +60,6 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
   const [phase, setPhase] = useState<Phase>("name");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    params.then(async (p) => {
-      // URLパラメータに studentName があればログイン済み生徒として自動セット
-      const urlParams = new URLSearchParams(window.location.search);
-      const nameFromUrl = urlParams.get("studentName");
-      if (nameFromUrl) {
-        setStudentName(nameFromUrl);
-        await loadTest(p.token);
-        setPhase("test");
-      } else {
-        await loadTest(p.token);
-      }
-    });
-  }, []);
-
   const loadTest = async (tok: string) => {
     const { data: sessionData } = await supabase
       .from("test_sessions").select("*").eq("url_token", tok).single();
@@ -88,6 +73,22 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     setQuestions(questionsData ?? []);
     setLoading(false);
   };
+
+  useEffect(() => {
+    params.then(async (p) => {
+      // URLパラメータに studentName があればログイン済み生徒として自動セット
+      const urlParams = new URLSearchParams(window.location.search);
+      const nameFromUrl = urlParams.get("studentName");
+      if (nameFromUrl) {
+        setStudentName(nameFromUrl);
+        await loadTest(p.token);
+        setPhase("test");
+      } else {
+        await loadTest(p.token);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submitAll = async () => {
     if (!session || !studentName) return;
@@ -121,12 +122,6 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
       setPhase("qc");
     }
   };
-
-  const setQ = (setter: React.Dispatch<React.SetStateAction<QAnswers>>, key: string, val: number) =>
-    setter((prev) => ({ ...prev, [key]: val }));
-
-  const allAnswered = (section: { key: string }[], answered: QAnswers) =>
-    section.every((q) => answered[q.key] !== undefined);
 
   // 複数選択問題かどうかを判定
   // 「全て選びなさい」「すべて選べ」など、または correct_answer がカンマ区切りの場合
@@ -336,17 +331,63 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     );
   }
 
-  // ── アンケート共通レイアウト ──
-  const QuestionnaireSection = ({
-    title, subtitle, color, section, qAnswers, setAnswers: setAns, onNext, onBack, nextLabel, partNum, partTotal,
-  }: {
-    title: string; subtitle: string; color: string;
-    section: { key: string; text: string }[];
-    qAnswers: QAnswers;
-    setAnswers: React.Dispatch<React.SetStateAction<QAnswers>>;
-    onNext: () => void; onBack: () => void; nextLabel: string;
-    partNum: number; partTotal: number;
-  }) => (
+  if (phase === "qa") return (
+    <QuestionnaireSection
+      title="アンケート Part A：学習習慣" subtitle="ふだんの勉強のようすについて答えてください"
+      color="bg-indigo-50 text-indigo-800" section={SECTION_A}
+      qAnswers={qaAnswers} setAnswers={setQaAnswers}
+      onNext={() => setPhase("qb")} onBack={() => setPhase("test")}
+      nextLabel="Part B へ" partNum={1} partTotal={3} />
+  );
+
+  if (phase === "qb") return (
+    <QuestionnaireSection
+      title="アンケート Part B：学習法" subtitle="どのように勉強しているかについて答えてください"
+      color="bg-emerald-50 text-emerald-800" section={SECTION_B}
+      qAnswers={qbAnswers} setAnswers={setQbAnswers}
+      onNext={() => setPhase("qc")} onBack={() => setPhase("qa")}
+      nextLabel="Part C へ" partNum={2} partTotal={3} />
+  );
+
+  if (phase === "qc") return (
+    <QuestionnaireSection
+      title="アンケート Part C：自分の勉強のとくちょう" subtitle="正直に答えてください。正解はありません"
+      color="bg-amber-50 text-amber-800" section={SECTION_C}
+      qAnswers={qcAnswers} setAnswers={setQcAnswers}
+      onNext={submitAll} onBack={() => setPhase("qb")}
+      nextLabel="提出する" partNum={3} partTotal={3} />
+  );
+
+  return null;
+}
+
+function Center({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-6">
+      <div className="bg-white rounded-3xl p-10 shadow-lg text-center max-w-lg w-full">{children}</div>
+    </div>
+  );
+}
+
+// アンケート回答の更新ヘルパー（純粋関数）
+const setQ = (setter: React.Dispatch<React.SetStateAction<QAnswers>>, key: string, val: number) =>
+  setter((prev) => ({ ...prev, [key]: val }));
+
+const allAnswered = (section: { key: string }[], answered: QAnswers) =>
+  section.every((q) => answered[q.key] !== undefined);
+
+// ── アンケート共通レイアウト（モジュールスコープで定義し、再レンダー時の再生成・入力フォーカス喪失を防ぐ）──
+function QuestionnaireSection({
+  title, subtitle, color, section, qAnswers, setAnswers: setAns, onNext, onBack, nextLabel, partNum, partTotal,
+}: {
+  title: string; subtitle: string; color: string;
+  section: { key: string; text: string }[];
+  qAnswers: QAnswers;
+  setAnswers: React.Dispatch<React.SetStateAction<QAnswers>>;
+  onNext: () => void; onBack: () => void; nextLabel: string;
+  partNum: number; partTotal: number;
+}) {
+  return (
     <div className="min-h-screen bg-slate-50">
       <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-3 shadow-sm">
         <div className="mx-auto max-w-2xl">
@@ -410,43 +451,6 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
         </div>
       </div>
       </div>
-    </div>
-  );
-
-  if (phase === "qa") return (
-    <QuestionnaireSection
-      title="アンケート Part A：学習習慣" subtitle="ふだんの勉強のようすについて答えてください"
-      color="bg-indigo-50 text-indigo-800" section={SECTION_A}
-      qAnswers={qaAnswers} setAnswers={setQaAnswers}
-      onNext={() => setPhase("qb")} onBack={() => setPhase("test")}
-      nextLabel="Part B へ" partNum={1} partTotal={3} />
-  );
-
-  if (phase === "qb") return (
-    <QuestionnaireSection
-      title="アンケート Part B：学習法" subtitle="どのように勉強しているかについて答えてください"
-      color="bg-emerald-50 text-emerald-800" section={SECTION_B}
-      qAnswers={qbAnswers} setAnswers={setQbAnswers}
-      onNext={() => setPhase("qc")} onBack={() => setPhase("qa")}
-      nextLabel="Part C へ" partNum={2} partTotal={3} />
-  );
-
-  if (phase === "qc") return (
-    <QuestionnaireSection
-      title="アンケート Part C：自分の勉強のとくちょう" subtitle="正直に答えてください。正解はありません"
-      color="bg-amber-50 text-amber-800" section={SECTION_C}
-      qAnswers={qcAnswers} setAnswers={setQcAnswers}
-      onNext={submitAll} onBack={() => setPhase("qb")}
-      nextLabel="提出する" partNum={3} partTotal={3} />
-  );
-
-  return null;
-}
-
-function Center({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-6">
-      <div className="bg-white rounded-3xl p-10 shadow-lg text-center max-w-lg w-full">{children}</div>
     </div>
   );
 }

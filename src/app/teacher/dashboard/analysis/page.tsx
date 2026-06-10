@@ -37,8 +37,8 @@ function mean(arr: number[]) {
   return arr.length === 0 ? 0 : Math.round(arr.reduce((s, v) => s + v, 0) / arr.length);
 }
 
-function filterByPeriod<T extends { created_at: string }>(rows: T[], period: Period): T[] {
-  const since = Date.now() - PERIOD_MS[period];
+function filterByPeriod<T extends { created_at: string }>(rows: T[], period: Period, now: number): T[] {
+  const since = now - PERIOD_MS[period];
   return rows.filter((r) => new Date(r.created_at).getTime() >= since);
 }
 
@@ -157,6 +157,8 @@ function LineChart({ data }: { data: { label: string; avg: number }[] }) {
 
 export default function AnalysisPage() {
   const [period, setPeriod] = useState<Period>("3m");
+  // 「現在時刻」はマウント時に一度だけ確定させ、レンダーを純粋に保つ（期間フィルタの基準）
+  const [now, setNow] = useState(0);
   const [loading, setLoading] = useState(true);
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [results, setResults] = useState<ResultRow[]>([]);
@@ -165,6 +167,7 @@ export default function AnalysisPage() {
   const [reports, setReports] = useState<ReportRow[]>([]);
 
   useEffect(() => {
+    setNow(Date.now());
     (async () => {
       setLoading(true);
       const [s, r, d, l, rp] = await Promise.all([
@@ -195,15 +198,15 @@ export default function AnalysisPage() {
   }, []);
 
   const filteredResults = useMemo(() => {
-    const since = Date.now() - PERIOD_MS[period];
+    const since = now - PERIOD_MS[period];
     return results.filter((r) => new Date(r.completed_at).getTime() >= since);
-  }, [results, period]);
-  const filteredDiagnoses = useMemo(() => filterByPeriod(diagnoses, period), [diagnoses, period]);
+  }, [results, period, now]);
+  const filteredDiagnoses = useMemo(() => filterByPeriod(diagnoses, period, now), [diagnoses, period, now]);
   const filteredLessons = useMemo(() => {
-    const since = Date.now() - PERIOD_MS[period];
+    const since = now - PERIOD_MS[period];
     return lessons.filter((l) => new Date(l.scheduled_at).getTime() >= since);
-  }, [lessons, period]);
-  const filteredReports = useMemo(() => filterByPeriod(reports, period), [reports, period]);
+  }, [lessons, period, now]);
+  const filteredReports = useMemo(() => filterByPeriod(reports, period, now), [reports, period, now]);
 
   // Summary stats
   const avgScore = mean(filteredResults.map((r) => r.percentage));

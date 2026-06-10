@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 const FEATURES_OPTIONS = [
   "特進コース", "英語重視", "理数特化", "国際バカロレア", "SSH指定校", "SGH指定校",
@@ -166,9 +167,9 @@ export default function SchoolRegisterPage() {
             <p>お問い合わせ: <a href="mailto:sekitaeisuke@kyouiku-koubou.com" className="text-indigo-600 hover:underline">sekitaeisuke@kyouiku-koubou.com</a></p>
           </div>
 
-          <a href="/" className="block w-full rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
+          <Link href="/" className="block w-full rounded-2xl border border-slate-200 bg-white py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">
             トップに戻る
-          </a>
+          </Link>
         </div>
       </div>
     );

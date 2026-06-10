@@ -44,6 +44,8 @@ export default function StudentDetailPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [schoolName, setSchoolName] = useState<string>("—");
   const [loading, setLoading] = useState(true);
+  // 「現在時刻」はマウント時に一度だけ確定させ、レンダーを純粋に保つ（授業の前後判定の基準）
+  const [now, setNow] = useState(0);
 
   const load = useCallback(async () => {
     if (!studentId) return;
@@ -107,7 +109,7 @@ export default function StudentDetailPage() {
     setLoading(false);
   }, [studentId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { setNow(Date.now()); load(); }, [load]);
 
   if (loading) {
     return (
@@ -165,7 +167,6 @@ export default function StudentDetailPage() {
     );
   }
 
-  const now = Date.now();
   const upcomingLessons = lessons.filter((l) => new Date(l.scheduled_at).getTime() >= now).slice(0, 5);
   const pastLessons = lessons.filter((l) => new Date(l.scheduled_at).getTime() < now).slice(0, 5);
 
