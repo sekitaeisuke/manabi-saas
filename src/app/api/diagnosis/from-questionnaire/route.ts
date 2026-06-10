@@ -3,50 +3,60 @@ import { createClient } from "@supabase/supabase-js";
 
 type SectionAnswers = Record<string, number>;
 
+// ラベルは受験ページ（test/[token]）の実際の設問文に同期している。
 const SECTION_A_LABELS: Record<string, string> = {
-  a1: "毎日決まった時間に勉強している",
-  a2: "塾の宿題を期日までに提出している",
-  a3: "予習・復習を自分でしている",
-  a4: "勉強中にスマホやゲームをしない",
-  a5: "テスト前は計画を立てて勉強している",
-  a6: "塾以外でも毎日30分以上勉強している",
-  a7: "苦手な単元を避けずに取り組んでいる",
-  a8: "暗記・基礎練習を毎日続けている",
+  a1: "毎日、決まった時間に勉強している",
+  a2: "宿題を決められた日までに終わらせている",
+  a3: "毎日2時間以上勉強している",
+  a4: "授業の前に前回の内容を見直している",
+  a5: "授業が終わったその日に内容を復習している",
+  a6: "テスト前に計画を立てて勉強している",
+  a7: "勉強中にスマホやゲームが気になって集中できないことがある",
+  a8: "「今日はいいや」と勉強をやめてしまうことがある",
 };
 
 const SECTION_B_LABELS: Record<string, string> = {
-  b1: "問題文をよく読んでから解いている",
-  b2: "解説をしっかり読んで理解している",
-  b3: "例題・見本を参考にして問題を解いている",
-  b4: "計算や解法の途中式を書いている",
-  b5: "授業のノートをきれいに取っている",
-  b6: "新出単語・語彙を記録している",
-  b7: "わからないことを先生に質問している",
-  b8: "テストの範囲・形式を事前に確認している",
-  b9: "理解できるまで先生に聞き直している",
-  b10: "間違えた問題の原因を説明できる",
-  b11: "間違えた問題をやり直して説明できる",
-  b12: "どの教科にどれだけ時間をかけるか説明できる",
+  b1: "わからない問題でも自分でじっくり考え続けている",
+  b2: "間違えた問題をもう一度自分で解きなおしている",
+  b3: "解説を読んで「なるほど」と理解できている",
+  b4: "教科書や参考書の例題を自分で読んで学ぼうとしている",
+  b5: "ノートに大事なことをまとめている",
+  b6: "新しい言葉や公式を書いて覚えるようにしている",
+  b7: "わからないとき先生に積極的に質問している",
+  b8: "自分の得意な科目と苦手な科目がわかっている",
 };
 
 const SECTION_C_LABELS: Record<string, string> = {
-  c1: "問題文の言葉の意味を正しく理解できる",
-  c2: "問題文の文法・文章の構造を理解できる",
-  c3: "問題の条件や制約を正確に把握できる",
-  c4: "選択肢や記述の形式に合った答え方ができる",
-  c5: "自分の考えを文章や式で表現できる",
-  c6: "難しい問題でも部分点を取る工夫ができる",
-  c7: "時間内に問題を解き終えることができる",
+  c1: "問題文に知らない言葉や用語が出てきて困ることがある",
+  c2: "文の意味や言葉のルールがよくわからなくなることがある",
+  c3: "問題が「何を答えればいいのか」わからなくなることがある",
+  c4: "答えはわかっているのに、どう書けばいいかわからないことがある",
+  c5: "頭ではわかっているのに、うまく答えを書けないことがある",
+  c6: "計算や暗記（単語・公式）はスムーズにできている",
+  c7: "間違えた問題について、なぜ間違えたか自分で説明できる",
 };
+
+// 逆転項目：「〜で困る／やめてしまう」など、高評価ほど“悪い”設問。
+// 5 - r で反転し、全指標を「高いほど良い」に統一して採点する。
+const REVERSE_KEYS = new Set(["a7", "a8", "c1", "c2", "c3", "c4", "c5"]);
+
+// 言語力（読解・表現・説明）= C1〜C5、技能（計算・暗記・メタ認知）= C6・C7
+const VERBAL_KEYS = ["c1", "c2", "c3", "c4", "c5"];
+const SKILL_KEYS = ["c6", "c7"];
 
 function ratingText(r: number): string {
   return r === 4 ? "いつもそう" : r === 3 ? "だいたいそう" : r === 2 ? "あまりそうでない" : "ほとんどない";
 }
 
-function sectionScore(answers: SectionAnswers): number {
-  const vals = Object.values(answers);
-  if (vals.length === 0) return 0;
-  return Math.round((vals.reduce((a, b) => a + b, 0) / (vals.length * 4)) * 100);
+// 指定キー群を極性補正して 0〜100 で採点（回答が無いキーは除外）
+function scoreItems(answers: SectionAnswers, keys: string[]): number {
+  const present = keys.filter((k) => typeof answers[k] === "number");
+  if (present.length === 0) return 0;
+  const sum = present.reduce((s, k) => {
+    const v = answers[k] as number;
+    return s + (REVERSE_KEYS.has(k) ? 5 - v : v);
+  }, 0);
+  return Math.round((sum / (present.length * 4)) * 100);
 }
 
 async function callClaude(prompt: string): Promise<string> {
@@ -94,10 +104,10 @@ export async function POST(req: NextRequest) {
   const sB = (qr.section_b ?? {}) as SectionAnswers;
   const sC = (qr.section_c ?? {}) as SectionAnswers;
 
-  const habitScore = sectionScore(sA);
-  const methodScore = sectionScore({ ...Object.fromEntries(Object.entries(sB).slice(0, 9)) });
-  const verbalScore = sectionScore({ ...Object.fromEntries(Object.entries(sB).slice(9)) });
-  const skillScore = sectionScore(sC);
+  const habitScore = scoreItems(sA, Object.keys(SECTION_A_LABELS));
+  const methodScore = scoreItems(sB, Object.keys(SECTION_B_LABELS));
+  const verbalScore = scoreItems(sC, VERBAL_KEYS);   // 言語力（C1〜C5）
+  const skillScore = scoreItems(sC, SKILL_KEYS);     // 技能（C6・C7）
   const testRate = qr.test_percentage ?? null;
 
   // Format section answers for prompt
@@ -129,7 +139,8 @@ ${formatSection(SECTION_A_LABELS, sA)}
 読む・書く・聞く・話す の視点で:
 ${formatSection(SECTION_B_LABELS, sB)}
 
-【C. 学力スキル自己評価】（スコア: ${skillScore}/100）
+【C. 言語力・技能 自己評価】（言語力: ${verbalScore}/100 ／ 技能: ${skillScore}/100）
+※「困る/わからない」系の設問は、回答が低いほど良い（採点時に極性補正済み）。
 ${formatSection(SECTION_C_LABELS, sC)}
 
 ━━━━━━━━━━━━━━━━━━━━
