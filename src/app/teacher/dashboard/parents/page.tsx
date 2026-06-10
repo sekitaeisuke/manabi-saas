@@ -3,6 +3,7 @@ import { showToast } from "@/lib/toast";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { authFetch } from "@/lib/authFetch";
 import type { Student, School } from "@/lib/supabase";
 
 type LinkedStudent = { id: string; name: string; grade: string };
@@ -104,7 +105,7 @@ export default function ParentsPage() {
     setCreateBusy(true);
     setCreateError("");
     setCreateNotice("");
-    const res = await fetch("/api/parent/create", {
+    const res = await authFetch("/api/parent/create", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(createForm),
@@ -197,7 +198,7 @@ export default function ParentsPage() {
 
   const removeParent = async (p: Parent) => {
     if (!confirm(`保護者「${p.name}」を削除しますか？`)) return;
-    const res = await fetch("/api/parent/delete", {
+    const res = await authFetch("/api/parent/delete", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ parent_id: p.id }),

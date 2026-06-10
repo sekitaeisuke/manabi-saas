@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/lib/apiAuth";
 
 type ShiftRow = {
   date:        string;
@@ -11,6 +12,9 @@ type ShiftRow = {
 };
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { period_id, shifts, status = "draft" } = await req.json() as {
     period_id: string;
     shifts: ShiftRow[];

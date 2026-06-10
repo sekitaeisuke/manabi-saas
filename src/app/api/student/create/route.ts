@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireTeacher } from "@/lib/apiAuth";
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { student_id, login_id, password } = await req.json();
   if (!student_id || !login_id || !password) {
     return NextResponse.json({ error: "必須項目が不足しています" }, { status: 400 });

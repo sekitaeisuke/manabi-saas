@@ -6,6 +6,16 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
+// メールHTMLに差し込む前にエスケープ（HTMLインジェクション対策）
+function esc(s: string | null | undefined): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function sendAdminEmail(school: {
   id: string; name: string; school_type: string; prefecture: string;
   city: string | null; email: string | null; phone: string | null;
@@ -19,11 +29,11 @@ async function sendAdminEmail(school: {
   const html = `
 <h2>新規学校登録がありました</h2>
 <table style="border-collapse:collapse;font-size:14px">
-  <tr><td style="padding:4px 12px 4px 0;color:#666">学校名</td><td><strong>${school.name}</strong></td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">種別</td><td>${school.school_type}</td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">所在地</td><td>${school.prefecture} ${school.city ?? ""}</td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">メール</td><td>${school.email ?? "未入力"}</td></tr>
-  <tr><td style="padding:4px 12px 4px 0;color:#666">電話</td><td>${school.phone ?? "未入力"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">学校名</td><td><strong>${esc(school.name)}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">種別</td><td>${esc(school.school_type)}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">所在地</td><td>${esc(school.prefecture)} ${esc(school.city)}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">メール</td><td>${school.email ? esc(school.email) : "未入力"}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">電話</td><td>${school.phone ? esc(school.phone) : "未入力"}</td></tr>
 </table>
 <p style="margin-top:16px">
   <a href="${process.env.NEXT_PUBLIC_APP_URL ?? "https://manabi-saas.vercel.app"}/teacher/dashboard/schools?tab=pending">

@@ -4,6 +4,7 @@ import { showToast } from "@/lib/toast";
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { authFetch } from "@/lib/authFetch";
 import type { School, Teacher, Student } from "@/lib/supabase";
 import { GRADE_ORDER } from "@/lib/curriculum";
 
@@ -540,7 +541,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   const issueAccount = async () => {
     if (!accountModal || !accountModal.loginId || accountModal.password.length < 6) return;
     setIssuing(true);
-    const res = await fetch("/api/student/create", {
+    const res = await authFetch("/api/student/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -64,13 +64,20 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     const { data: sessionData } = await supabase
       .from("test_sessions").select("*").eq("url_token", tok).single();
     if (!sessionData) { setLoading(false); return; }
+    // 有効期限切れのURLは受験不可（session 未設定のまま終了 → 「見つかりません」表示）
+    if (sessionData.expires_at && new Date(sessionData.expires_at).getTime() < Date.now()) {
+      setLoading(false); return;
+    }
     setSession(sessionData);
     const { data: testData } = await supabase
       .from("tests").select("*").eq("id", sessionData.test_id).single();
     setTest(testData);
+    // correct_answer は生徒に送らない（採点はサーバ側がDBの正解で行う）
     const { data: questionsData } = await supabase
-      .from("questions").select("*").eq("test_id", sessionData.test_id).order("order_index");
-    setQuestions(questionsData ?? []);
+      .from("questions")
+      .select("id, test_id, type, text, options, order_index, points")
+      .eq("test_id", sessionData.test_id).order("order_index");
+    setQuestions((questionsData ?? []) as Question[]);
     setLoading(false);
   };
 
@@ -123,12 +130,11 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     }
   };
 
-  // 複数選択問題かどうかを判定
-  // 「全て選びなさい」「すべて選べ」など、または correct_answer がカンマ区切りの場合
+  // 複数選択問題かどうかを判定（correct_answer は取得しないため type と本文で判定）
+  // 「全て選びなさい」「すべて選べ」など
   const isMultiSelect = (q: Question): boolean =>
     q.type === "multi-select" ||
-    /全て|すべて|全ての|すべての/.test(q.text) ||
-    (!!q.correct_answer && q.correct_answer.includes(","));
+    /全て|すべて|全ての|すべての/.test(q.text);
 
   // 複数選択の切り替え（選択肢をトグルしてカンマ区切りで保存）
   const toggleMultiAnswer = (questionId: string, opt: string) => {

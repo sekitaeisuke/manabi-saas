@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireTeacher } from "@/lib/apiAuth";
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { email, password, name, phone, student_ids } = await req.json();
 
   if (!email || !password || !name) {

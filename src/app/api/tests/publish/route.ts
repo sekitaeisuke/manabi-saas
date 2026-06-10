@@ -9,10 +9,12 @@ export async function POST(req: NextRequest) {
   );
 
   const token = crypto.randomUUID().replace(/-/g, "");
+  // 受験URLは無期限にせず、既定30日で失効させる
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const { data, error } = await supabase
     .from("test_sessions")
-    .insert({ test_id, url_token: token, expires_at: null })
+    .insert({ test_id, url_token: token, expires_at: expiresAt })
     .select()
     .single();
 

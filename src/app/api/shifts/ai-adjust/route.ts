@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireAdmin } from "@/lib/apiAuth";
 
 export const runtime = "edge";
 export const maxDuration = 30;
@@ -123,6 +124,9 @@ async function summarize(shifts: ShiftRow[], warnings: string[], customInstructi
 
 // ─── POST ─────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { period_id, custom_prompt } = await req.json() as {
     period_id: string;
     custom_prompt?: string;

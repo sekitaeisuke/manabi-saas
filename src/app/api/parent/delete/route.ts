@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireTeacher } from "@/lib/apiAuth";
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { parent_id } = await req.json();
   if (!parent_id) {
     return NextResponse.json({ error: "parent_id は必須です" }, { status: 400 });

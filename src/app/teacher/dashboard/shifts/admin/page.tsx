@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { authFetch } from "@/lib/authFetch";
 import type { ShiftPeriod, ShiftRequest, ShiftAssignment, ShiftEvent, EventType, AssignmentMode } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
 import { triggerConfetti } from "@/lib/confetti";
@@ -457,7 +458,7 @@ function AiStep({ onNext }: { onNext: () => void }) {
     setResult(null);
     setErrorDetail(null);
     try {
-      const res = await fetch("/api/shifts/ai-adjust", {
+      const res = await authFetch("/api/shifts/ai-adjust", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period_id: periodId, custom_prompt: customPrompt }),
@@ -483,7 +484,7 @@ function AiStep({ onNext }: { onNext: () => void }) {
 
   const handleSaveDraft = async () => {
     if (!result || !periodId) return;
-    const res = await fetch("/api/shifts/confirm", {
+    const res = await authFetch("/api/shifts/confirm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ period_id: periodId, shifts: result.shifts, status: "draft" }),
@@ -681,7 +682,7 @@ function ConfirmStep({ onGoToAi }: { onGoToAi?: () => void }) {
       date: a.date, slot_start: a.slot_start, slot_end: a.slot_end,
       school_id: a.school_id, teacher_id: a.teacher_id, note: a.note,
     }));
-    const res = await fetch("/api/shifts/confirm", {
+    const res = await authFetch("/api/shifts/confirm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ period_id: periodId, shifts: rows, status: "confirmed" }),

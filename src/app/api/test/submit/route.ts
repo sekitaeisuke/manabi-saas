@@ -97,14 +97,13 @@ ${wrongQs.length > 0 ? `
 }
 
 export async function POST(req: NextRequest) {
-  const { session_id, student_name, grade, subject, answers, questions, questionnaire, test_type, test_title } =
+  const { session_id, student_name, grade, subject, answers, questionnaire, test_type, test_title } =
     await req.json() as {
       session_id: string;
       student_name: string;
       grade: string;
       subject: string;
       answers: RawAnswer[];
-      questions: RawQuestion[];
       questionnaire: { a: Record<string, number>; b: Record<string, number>; c: Record<string, number> } | null;
       test_type?: string;
       test_title?: string;
@@ -116,6 +115,22 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+
+  // ── 採点はクライアント送信値ではなく、DB の正解・配点で行う（改ざん防止）──
+  const { data: ts } = await supabase
+    .from("test_sessions").select("test_id").eq("id", session_id).maybeSingle();
+  if (!ts) {
+    return NextResponse.json({ error: "テストセッションが見つかりません" }, { status: 404 });
+  }
+  const { data: dbQuestions, error: qErr } = await supabase
+    .from("questions")
+    .select("id, type, text, options, correct_answer, points")
+    .eq("test_id", ts.test_id)
+    .order("order_index");
+  if (qErr || !dbQuestions) {
+    return NextResponse.json({ error: "問題の取得に失敗しました" }, { status: 500 });
+  }
+  const questions = dbQuestions as RawQuestion[];
 
   // ── Step1: 選択式は即座に採点（正規化比較） ──────────
   const gradedMap: Record<string, boolean | null> = {};
