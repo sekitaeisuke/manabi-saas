@@ -193,27 +193,35 @@ ${analysisSection}
   "analysis": "分析テキスト"
 }`;
 
-    try {
-      const text = await callClaude(prompt, 1500);
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        const grades: unknown[] = Array.isArray(parsed.grades) ? parsed.grades : [];
-        // 記述式の採点結果を反映（ClaudeのgradesがshortAnswerQsと同サイズとは限らないため境界チェック）
-        shortAnswerQs.forEach((q, i) => {
-          gradedMap[q.id] = i < grades.length ? Boolean(grades[i]) : false;
-        });
-        ai_analysis = parsed.analysis ?? "";
-      }
-    } catch (err) {
-      console.error("Claude採点エラー（正規化フォールバックで継続）:", err);
-      // フォールバック：正規化比較
+    // AI採点が得られなかった場合の正規化フォールバック（記述式を無得点で握りつぶさない）
+    const fallbackGradeShortAnswers = () => {
       shortAnswerQs.forEach((q) => {
         const a = answers.find((a) => a.question_id === q.id);
         gradedMap[q.id] = a && q.correct_answer
           ? normalize(a.answer) === normalize(q.correct_answer)
           : false;
       });
+    };
+
+    try {
+      const text = await callClaude(prompt, 1500);
+      const match = text.match(/\{[\s\S]*\}/);
+      const parsed = match ? JSON.parse(match[0]) : null;
+      if (parsed && Array.isArray(parsed.grades)) {
+        const grades: unknown[] = parsed.grades;
+        // 記述式の採点結果を反映（ClaudeのgradesがshortAnswerQsと同サイズとは限らないため境界チェック）
+        shortAnswerQs.forEach((q, i) => {
+          gradedMap[q.id] = i < grades.length ? Boolean(grades[i]) : false;
+        });
+        ai_analysis = typeof parsed.analysis === "string" ? parsed.analysis : "";
+      } else {
+        // JSONが取れない／gradesが無い場合も正規化比較で救済
+        console.warn("Claude採点：JSON解析不可。正規化フォールバックで継続");
+        fallbackGradeShortAnswers();
+      }
+    } catch (err) {
+      console.error("Claude採点エラー（正規化フォールバックで継続）:", err);
+      fallbackGradeShortAnswers();
     }
   }
 

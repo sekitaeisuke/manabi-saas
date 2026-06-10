@@ -1,5 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// 全角→半角・空白・大文字小文字を正規化（採点の表記ゆれ吸収）。submit ルートと同一ロジック。
+function normalize(s: string): string {
+  return s
+    .trim()
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[Ａ-Ｚａ-ｚ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/　/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 type Question = {
   id: string;
   difficulty: string;
@@ -22,14 +33,17 @@ export async function POST(req: NextRequest) {
 
   const scored: AnswerEntry[] = (questions as Question[]).map((q) => {
     const given = (answers as Record<string, string>)[q.id] ?? "";
-    const givenNorm = given.trim();
-    const correctNorm = q.correct_answer.trim();
-    let isCorrect = givenNorm === correctNorm;
-    if (!isCorrect && q.type === "multiple-choice") {
-      // "C. -1" vs "C" — compare only the leading option letter/label
-      const givenLetter = givenNorm.split(/[\s.。]/)[0];
-      const correctLetter = correctNorm.split(/[\s.。]/)[0];
-      isCorrect = givenLetter.length > 0 && givenLetter === correctLetter;
+    const correct = q.correct_answer ?? "";
+    let isCorrect: boolean;
+    if ((q.type === "multiple-choice" || q.type === "multi-select") && correct.includes(",")) {
+      // 複数選択：順序を無視して集合比較（submit ルートと同一）
+      const correctSet = new Set(correct.split(",").map((s) => normalize(s)));
+      const answerSet = new Set(given.split(",").map((s) => normalize(s)));
+      isCorrect =
+        correctSet.size === answerSet.size &&
+        [...correctSet].every((c) => answerSet.has(c));
+    } else {
+      isCorrect = normalize(given) === normalize(correct);
     }
     return { questionId: q.id, answer: given, isCorrect, points: isCorrect ? q.points : 0 };
   });

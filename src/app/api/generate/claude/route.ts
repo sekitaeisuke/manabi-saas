@@ -34,12 +34,26 @@ export async function POST(req: NextRequest) {
   // ── Step A+B 統合: 問題チェック＋HTML生成を1回で実施（レート制限対策）──
   // 配点を自動調整してHTMLを生成する
   const totalPoints = (questions as { points?: number }[]).reduce((s, q) => s + (q.points ?? 0), 0);
-  const normalizedQuestions = totalPoints > 0
-    ? (questions as { points?: number }[]).map((q) => ({
-        ...q,
-        points: Math.round(((q.points ?? 1) / totalPoints) * 100),
-      }))
-    : questions;
+  let normalizedQuestions = questions;
+  if (totalPoints > 0) {
+    // 各問を比例配分しつつ、合計が必ず100点になるよう最大剰余法で端数を配分する
+    const raw = (questions as { points?: number }[]).map((q) => ((q.points ?? 1) / totalPoints) * 100);
+    const floored = raw.map((v) => Math.floor(v));
+    let remainder = 100 - floored.reduce((s, v) => s + v, 0);
+    const order = raw
+      .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+      .sort((a, b) => b.frac - a.frac);
+    const bonus: number[] = new Array(raw.length).fill(0);
+    for (const { i } of order) {
+      if (remainder <= 0) break;
+      bonus[i] = 1;
+      remainder--;
+    }
+    normalizedQuestions = (questions as { points?: number }[]).map((q, i) => ({
+      ...q,
+      points: floored[i] + bonus[i],
+    }));
+  }
 
   const finalQuestions = normalizedQuestions;
 

@@ -8,8 +8,9 @@ import DOMPurify from "dompurify";
  */
 export function sanitizeHtml(html: string): string {
   if (typeof window === "undefined") {
-    // SSR時はそのまま返す（サーバ側にはdocumentがない）
-    return html;
+    // SSR時は document が無くサニタイズできないため、未検証HTMLを素通しせず空で返す。
+    // これらは "use client" ページのため、実コンテンツはクライアント側の再レンダーで描画される。
+    return "";
   }
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
