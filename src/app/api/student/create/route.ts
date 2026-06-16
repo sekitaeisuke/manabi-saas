@@ -29,21 +29,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "アカウント作成に失敗しました" }, { status: 500 });
   }
 
-  const { error: updateErr } = await supabase
+  if (!serviceRoleKey) {
+    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY が未設定のため生徒情報を更新できません" }, { status: 500 });
+  }
+  // RLS を貫通するため service role で students を更新（呼び出し元は requireTeacher 済み）
+  const admin = createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { error: updateErr } = await admin
     .from("students")
     .update({ login_id, auth_user_id: authUserId })
     .eq("id", student_id);
 
   if (updateErr) {
     // auth userが宙に浮かないようサービスロールで削除
-    if (serviceRoleKey) {
-      const admin = createClient(url, serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false },
-      });
-      const { error: deleteErr } = await admin.auth.admin.deleteUser(authUserId);
-      if (deleteErr) {
-        console.error("ロールバック中のAuth削除失敗（手動対応が必要）:", authUserId, deleteErr);
-      }
+    const { error: deleteErr } = await admin.auth.admin.deleteUser(authUserId);
+    if (deleteErr) {
+      console.error("ロールバック中のAuth削除失敗（手動対応が必要）:", authUserId, deleteErr);
     }
     return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }

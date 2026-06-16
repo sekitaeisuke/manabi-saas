@@ -87,9 +87,11 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { session_id } = await req.json() as { session_id: string };
 
+  // RLS を貫通するため service role で読み書き（呼び出し元は requireTeacher 済み）
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
   // Fetch questionnaire response

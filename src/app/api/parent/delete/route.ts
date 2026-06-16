@@ -12,12 +12,15 @@ export async function POST(req: NextRequest) {
   }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) {
+    return NextResponse.json({ error: "SUPABASE_SERVICE_ROLE_KEY が未設定のため削除できません" }, { status: 500 });
+  }
+  // RLS を貫通するため service role で操作（呼び出し元は requireTeacher 済み）
+  const admin = createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
 
   // 1) parents 行を取得して auth_user_id を確認
-  const supabase = createClient(url, anonKey);
-  const { data: parent, error: getErr } = await supabase
+  const { data: parent, error: getErr } = await admin
     .from("parents")
     .select("id, auth_user_id")
     .eq("id", parent_id)
@@ -31,7 +34,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 2) parents 行を削除（ON DELETE CASCADE で parent_student_links も消える）
-  const { error: delErr } = await supabase.from("parents").delete().eq("id", parent_id);
+  const { error: delErr } = await admin.from("parents").delete().eq("id", parent_id);
   if (delErr) {
     return NextResponse.json({ error: delErr.message }, { status: 500 });
   }
@@ -39,8 +42,7 @@ export async function POST(req: NextRequest) {
   // 3) service role があれば Supabase Auth ユーザも削除
   let auth_user_deleted = false;
   let auth_error: string | null = null;
-  if (serviceRoleKey && parent.auth_user_id) {
-    const admin = createClient(url, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  if (parent.auth_user_id) {
     const { error: adminErr } = await admin.auth.admin.deleteUser(parent.auth_user_id);
     if (adminErr) {
       auth_error = adminErr.message;
