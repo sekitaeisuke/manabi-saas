@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireTeacher, internalHeaders } from "@/lib/apiAuth";
 
 type Announcement = {
   id: string;
@@ -19,12 +20,15 @@ async function dispatch(origin: string, opts: {
 }) {
   await fetch(`${origin}/api/notify`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...internalHeaders() },
     body: JSON.stringify(opts),
   }).catch((e) => { console.error("dispatch failed:", opts.event_type, e); });
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
+
   const origin = new URL(req.url).origin;
   const { announcement_id } = await req.json();
   if (!announcement_id) {

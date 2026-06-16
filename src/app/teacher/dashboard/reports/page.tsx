@@ -1,5 +1,6 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { authFetch } from "@/lib/authFetch";
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
@@ -527,7 +528,7 @@ function ManualReportForm({
     setPreviewHtml("");
     try {
       // Step1: Claude でHTMLを生成
-      const res = await fetch("/api/reports/generate-manual", {
+      const res = await authFetch("/api/reports/generate-manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

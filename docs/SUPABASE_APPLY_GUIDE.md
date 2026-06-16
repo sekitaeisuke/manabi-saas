@@ -144,4 +144,31 @@ create policy "students_select" on students for select
 - [ ] ステップ0：admin が1人以上いることを確認
 - [ ] ステップ2：`rls-hardening.sql` を Run → 講師ダッシュボードが正常表示
 - [ ] ステップ3：重複0件を確認 →（必要なら重複削除）→ `data-integrity.sql` を Run
+- [ ] 環境変数 `SUPABASE_SERVICE_ROLE_KEY` と `INTERNAL_API_SECRET` を設定（下記）
+
+---
+
+## APIルートの認証ガード（2026-06-16 全ルート対応完了）
+
+全ての `/api/*` ルートに認証チェックを入れた。
+
+- 講師専用ルート … `requireTeacher`（`src/lib/apiAuth.ts`）。クライアントは `authFetch`（`src/lib/authFetch.ts`）で Bearer トークンを自動付与。
+- 管理者専用（`shifts/confirm` `shifts/ai-adjust` `shifts/ai-events`）… `requireAdmin`。
+- `notify` … ログイン済みユーザー（保護者/生徒/講師）または内部呼び出しのみ（`requireUser` / `isInternalCall`）。
+- 公開のまま据え置き（設計上ログイン不要）… `test/submit`（生徒のURLトークン受験）、`schools/register`（公開フォーム）。url_token照合・レート制限の追加を推奨。
+- 認証なしでダッシュボードに入れた `login/teacher` は削除済み。
+
+### 必要な環境変数（**未設定だと壊れる**）
+
+```
+# 全ての講師用API（requireTeacher が teachers を service role で照合）で必須。
+# 未設定だと講師ダッシュボードのAPIが全て 401。
+SUPABASE_SERVICE_ROLE_KEY=（Project Settings → API → service_role キー）
+
+# お知らせ一斉通知（announcement → notify のサーバ間呼び出し）用の内部シークレット。
+# 任意のランダム長文字列。未設定だと一斉通知だけが静かに失敗する。
+INTERNAL_API_SECRET=（例: openssl rand -hex 32 の出力）
+```
+
+> どちらも秘密鍵。`NEXT_PUBLIC_` を付けない／クライアントに出さないこと。
 - [ ] ステップ4：Vercel デプロイ `Ready`

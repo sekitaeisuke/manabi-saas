@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase";
+
 export type NotifyActor = "parent" | "teacher" | "student";
 
 export type NotifyInput = {
@@ -16,9 +18,12 @@ export type NotifyInput = {
  */
 export async function notify(input: NotifyInput): Promise<void> {
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
     await fetch("/api/notify", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(input),
       keepalive: true,
     });

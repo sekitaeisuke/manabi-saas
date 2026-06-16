@@ -1,5 +1,6 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { authFetch } from "@/lib/authFetch";
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
@@ -224,7 +225,7 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
 
   const publish = async (testId: string) => {
     setPublishing(testId);
-    const res = await fetch("/api/tests/publish", {
+    const res = await authFetch("/api/tests/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ test_id: testId }),
@@ -248,7 +249,7 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
     let sessionId = sessionData[startModal.id]?.session_id;
 
     if (!token) {
-      const res = await fetch("/api/tests/publish", {
+      const res = await authFetch("/api/tests/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ test_id: startModal.id }),
@@ -632,7 +633,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       } else {
         body = { testType, title, subject, grade, instructions, questions };
       }
-      const res = await fetch(`/api/generate/${step}`, {
+      const res = await authFetch(`/api/generate/${step}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -668,7 +669,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const analyze = async () => {
     setAnalyzing(true);
     try {
-      const res = await fetch("/api/analyze", {
+      const res = await authFetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ testType, title, subject, grade, questions, answers, studentName }),

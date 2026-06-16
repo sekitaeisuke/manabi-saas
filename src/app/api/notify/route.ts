@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
+import { requireUser, isInternalCall } from "@/lib/apiAuth";
 
 type ActorKind = "parent" | "teacher" | "student";
 
@@ -56,6 +57,13 @@ async function sendEmailViaResend({
 }
 
 export async function POST(req: NextRequest) {
+  // ログイン済みユーザー（保護者/生徒/講師）または内部呼び出しのみ許可。
+  // 無認証だと誰でも学校を装って任意の保護者にメール/LINE/Pushを送れてしまう。
+  if (!isInternalCall(req)) {
+    const auth = await requireUser(req);
+    if (auth instanceof NextResponse) return auth;
+  }
+
   const payload = (await req.json()) as NotifyPayload;
 
   if (!payload?.actor_kind || !payload?.actor_id || !payload?.event_type) {

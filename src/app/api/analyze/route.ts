@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/apiAuth";
 
 // 全角→半角・空白・大文字小文字を正規化（採点の表記ゆれ吸収）。submit ルートと同一ロジック。
 function normalize(s: string): string {
@@ -29,6 +30,8 @@ type AnswerEntry = {
 };
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
   const { testType, title, subject, grade, questions, answers, studentName } = await req.json();
 
   const scored: AnswerEntry[] = (questions as Question[]).map((q) => {

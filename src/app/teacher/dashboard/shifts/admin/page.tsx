@@ -850,7 +850,7 @@ function EventsStep() {
   const runAi = async () => {
     if (!aiPrompt.trim()) { showToast("指示を入力してください", "info"); return; }
     setAiRunning(true); setAiDraft([]);
-    const res = await fetch("/api/shifts/ai-events", {
+    const res = await authFetch("/api/shifts/ai-events", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: aiPrompt, schools }),

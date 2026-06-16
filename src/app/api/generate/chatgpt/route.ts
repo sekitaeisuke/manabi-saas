@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/apiAuth";
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
   const {
     testType, title, subject, grade,
     selectedUnits, difficulties, count,

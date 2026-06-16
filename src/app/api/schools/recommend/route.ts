@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/apiAuth";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -39,6 +40,8 @@ function targetSchoolLevels(grade: string | null): string[] {
 }
 
 export async function GET(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
   const { searchParams } = new URL(req.url);
   const testPercentage = searchParams.get("test_percentage") ? Number(searchParams.get("test_percentage")) : null;
   const habitScore     = searchParams.get("habit_score")     ? Number(searchParams.get("habit_score"))     : null;

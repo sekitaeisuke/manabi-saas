@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, TestSession } from "@/lib/supabase";
 import { GRADE_ORDER, getAdjacentGrades, getUnitsForGrade, SUBJECT_LIST } from "@/lib/curriculum";
+import { authFetch } from "@/lib/authFetch";
 
 // ─── メインページ ─────────────────────────────────────
 export default function DiagnosisPage() {
@@ -806,19 +807,19 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
 
     try {
       // Step1: ChatGPT
-      const r1 = await fetch("/api/generate/chatgpt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const r1 = await authFetch("/api/generate/chatgpt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d1 = await r1.json();
       if (d1.error) throw new Error(`[Step1] ${d1.error}`);
 
       // Step2: GPT-4o-mini
       setStep("step2");
-      const r2 = await fetch("/api/generate/gemini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d1.questions, subject, grade, difficulties, instructions: "" }) });
+      const r2 = await authFetch("/api/generate/gemini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d1.questions, subject, grade, difficulties, instructions: "" }) });
       const d2 = await r2.json();
       if (d2.error) throw new Error(`[Step2] ${d2.error}`);
 
       // Step3: Claude
       setStep("step3");
-      const r3 = await fetch("/api/generate/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d2.questions ?? d1.questions, subject, grade, difficulties, instructions: "" }) });
+      const r3 = await authFetch("/api/generate/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d2.questions ?? d1.questions, subject, grade, difficulties, instructions: "" }) });
       const d3 = await r3.json();
       if (d3.error) throw new Error(`[Step3] ${d3.error}`);
 
@@ -846,7 +847,7 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
       if (qErr) throw new Error("問題の保存に失敗しました: " + qErr.message);
 
       // URL発行
-      const pubRes = await fetch("/api/tests/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ test_id: test.id }) });
+      const pubRes = await authFetch("/api/tests/publish", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ test_id: test.id }) });
       const pubData = await pubRes.json();
       if (pubData.error) throw new Error("URL発行に失敗しました");
 
@@ -1188,7 +1189,7 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
     setGenerating(true);
     setError("");
     try {
-      const res = await fetch("/api/diagnosis/from-questionnaire", {
+      const res = await authFetch("/api/diagnosis/from-questionnaire", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: response.session_id }),
@@ -1441,7 +1442,7 @@ function SchoolRecommendPanel({
     if (skillScore     != null) params.set("skill_score",     String(skillScore));
     if (grade          != null) params.set("grade",           grade);
 
-    fetch(`/api/schools/recommend?${params}`)
+    authFetch(`/api/schools/recommend?${params}`)
       .then((r) => r.json())
       .then((data) => {
         setSchools(data.schools ?? []);

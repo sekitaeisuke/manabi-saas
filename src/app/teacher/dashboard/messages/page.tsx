@@ -1,5 +1,6 @@
 "use client";
 import { showToast } from "@/lib/toast";
+import { authFetch } from "@/lib/authFetch";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
@@ -286,7 +287,7 @@ export default function MessagesPage() {
 
     if (inserted?.id) {
       // best-effort broadcast notification
-      fetch("/api/notify/announcement", {
+      authFetch("/api/notify/announcement", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ announcement_id: inserted.id }),

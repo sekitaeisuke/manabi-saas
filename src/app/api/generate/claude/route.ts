@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/apiAuth";
 
 async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -25,6 +26,8 @@ async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
   const { questions, subject, grade, title, testType, instructions } = await req.json();
 
   const typeLabel = testType === "diagnostic"

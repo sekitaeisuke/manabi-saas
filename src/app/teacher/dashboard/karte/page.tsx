@@ -1,5 +1,6 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
@@ -636,7 +637,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
       };
 
       // Step 1: ChatGPT (GPT-4o) — 初稿作成
-      const r1 = await fetch("/api/karte/generate/chatgpt", {
+      const r1 = await authFetch("/api/karte/generate/chatgpt", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(basePayload),
       });
@@ -645,7 +646,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
 
       // Step 2: Gemini (GPT-4o-mini) — 精査・改善
       setGenStep(2);
-      const r2 = await fetch("/api/karte/generate/gemini", {
+      const r2 = await authFetch("/api/karte/generate/gemini", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draft: d1.draft, studentName, grade, subject }),
       });
@@ -654,7 +655,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
 
       // Step 3: Claude — HTML仕上げ
       setGenStep(3);
-      const r3 = await fetch("/api/karte/generate", {
+      const r3 = await authFetch("/api/karte/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...basePayload, refined: d2.refined }),
       });

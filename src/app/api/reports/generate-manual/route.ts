@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/apiAuth";
 
 const CHECKED_GROUPS = [
   {
@@ -30,6 +31,8 @@ const CHECKED_GROUPS = [
 ];
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
   const {
     studentName,
     grade,

@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/apiAuth";
 
 export const runtime = "edge";
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
+  const auth = await requireAdmin(req);
+  if (auth instanceof NextResponse) return auth;
   const { prompt, schools } = await req.json() as {
     prompt: string;
     schools: { id: string; name: string; group_name: string | null }[];

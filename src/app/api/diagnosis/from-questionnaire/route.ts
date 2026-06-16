@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireTeacher } from "@/lib/apiAuth";
 import { createClient } from "@supabase/supabase-js";
 
 type SectionAnswers = Record<string, number>;
@@ -82,6 +83,8 @@ async function callClaude(prompt: string): Promise<string> {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await requireTeacher(req);
+  if (auth instanceof NextResponse) return auth;
   const { session_id } = await req.json() as { session_id: string };
 
   const supabase = createClient(
