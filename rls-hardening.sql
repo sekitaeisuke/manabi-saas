@@ -70,6 +70,7 @@ CREATE POLICY "students_delete" ON students FOR DELETE
 -- ============================================================
 DROP POLICY IF EXISTS "results_select_public" ON results;
 DROP POLICY IF EXISTS "results_insert_public" ON results;
+DROP POLICY IF EXISTS "results_select" ON results;
 
 CREATE POLICY "results_select" ON results FOR SELECT
   USING (auth_is_teacher());
