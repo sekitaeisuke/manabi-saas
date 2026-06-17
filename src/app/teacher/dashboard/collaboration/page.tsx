@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { authFetch } from "@/lib/authFetch";
 import type { Student, Teacher } from "@/lib/supabase";
+
+type SourceType = "manual" | "report" | "diagnosis";
 
 type Category = "student_guidance" | "classroom_management" | "school_rules";
 type ViewMode = "list" | "calendar";
@@ -21,6 +24,9 @@ type Task = {
   completed_by: string | null;
   completed_at: string | null;
   created_at: string;
+  source_type: SourceType | null;
+  source_id: string | null;
+  auto_reason: string | null;
 };
 
 type Message = {
@@ -94,6 +100,8 @@ export default function TeacherCollaborationPage() {
   const [newMessage, setNewMessage] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [checkedAuto, setCheckedAuto] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -134,6 +142,16 @@ export default function TeacherCollaborationPage() {
 
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
   useEffect(() => { if (myTeacherId) fetchReadIds(); }, [myTeacherId, fetchReadIds]);
+
+  // ページを開いたら報告書・学力診断から「気がかりな生徒」を自動掲載して再取得
+  useEffect(() => {
+    (async () => {
+      setSyncing(true);
+      try { await authFetch("/api/collaboration/sync", { method: "POST" }); } catch { /* 同期失敗は無視 */ }
+      setSyncing(false);
+      fetchTasks();
+    })();
+  }, [fetchTasks]);
 
   const fetchMessages = useCallback(async (taskId: string) => {
     const { data } = await supabase.from("collaboration_task_messages")
@@ -187,6 +205,25 @@ export default function TeacherCollaborationPage() {
     fetchTasks();
   };
 
+  // 自動掲載タスクを「解決済」にする（行は残るので同じ報告書では再掲されない）
+  const resolveAuto = async (taskId: string) => {
+    if (!myTeacherId) return;
+    await supabase.from("collaboration_tasks")
+      .update({ status: "completed", completed_by: myTeacherId, completed_at: new Date().toISOString() })
+      .eq("id", taskId);
+    if (selectedTaskId === taskId) { setSelectedTaskId(null); setMessages([]); }
+    setCheckedAuto(prev => { const n = new Set(prev); n.delete(taskId); return n; });
+    fetchTasks();
+  };
+
+  const toggleCheck = (taskId: string) => {
+    setCheckedAuto(prev => {
+      const n = new Set(prev);
+      if (n.has(taskId)) n.delete(taskId); else n.add(taskId);
+      return n;
+    });
+  };
+
   const sendMessage = async () => {
     if (!newMessage.trim() || !selectedTaskId || !myTeacherId) return;
     setSendingMsg(true);
@@ -238,7 +275,10 @@ export default function TeacherCollaborationPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div>
             <h1 className="text-3xl font-bold text-slate-950">講師連携</h1>
-            <p className="mt-1 text-slate-600">タスクの共有とスレッドで講師間の連携を行います。</p>
+            <p className="mt-1 text-slate-600">
+              タスクの共有とスレッドで講師間の連携を行います。報告書・学力診断で気がかりな生徒は自動で掲載されます。
+              {syncing && <span className="ml-2 text-xs font-semibold text-rose-500">自動掲載を確認中…</span>}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             {/* ビュー切替 */}
@@ -286,17 +326,28 @@ export default function TeacherCollaborationPage() {
                   const isUnread = !readIds.has(task.id) && task.created_by !== myTeacherId;
                   const isSelected = selectedTaskId === task.id;
                   const due = dueDateLabel(task.due_date);
+                  const isAuto = task.source_type === "report" || task.source_type === "diagnosis";
+                  const isChecked = checkedAuto.has(task.id);
                   return (
-                    <button key={task.id} onClick={() => selectTask(task.id)}
-                      className={`w-full rounded-2xl border p-4 text-left transition ${isSelected ? "border-indigo-400 bg-indigo-50" : isUnread ? "border-red-200 bg-red-50 hover:bg-red-100/60" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                    <div key={task.id}
+                      className={`w-full rounded-2xl border text-left transition ${isSelected ? "border-indigo-400 bg-indigo-50" : isAuto ? "border-rose-200 bg-rose-50/60 hover:bg-rose-50" : isUnread ? "border-red-200 bg-red-50 hover:bg-red-100/60" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                      <button onClick={() => selectTask(task.id)} className="w-full p-4 text-left">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
                           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${CATEGORY_COLORS[task.category]}`}>
                             {CATEGORY_LABELS[task.category]}
                           </span>
+                          {isAuto && (
+                            <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">
+                              {task.source_type === "diagnosis" ? "🔔 自動・診断" : "🔔 自動・報告書"}
+                            </span>
+                          )}
                           {isUnread && <span className="h-2 w-2 rounded-full bg-red-500 shrink-0" />}
                         </div>
                         <p className="truncate text-sm font-semibold text-slate-900">{task.title}</p>
+                        {isAuto && task.auto_reason && (
+                          <p className="mt-0.5 truncate text-xs font-medium text-rose-600">{task.auto_reason}</p>
+                        )}
                         {task.category === "student_guidance" && (
                           <p className="mt-0.5 text-xs text-slate-500">
                             {task.is_all_students ? "生徒全体" : studentName(task.student_id)}
@@ -308,10 +359,24 @@ export default function TeacherCollaborationPage() {
                           </span>
                         )}
                         <p className="mt-1 text-xs text-slate-400">
-                          {teacherName(task.created_by)} · {new Date(task.created_at).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          {isAuto ? "自動掲載" : teacherName(task.created_by)} · {new Date(task.created_at).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                         </p>
                       </div>
-                    </button>
+                      </button>
+                      {isAuto && (
+                        <div className="flex items-center justify-between gap-2 border-t border-rose-100 px-4 py-2">
+                          <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 cursor-pointer select-none">
+                            <input type="checkbox" checked={isChecked} onChange={() => toggleCheck(task.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-400" />
+                            対応した
+                          </label>
+                          <button onClick={() => resolveAuto(task.id)} disabled={!isChecked}
+                            className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                            ✓ 解決済
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -330,6 +395,11 @@ export default function TeacherCollaborationPage() {
                           <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${CATEGORY_COLORS[selectedTask.category]}`}>
                             {CATEGORY_LABELS[selectedTask.category]}
                           </span>
+                          {(selectedTask.source_type === "report" || selectedTask.source_type === "diagnosis") && (
+                            <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-700">
+                              {selectedTask.source_type === "diagnosis" ? "🔔 自動・診断" : "🔔 自動・報告書"}
+                            </span>
+                          )}
                           {selectedTask.category === "student_guidance" && (
                             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
                               {selectedTask.is_all_students ? "生徒全体" : studentName(selectedTask.student_id)}
@@ -337,6 +407,9 @@ export default function TeacherCollaborationPage() {
                           )}
                         </div>
                         <h2 className="text-lg font-bold text-slate-950">{selectedTask.title}</h2>
+                        {selectedTask.auto_reason && (
+                          <p className="mt-0.5 text-sm font-semibold text-rose-600">{selectedTask.auto_reason}</p>
+                        )}
                         {selectedTask.description && (
                           <p className="mt-1 text-sm text-slate-600 whitespace-pre-wrap">{selectedTask.description}</p>
                         )}
