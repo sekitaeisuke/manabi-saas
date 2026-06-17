@@ -8,7 +8,18 @@ import { Logo } from "@/components/Logo";
 import type { Student, ShiftEvent } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
-type Tab = "tests" | "messages" | "calendar" | "karte" | "settings";
+type Tab = "todo" | "tests" | "messages" | "calendar" | "karte" | "settings";
+
+type DailyTask = {
+  id: string;
+  learning_plan_id: string;
+  task_date: string;
+  subject: string | null;
+  content: string;
+  amount: string | null;
+  sort_order: number;
+  done: boolean;
+};
 
 type KartePlan = {
   id: string;
@@ -57,7 +68,8 @@ export default function StudentDashboardPage() {
   const [student, setStudent] = useState<Student | null>(null);
   const [tests, setTests] = useState<AssignedTest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>("tests");
+  const [tab, setTab] = useState<Tab>("todo");
+  const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
   const [messages, setMessages] = useState<StudentMessage[]>([]);
   const [msgForm, setMsgForm] = useState({ subject: "", message: "" });
   const [sending, setSending] = useState(false);
@@ -75,6 +87,14 @@ export default function StudentDashboardPage() {
   const logout = async () => {
     await supabase.auth.signOut();
     router.replace("/student/login");
+  };
+
+  const toggleTask = async (taskId: string, next: boolean) => {
+    setDailyTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, done: next } : t)));
+    await supabase
+      .from("daily_tasks")
+      .update({ done: next, done_at: next ? new Date().toISOString() : null })
+      .eq("id", taskId);
   };
 
   const fetchMessages = async (s: Student) => {
@@ -151,6 +171,18 @@ export default function StudentDashboardPage() {
         .eq("status", "shared")
         .order("created_at", { ascending: false });
       setKartes((karteData as KartePlan[]) ?? []);
+
+      // 毎日のTODO（共有済みカルテのぶんのみ）
+      const planIds = (karteData ?? []).map((k: { id: string }) => k.id);
+      if (planIds.length > 0) {
+        const { data: dt } = await supabase
+          .from("daily_tasks")
+          .select("id, learning_plan_id, task_date, subject, content, amount, sort_order, done")
+          .in("learning_plan_id", planIds)
+          .order("task_date", { ascending: true })
+          .order("sort_order", { ascending: true });
+        setDailyTasks((dt as DailyTask[]) ?? []);
+      }
 
       setLoading(false);
     };
@@ -261,6 +293,27 @@ export default function StudentDashboardPage() {
   const pendingTests = tests.filter((t) => !t.completed);
   const completedTests = tests.filter((t) => t.completed);
 
+  // 今日のTODO / これから1週間
+  const todayKey = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const weekEndKey = (() => {
+    const d = new Date(); d.setDate(d.getDate() + 6);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const todayTasks = dailyTasks.filter((t) => t.task_date === todayKey);
+  const todayDone = todayTasks.filter((t) => t.done).length;
+  const upcomingTasks = dailyTasks.filter((t) => t.task_date > todayKey && t.task_date <= weekEndKey);
+  const upcomingByDate = upcomingTasks.reduce<Record<string, DailyTask[]>>((acc, t) => {
+    (acc[t.task_date] ??= []).push(t); return acc;
+  }, {});
+  const dateLabel = (key: string) => {
+    const [y, m, d] = key.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return `${m}月${d}日（${WEEKDAY[dt.getDay()]}）`;
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50">
       <header className="sticky top-0 z-10 border-b border-white/60 bg-white/80 px-6 py-4 backdrop-blur-sm">
@@ -290,7 +343,22 @@ export default function StudentDashboardPage() {
         </div>
 
         {/* タブ */}
-        <div className="mb-6 flex gap-2">
+        <div className="mb-6 flex gap-2 flex-wrap">
+          <button
+            onClick={() => setTab("todo")}
+            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
+              tab === "todo"
+                ? "bg-emerald-600 text-white"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            今日のTODO
+            {todayTasks.length - todayDone > 0 && tab !== "todo" && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-bold text-white">
+                {todayTasks.length - todayDone}
+              </span>
+            )}
+          </button>
           <button
             onClick={() => setTab("tests")}
             className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
@@ -360,6 +428,84 @@ export default function StudentDashboardPage() {
             通知設定
           </button>
         </div>
+
+        {/* 今日のTODOタブ */}
+        {tab === "todo" && (
+          <div className="space-y-5">
+            {dailyTasks.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-16 text-center text-slate-500">
+                <p className="text-5xl mb-3">📝</p>
+                <p className="font-semibold text-slate-700">まだTODOはありません</p>
+                <p className="mt-1 text-sm">先生がカルテ（学習方針）を共有すると、毎日のやることがここに表示されます。</p>
+              </div>
+            ) : (
+              <>
+                {/* 今日 */}
+                <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900">今日のTODO</h2>
+                      <p className="text-xs text-slate-500">{dateLabel(todayKey)}</p>
+                    </div>
+                    {todayTasks.length > 0 && (
+                      <span className={`rounded-full px-3 py-1 text-sm font-bold ${
+                        todayDone === todayTasks.length ? "bg-emerald-100 text-emerald-700" : "bg-emerald-50 text-emerald-700"
+                      }`}>
+                        {todayDone}/{todayTasks.length} 完了
+                      </span>
+                    )}
+                  </div>
+                  {todayTasks.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-slate-400">今日のタスクはありません。ゆっくり休もう／苦手の復習をしよう。</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {todayTasks.map((t) => (
+                        <li key={t.id}>
+                          <label className={`flex items-start gap-3 rounded-2xl border px-4 py-3 cursor-pointer transition ${
+                            t.done ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                          }`}>
+                            <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id, !t.done)}
+                              className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600" />
+                            <span className="flex-1 min-w-0">
+                              <span className={`block text-sm font-medium ${t.done ? "text-slate-400 line-through" : "text-slate-900"}`}>{t.content}</span>
+                              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                                {t.subject && <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-medium text-indigo-600">{t.subject}</span>}
+                                {t.amount && <span className="text-slate-400">{t.amount}</span>}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* これから1週間 */}
+                {Object.keys(upcomingByDate).length > 0 && (
+                  <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+                    <h2 className="mb-4 text-lg font-bold text-slate-900">これから1週間</h2>
+                    <div className="space-y-4">
+                      {Object.entries(upcomingByDate).map(([date, items]) => (
+                        <div key={date}>
+                          <p className="mb-1.5 text-xs font-semibold text-slate-500">{dateLabel(date)}</p>
+                          <ul className="space-y-1.5">
+                            {items.map((t) => (
+                              <li key={t.id} className="flex items-center gap-2.5 rounded-xl border border-slate-100 bg-slate-50/60 px-3.5 py-2">
+                                <span className={`h-2 w-2 shrink-0 rounded-full ${t.done ? "bg-emerald-400" : "bg-slate-300"}`} />
+                                <span className={`flex-1 text-sm ${t.done ? "text-slate-400 line-through" : "text-slate-700"}`}>{t.content}</span>
+                                {t.subject && <span className="shrink-0 text-xs text-slate-400">{t.subject}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
 
         {tab === "settings" && studentRef && <StudentSettings student={studentRef} />}
 

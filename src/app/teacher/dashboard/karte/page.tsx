@@ -246,6 +246,56 @@ function KarteDetail({ plan, onBack, onUpdated }: {
   const [notesOpen, setNotesOpen] = useState(false);
   const bg = avatarColor(plan.student_name);
 
+  // 毎日のTODO（進捗パネル用）
+  type DailyTaskRow = { id: string; task_date: string; subject: string | null; content: string; amount: string | null; done: boolean; sort_order: number };
+  const [todoTasks, setTodoTasks] = useState<DailyTaskRow[]>([]);
+  const [todoLoading, setTodoLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
+
+  const fetchTodo = useCallback(async () => {
+    setTodoLoading(true);
+    const { data } = await supabase
+      .from("daily_tasks")
+      .select("id, task_date, subject, content, amount, done, sort_order")
+      .eq("learning_plan_id", plan.id)
+      .order("task_date", { ascending: true })
+      .order("sort_order", { ascending: true });
+    setTodoTasks((data as DailyTaskRow[]) ?? []);
+    setTodoLoading(false);
+  }, [plan.id]);
+  useEffect(() => { fetchTodo(); }, [fetchTodo]);
+
+  const regenerateTodo = async () => {
+    setRegenerating(true);
+    try {
+      await authFetch("/api/karte/daily-tasks/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ learningPlanId: plan.id }),
+      });
+      await fetchTodo();
+    } catch { /* ignore */ }
+    setRegenerating(false);
+  };
+
+  const todayKey = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const weekEndKey = (() => {
+    const d = new Date(); d.setDate(d.getDate() + 6);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const todoDone = todoTasks.filter((t) => t.done).length;
+  const weekTasks = todoTasks.filter((t) => t.task_date >= todayKey && t.task_date <= weekEndKey);
+  const weekByDate = weekTasks.reduce<Record<string, DailyTaskRow[]>>((acc, t) => {
+    (acc[t.task_date] ??= []).push(t); return acc;
+  }, {});
+  const todoDateLabel = (key: string) => {
+    const [y, m, d] = key.split("-").map(Number);
+    const wd = ["日", "月", "火", "水", "木", "金", "土"][new Date(y, m - 1, d).getDay()];
+    return `${m}/${d}（${wd}）`;
+  };
+
   const saveNotes = async () => {
     setSaving(true);
     await supabase.from("learning_plans").update({ teacher_notes: notes }).eq("id", plan.id);
@@ -330,6 +380,47 @@ function KarteDetail({ plan, onBack, onUpdated }: {
 
       {/* カルテ本体 */}
       <div className="mx-auto max-w-3xl px-6 py-10">
+        {/* 毎日のTODO 進捗 */}
+        <div className="no-print mb-6 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-slate-900">毎日のTODO（3か月方針から自動生成）</p>
+              <p className="text-xs text-slate-500">
+                {todoLoading ? "読み込み中…"
+                  : todoTasks.length === 0 ? "まだ生成されていません"
+                  : `全${todoTasks.length}件中 ${todoDone}件 完了（${Math.round((todoDone / todoTasks.length) * 100)}%）`}
+              </p>
+            </div>
+            <button onClick={regenerateTodo} disabled={regenerating}
+              className="shrink-0 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">
+              {regenerating ? "生成中…" : todoTasks.length === 0 ? "TODOを生成" : "TODOを再生成"}
+            </button>
+          </div>
+          {!todoLoading && todoTasks.length > 0 && (
+            Object.keys(weekByDate).length === 0 ? (
+              <p className="text-xs text-slate-400">今週のタスクはありません。</p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500">今週の予定</p>
+                {Object.entries(weekByDate).map(([date, items]) => (
+                  <div key={date} className="rounded-xl bg-white px-3 py-2">
+                    <p className="mb-1 text-xs font-semibold text-slate-600">{todoDateLabel(date)}</p>
+                    <ul className="space-y-0.5">
+                      {items.map((t) => (
+                        <li key={t.id} className="flex items-center gap-2 text-xs">
+                          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${t.done ? "bg-emerald-400" : "bg-slate-300"}`} />
+                          <span className={t.done ? "text-slate-400 line-through" : "text-slate-700"}>{t.content}</span>
+                          {t.subject && <span className="text-slate-400">· {t.subject}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+
         {/* 使用テキスト */}
         {plan.selected_textbooks && plan.selected_textbooks.length > 0 && (
           <div className="no-print mb-6 flex flex-wrap gap-2">
@@ -534,6 +625,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
 
   const [genStep, setGenStep] = useState(0); // 0=idle 1=chatgpt 2=gemini 3=claude 4=done
   const [planHtml, setPlanHtml] = useState("");
+  const [refinedJson, setRefinedJson] = useState<unknown>(null); // 3か月方針の構造化JSON（日割りTODOの元）
   const [genError, setGenError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -652,6 +744,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
       });
       const d2 = await r2.json();
       if (d2.error) { setGenError("Gemini: " + d2.error); setGenStep(0); return; }
+      setRefinedJson(d2.refined ?? null);
 
       // Step 3: Claude — HTML仕上げ
       setGenStep(3);
@@ -679,15 +772,23 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
     const total = testTotal ? Number(testTotal) : null;
     const percentage = score != null && total != null && total > 0
       ? Math.round((score / total) * 100) : null;
-    const { error } = await supabase.from("learning_plans").insert({
+    const baseRow = {
       student_name: studentName, grade, subject,
       test_score: score, test_total: total, test_percentage: percentage,
       diagnosis_session_id: diagnosisSessionId,
       selected_textbooks: selectedTextbooks.length > 0 ? selectedTextbooks : null,
       plan_html: planHtml, status: "draft",
-    });
-    setSaving(false);
+    };
+
+    // plan_json（3か月方針の構造化JSON）も保存。列が未追加の環境では列なしで再試行する。
+    let res = await supabase.from("learning_plans")
+      .insert({ ...baseRow, plan_json: refinedJson }).select("id").single();
+    if (res.error && /plan_json/.test(res.error.message)) {
+      res = await supabase.from("learning_plans").insert(baseRow).select("id").single();
+    }
+    const { data: inserted, error } = res;
     if (error) {
+      setSaving(false);
       if (error.message.includes("does not exist") || error.code === "42P01") {
         setSaveError("Supabaseにテーブルが必要です。SupabaseのSQLエディタで learning_plans テーブルを作成してください。");
       } else {
@@ -695,6 +796,17 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
       }
       return;
     }
+
+    // カルテ作成と同時に「毎日のTODO」を自動生成（plan_jsonがある場合のみ意味を持つ）
+    if (inserted?.id && refinedJson) {
+      try {
+        await authFetch("/api/karte/daily-tasks/generate", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ learningPlanId: inserted.id }),
+        });
+      } catch { /* TODO生成失敗は保存自体を妨げない */ }
+    }
+    setSaving(false);
     setSaved(true);
     setTimeout(() => { setSaved(false); onSaved(); }, 1200);
   };
@@ -869,7 +981,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                     </button>
                     <button onClick={save} disabled={saving || saved}
                       className="flex-2 rounded-xl bg-green-600 px-8 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50">
-                      {saved ? "保存済み ✓" : saving ? "保存中..." : "カルテを保存する"}
+                      {saved ? "保存済み ✓" : saving ? "保存＆TODO作成中..." : "カルテを保存する"}
                     </button>
                   </div>
                 </div>

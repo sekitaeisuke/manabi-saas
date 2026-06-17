@@ -48,6 +48,18 @@ type Announcement = {
   created_at: string;
 };
 
+type WeekTask = {
+  id: string;
+  task_date: string;
+  subject: string | null;
+  content: string;
+  done: boolean;
+  sort_order: number;
+};
+
+const ymd = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 export default function ParentOverviewPage() {
   const [selectedId] = useSelectedStudentId();
   const [student, setStudent] = useState<Student | null>(null);
@@ -57,6 +69,7 @@ export default function ParentOverviewPage() {
   const [latestReport, setLatestReport] = useState<LatestReport | null>(null);
   const [latestDiagnosis, setLatestDiagnosis] = useState<LatestDiagnosis | null>(null);
   const [latestKarte, setLatestKarte] = useState<LatestKarte | null>(null);
+  const [weekTasks, setWeekTasks] = useState<WeekTask[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -131,6 +144,22 @@ export default function ParentOverviewPage() {
         .limit(1)
         .maybeSingle();
       setLatestKarte((karte as LatestKarte) ?? null);
+
+      // 今週の取り組み（共有された最新カルテの毎日のTODO）
+      if (karte?.id) {
+        const today = new Date();
+        const end = new Date(); end.setDate(end.getDate() + 6);
+        const { data: dt } = await supabase
+          .from("daily_tasks")
+          .select("id, task_date, subject, content, done, sort_order")
+          .eq("learning_plan_id", karte.id)
+          .gte("task_date", ymd(today)).lte("task_date", ymd(end))
+          .order("task_date", { ascending: true })
+          .order("sort_order", { ascending: true });
+        setWeekTasks((dt as WeekTask[]) ?? []);
+      } else {
+        setWeekTasks([]);
+      }
     }
 
     setLoading(false);
@@ -214,6 +243,49 @@ export default function ParentOverviewPage() {
                     <p className="leading-relaxed line-clamp-3 whitespace-pre-wrap">{latestKarte.teacher_notes}</p>
                   </div>
                 )}
+              </section>
+            )}
+
+            {weekTasks.length > 0 && (
+              <section className="rounded-3xl border border-emerald-200 bg-white p-4 shadow-sm sm:p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">🗓️</span>
+                    <div>
+                      <h2 className="font-bold text-slate-900">今週の取り組み</h2>
+                      <p className="text-xs text-slate-500">
+                        カルテの3か月方針から作成した、お子さまの毎日のやること（{weekTasks.filter((t) => t.done).length}/{weekTasks.length} 完了）
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {Object.entries(
+                    weekTasks.reduce<Record<string, WeekTask[]>>((acc, t) => {
+                      (acc[t.task_date] ??= []).push(t); return acc;
+                    }, {})
+                  ).map(([date, items]) => {
+                    const [y, m, d] = date.split("-").map(Number);
+                    const wd = ["日", "月", "火", "水", "木", "金", "土"][new Date(y, m - 1, d).getDay()];
+                    const isToday = date === ymd(new Date());
+                    return (
+                      <div key={date} className={`rounded-2xl border px-4 py-3 ${isToday ? "border-emerald-300 bg-emerald-50/50" : "border-slate-100 bg-slate-50/60"}`}>
+                        <p className="mb-1.5 text-xs font-semibold text-slate-600">
+                          {m}月{d}日（{wd}）{isToday && <span className="ml-1 text-emerald-600">今日</span>}
+                        </p>
+                        <ul className="space-y-1">
+                          {items.map((t) => (
+                            <li key={t.id} className="flex items-center gap-2 text-sm">
+                              <span className={`text-base leading-none ${t.done ? "text-emerald-500" : "text-slate-300"}`}>{t.done ? "✓" : "○"}</span>
+                              <span className={t.done ? "text-slate-400 line-through" : "text-slate-700"}>{t.content}</span>
+                              {t.subject && <span className="text-xs text-slate-400">· {t.subject}</span>}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
               </section>
             )}
 
