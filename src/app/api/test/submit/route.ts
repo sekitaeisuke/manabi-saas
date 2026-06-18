@@ -12,6 +12,35 @@ function normalize(s: string): string {
     .toLowerCase();
 }
 
+// 氏名照合用の正規化：上記に加えて空白を全除去（「山田 太郎」=「山田太郎」を同一視）
+function normalizeName(s: string): string {
+  return normalize(s).replace(/\s+/g, "");
+}
+
+// 受験URLは氏名を手入力するため、入力名から students を照合して student_id を解決する。
+// service role で students を読み（RLSの影響を受けない）、一意に定まる場合のみ採用する。
+// 誤紐付けを避けるため、同名が複数いる場合は null（講師が後から手当て）。
+async function resolveStudentId(studentName: string, grade: string): Promise<string | null> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const target = normalizeName(studentName);
+  if (!url || !serviceKey || !target) return null;
+
+  const svc = createClient(url, serviceKey);
+
+  const matchUnique = async (filterByGrade: boolean): Promise<string | null> => {
+    let q = svc.from("students").select("id, name, grade");
+    if (filterByGrade && grade) q = q.eq("grade", grade);
+    const { data } = await q;
+    if (!data) return null;
+    const hits = data.filter((s) => normalizeName(s.name as string) === target);
+    return hits.length === 1 ? (hits[0].id as string) : null;
+  };
+
+  // まず同学年で一意照合、ダメなら全学年で一意照合（学年表記ゆれ救済）
+  return (grade ? await matchUnique(true) : null) ?? (await matchUnique(false));
+}
+
 async function callClaude(prompt: string, maxTokens = 1500): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -251,7 +280,10 @@ ${analysisSection}
     .select("student_id")
     .eq("test_session_id", session_id)
     .maybeSingle();
-  const student_id = assignment?.student_id ?? null;
+  // 割り当てが無い受験（氏名手入力の共有URL）は、入力名から students を照合して紐付ける。
+  // これにより lesson_reports / questionnaire_responses に student_id が入り、
+  // 講師の生徒別ページ・保護者の多層診断に結果が表示される。
+  const student_id = assignment?.student_id ?? await resolveStudentId(student_name, grade);
 
   // ── Step4: 採点結果を確定してDB保存 ──────────────────
   // 重複送信チェック（同一session_id + student_name で既に回答済みの場合は既存結果を返す）
