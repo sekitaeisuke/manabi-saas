@@ -437,7 +437,7 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
 }
 
 // ─── 生徒タブ ────────────────────────────────────────
-type AccountModal = { studentId: string; studentName: string; loginId: string; password: string } | null;
+type AccountModal = { studentId: string; studentName: string; loginId: string; password: string; mode: "issue" | "reset" } | null;
 type EditModal = {
   id: string; name: string; grade: string; school_id: string;
   attendance_days: string[];
@@ -534,21 +534,26 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
     // イベントハンドラ内での仮ログインID生成（render 中ではないため非決定でも問題なし）
     // eslint-disable-next-line react-hooks/purity
     const auto = "s-" + Math.random().toString(36).slice(2, 7);
-    setAccountModal({ studentId: s.id, studentName: s.name, loginId: s.login_id ?? auto, password: "" });
+    setAccountModal({ studentId: s.id, studentName: s.name, loginId: s.login_id ?? auto, password: "", mode: "issue" });
+    setIssuedResult(null);
+  };
+
+  const openResetModal = (s: Student) => {
+    setAccountModal({ studentId: s.id, studentName: s.name, loginId: s.login_id ?? "", password: "", mode: "reset" });
     setIssuedResult(null);
   };
 
   const issueAccount = async () => {
     if (!accountModal || !accountModal.loginId || accountModal.password.length < 6) return;
     setIssuing(true);
-    const res = await authFetch("/api/student/create", {
+    const endpoint = accountModal.mode === "reset" ? "/api/student/reset-password" : "/api/student/create";
+    const body = accountModal.mode === "reset"
+      ? { student_id: accountModal.studentId, password: accountModal.password }
+      : { student_id: accountModal.studentId, login_id: accountModal.loginId, password: accountModal.password };
+    const res = await authFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        student_id: accountModal.studentId,
-        login_id: accountModal.loginId,
-        password: accountModal.password,
-      }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     setIssuing(false);
@@ -700,9 +705,15 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
                     </div>
                   )}
                   {s.login_id ? (
-                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      <span className="text-xs font-medium text-green-700">ID: {s.login_id}</span>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <div className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1">
+                        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                        <span className="text-xs font-medium text-green-700">ID: {s.login_id}</span>
+                      </div>
+                      <button onClick={() => openResetModal(s)}
+                        className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100">
+                        パスワード再設定
+                      </button>
                     </div>
                   ) : (
                     <button onClick={() => openAccountModal(s)}
@@ -826,7 +837,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
             {issuedResult ? (
               <>
                 <div className="mb-4 text-center text-4xl">✅</div>
-                <h3 className="mb-1 text-center text-lg font-bold text-slate-900">アカウント発行完了</h3>
+                <h3 className="mb-1 text-center text-lg font-bold text-slate-900">{accountModal.mode === "reset" ? "パスワード再設定完了" : "アカウント発行完了"}</h3>
                 <p className="mb-6 text-center text-sm text-slate-500">{accountModal.studentName}さんのログイン情報</p>
                 <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
                   <div>
@@ -852,19 +863,24 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
               </>
             ) : (
               <>
-                <h3 className="mb-1 text-lg font-bold text-slate-900">アカウント発行</h3>
-                <p className="mb-6 text-sm text-slate-500">{accountModal.studentName}さんのログイン情報を設定します</p>
+                <h3 className="mb-1 text-lg font-bold text-slate-900">{accountModal.mode === "reset" ? "パスワード再設定" : "アカウント発行"}</h3>
+                <p className="mb-6 text-sm text-slate-500">
+                  {accountModal.mode === "reset"
+                    ? `${accountModal.studentName}さんの新しいパスワードを設定します（現在のパスワードは確認できません）`
+                    : `${accountModal.studentName}さんのログイン情報を設定します`}
+                </p>
                 <div className="space-y-4">
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-slate-700">ログインID</label>
                     <input value={accountModal.loginId}
                       onChange={(e) => setAccountModal({ ...accountModal, loginId: e.target.value })}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400"
+                      readOnly={accountModal.mode === "reset"}
+                      className={`w-full rounded-xl border border-slate-200 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400 ${accountModal.mode === "reset" ? "bg-slate-100 text-slate-500" : "bg-slate-50"}`}
                       placeholder="例：s-tanaka-01" />
-                    <p className="mt-1 text-xs text-slate-400">英数字・ハイフンのみ使用可</p>
+                    <p className="mt-1 text-xs text-slate-400">{accountModal.mode === "reset" ? "ログインIDは変更できません" : "英数字・ハイフンのみ使用可"}</p>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">初期パスワード（6文字以上）</label>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">{accountModal.mode === "reset" ? "新しいパスワード（6文字以上）" : "初期パスワード（6文字以上）"}</label>
                     <input type="text" value={accountModal.password}
                       onChange={(e) => setAccountModal({ ...accountModal, password: e.target.value })}
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400"
@@ -875,7 +891,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
                   <button onClick={issueAccount}
                     disabled={!accountModal.loginId || accountModal.password.length < 6 || issuing}
                     className="flex-1 rounded-2xl bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
-                    {issuing ? "発行中..." : "発行する"}
+                    {issuing ? (accountModal.mode === "reset" ? "設定中..." : "発行中...") : (accountModal.mode === "reset" ? "再設定する" : "発行する")}
                   </button>
                   <button onClick={() => setAccountModal(null)}
                     className="flex-1 rounded-2xl border border-slate-300 bg-white py-3 text-slate-700 hover:bg-slate-50">
