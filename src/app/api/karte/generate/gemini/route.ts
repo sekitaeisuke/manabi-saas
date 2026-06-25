@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
+import { generateWithGemini } from "@/lib/gemini";
 
 export async function POST(req: NextRequest) {
   const auth = await requireTeacher(req);
@@ -29,34 +30,19 @@ ${JSON.stringify(draft, null, 2)}
 改善したカルテデータのみをJSON形式で返してください（説明文不要）。
 入力と同じJSON構造を維持してください。`;
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          maxOutputTokens: 65536,
-        },
-      }),
-    }
-  );
+  const result = await generateWithGemini(prompt, {
+    responseMimeType: "application/json",
+    maxOutputTokens: 65536,
+  });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
+  if (!result.ok) {
     return NextResponse.json(
-      { error: `Gemini APIエラー: ${err.error?.message ?? `HTTP ${res.status}`}` },
+      { error: `Gemini APIエラー: ${result.message}` },
       { status: 500 }
     );
   }
 
-  const data = await res.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!content) {
-    return NextResponse.json({ error: "応答が空です" }, { status: 500 });
-  }
+  const content = result.text;
 
   try {
     const refined = JSON.parse(content);
