@@ -5,10 +5,20 @@
 type GenerationConfig = Record<string, unknown>;
 
 // 過負荷時に順に試すモデル（先頭が本命）。
-const MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"];
+// "-latest" エイリアスは常に現行モデルを指すため、特定バージョンの
+// 廃止（"is no longer available"）でフォールバックが壊れない。
+const MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-flash-lite-latest"];
 
 // この HTTP ステータスは「一時的」とみなしてリトライする。
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
+// モデル廃止・未提供（"no longer available" / "not found"）は次のモデルへ切り替える。
+function isModelUnavailable(status: number, message: string): boolean {
+  return (
+    status === 404 ||
+    /no longer available|not found|not supported|is not available/i.test(message)
+  );
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,6 +85,10 @@ export async function generateWithGemini(
     lastStatus = res.status;
     lastMessage = err?.error?.message ?? `HTTP ${res.status}`;
 
+    if (isModelUnavailable(res.status, lastMessage)) {
+      // このモデルは廃止・未提供。待たずに次のモデルへ即フォールバック。
+      continue;
+    }
     if (!RETRYABLE.has(res.status)) {
       // 認証エラーやリクエスト不正など、リトライしても無駄なものは即返す。
       return { ok: false, status: res.status, message: lastMessage };
