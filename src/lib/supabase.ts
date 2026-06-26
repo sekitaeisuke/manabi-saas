@@ -155,6 +155,27 @@ export type Diagnosis = {
   report_html: string | null;
 };
 
+// ── 教材進捗マネジメント ────────────────────────────────────
+
+export type Understanding = "good" | "normal" | "weak";
+
+export type TextbookProgress = {
+  id:             string;
+  student_id:     string;
+  student_name:   string;
+  teacher_id:     string;        // 誰が入力したか
+  teacher_name:   string | null;
+  lesson_date:    string;
+  subject:        string | null;
+  textbook:       string;
+  progress_where: string | null;
+  amount:         string | null;
+  understanding:  Understanding | null;
+  comment:        string | null;
+  created_at:     string;
+  updated_at:     string;
+};
+
 // ── 出勤怠管理 ──────────────────────────────────────────────
 
 export type AttendanceStatus = "present" | "absent" | "late" | "early_leave";
