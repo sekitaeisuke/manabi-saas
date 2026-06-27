@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>つながるまなび 教材進捗 入力マニュアル</title>
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  html { font-family: "Yu Gothic","Meiryo","Hiragino Kaku Gothic ProN",sans-serif; color:#1e293b; }
+  body { background:#fff; }
+
+  .page {
+    width: 210mm; height: 297mm; padding: 14mm 15mm; position: relative;
+    page-break-after: always; overflow: hidden;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  /* ===== 共通パーツ ===== */
+  h2.sec { font-size: 19px; font-weight: 800; color:#312e81; display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+  .step-badge { display:inline-flex; align-items:center; justify-content:center;
+    width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,#4338ca,#7c3aed);
+    color:#fff; font-weight:800; font-size:15px; flex:none; }
+  .sec-sub { color:#64748b; font-size:12.5px; margin:2px 0 14px 44px; }
+
+  .lead { font-size:13px; line-height:1.9; color:#334155; }
+  .pagefoot { position:absolute; left:15mm; right:15mm; bottom:9mm; display:flex; justify-content:space-between;
+    font-size:10px; color:#94a3b8; border-top:1px solid #e2e8f0; padding-top:5px; }
+
+  /* 操作リスト（番号つき説明） */
+  .ops { list-style:none; margin-top:14px; }
+  .ops li { display:flex; gap:11px; align-items:flex-start; margin-bottom:11px; }
+  .num { flex:none; width:23px; height:23px; border-radius:50%; background:#4f46e5; color:#fff;
+    font-size:12.5px; font-weight:800; display:flex; align-items:center; justify-content:center; margin-top:1px; }
+  .num.amber { background:#d97706; }
+  .ops .t { font-size:12.8px; line-height:1.65; }
+  .ops .t b { color:#312e81; }
+  .ops .t .sub { color:#64748b; font-size:11.5px; }
+
+  /* 注意・ヒント枠 */
+  .tip { margin-top:14px; border-radius:12px; padding:11px 14px 11px 14px; font-size:11.8px; line-height:1.7; }
+  .tip.blue { background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; }
+  .tip.amber{ background:#fffbeb; border:1px solid #fde68a; color:#92400e; }
+  .tip b{ font-weight:800; }
+
+  /* ===== ブラウザ枠（スクショ風） ===== */
+  .browser { border:1px solid #cbd5e1; border-radius:12px; overflow:hidden; box-shadow:0 8px 24px rgba(2,6,23,.10); background:#fff; }
+  .bbar { height:30px; background:#f1f5f9; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:6px; padding:0 12px; }
+  .bbar .dot{ width:9px;height:9px;border-radius:50%; }
+  .bbar .r{background:#f87171}.bbar .y{background:#fbbf24}.bbar .g{background:#34d399}
+  .bbar .url{ margin-left:10px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; height:18px;
+    flex:1; max-width:none; display:flex; align-items:center; padding:0 9px; font-size:10px; color:#64748b; }
+
+  /* 画面内インライン番号バッジ（ラベルに直接付ける＝必ず正しい位置に合う） */
+  .nb { display:inline-flex; width:18px; height:18px; border-radius:50%; background:#ef4444; color:#fff;
+    font-size:11px; font-weight:800; align-items:center; justify-content:center; margin-right:6px; vertical-align:middle;
+    box-shadow:0 1px 3px rgba(0,0,0,.25); }
+
+  /* ====== ログイン画面 再現 ====== */
+  .login { display:flex; height:300px; }
+  .login .brand{ width:46%; background:linear-gradient(135deg,#4f46e5,#5b21b6); color:#fff; padding:20px; display:flex; flex-direction:column; justify-content:space-between; }
+  .login .brand h3{ font-size:17px; font-weight:800; line-height:1.4; margin-top:8px; }
+  .login .brand p{ font-size:10px; color:#c7d2fe; margin-top:8px; line-height:1.6; }
+  .login .brand .feat{ font-size:10px; color:#e0e7ff; margin-top:6px; display:flex; gap:6px; align-items:center;}
+  .login .form{ flex:1; background:#f8fafc; display:flex; align-items:center; justify-content:center; padding:18px; }
+  .login .card{ background:#fff; border:1px solid #e2e8f0; border-radius:18px; padding:20px; width:100%; box-shadow:0 4px 14px rgba(2,6,23,.05); }
+  .login .card h4{ font-size:17px; font-weight:800; color:#0f172a; }
+  .login .card .cs{ font-size:10.5px; color:#64748b; margin-top:2px; }
+  .lbl{ font-size:11px; font-weight:700; color:#334155; display:block; margin:13px 0 4px; }
+  .inp{ width:100%; height:33px; border:1px solid #e2e8f0; background:#f8fafc; border-radius:9px; padding:0 11px;
+    font-size:11px; color:#94a3b8; display:flex; align-items:center; }
+  .btn-primary{ width:100%; height:36px; background:#4f46e5; color:#fff; border-radius:9px; font-weight:800; font-size:12.5px;
+    display:flex; align-items:center; justify-content:center; margin-top:16px; }
+
+  /* ====== ダッシュボード＋サイドバー 再現 ====== */
+  .app{ display:flex; height:360px; }
+  .sidebar{ width:165px; flex:none; border-right:1px solid #e2e8f0; background:#fff; display:flex; flex-direction:column; }
+  .sb-logo{ height:38px; border-bottom:1px solid #f1f5f9; display:flex; align-items:center; padding:0 12px; }
+  .sb-nav{ flex:1; padding:8px 8px; overflow:hidden; }
+  .sb-cap{ font-size:8px; font-weight:800; color:#94a3b8; letter-spacing:1px; padding:4px 8px; }
+  .sb-item{ display:flex; align-items:center; gap:8px; height:25px; padding:0 9px; border-radius:8px; font-size:10.5px; color:#475569; font-weight:600; }
+  .sb-item .ic{ width:13px; height:13px; border:1.6px solid #94a3b8; border-radius:4px; flex:none; }
+  .sb-item.active{ background:#eef2ff; color:#4338ca; }
+  .sb-item.active .ic{ border-color:#6366f1; background:#c7d2fe; }
+  .sb-user{ border-top:1px solid #f1f5f9; padding:8px; }
+  .sb-user .row{ display:flex; gap:7px; align-items:center; background:#f8fafc; border-radius:9px; padding:6px 8px; }
+  .sb-user .av{ width:22px;height:22px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-weight:800;font-size:11px;display:flex;align-items:center;justify-content:center;}
+  .sb-user .nm{ font-size:9px; color:#475569; } .sb-user .ro{ font-size:8.5px; color:#94a3b8; }
+  .sb-logout{ margin-top:7px; height:25px; border:1px solid #fecaca; background:#fef2f2; color:#dc2626; border-radius:8px; font-size:10px; font-weight:700; display:flex;align-items:center;justify-content:center;gap:5px;}
+  .content{ flex:1; background:#f8fafc; padding:16px; }
+
+  /* ====== 教材進捗フォーム 再現 ====== */
+  .formcard{ background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:14px; box-shadow:0 2px 8px rgba(2,6,23,.04); }
+  .fc-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:11px; }
+  .fc-head h4{ font-size:13.5px; font-weight:800; color:#1e293b; }
+  .pill-user{ background:#eef2ff; color:#4338ca; font-size:9.5px; font-weight:700; border-radius:20px; padding:3px 9px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:11px; }
+  .field .fl{ font-size:9.5px; font-weight:700; color:#475569; display:flex; align-items:center; gap:6px; }
+  .field .fl .req{ color:#e11d48; }
+  .field .fi{ margin-top:4px; height:30px; border:1px solid #cbd5e1; border-radius:9px; padding:0 10px; font-size:10.5px;
+    color:#94a3b8; display:flex; align-items:center; justify-content:space-between; background:#fff; }
+  .field .fi.val{ color:#1e293b; }
+  .caret{ color:#94a3b8; font-size:8px; }
+  .feel{ margin-top:12px; }
+  .feel .fl{ font-size:9.5px; font-weight:700; color:#475569; }
+  .feel .opts{ display:flex; gap:7px; margin-top:6px; }
+  .chip{ border-radius:20px; padding:5px 12px; font-size:10.5px; font-weight:700; border:1px solid #e2e8f0; color:#64748b; }
+  .chip.on{ background:#dcfce7; color:#15803d; border-color:#86efac; }
+  .ta{ margin-top:12px; }
+  .ta .fl{ font-size:9.5px; font-weight:700; color:#475569; }
+  .ta .box{ margin-top:4px; height:42px; border:1px solid #cbd5e1; border-radius:9px; padding:7px 10px; font-size:10px; color:#94a3b8; }
+  .submit{ margin-top:13px; display:flex; justify-content:flex-end; }
+  .submit .b{ background:#4f46e5; color:#fff; border-radius:10px; padding:8px 24px; font-size:11.5px; font-weight:800; }
+
+  /* ====== 状況ボード 再現 ====== */
+  .board{ background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:14px; box-shadow:0 2px 8px rgba(2,6,23,.04); }
+  .sum{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0 12px; text-align:center; }
+  .sum div{ border-radius:10px; padding:8px 0; }
+  .sum .big{ font-size:16px; font-weight:800; } .sum .cap{ font-size:9px; color:#64748b; }
+  .s1{background:#f1f5f9}.s1 .big{color:#334155} .s2{background:#f0fdf4}.s2 .big{color:#15803d}
+  .s3{background:#fffbeb}.s3 .big{color:#b45309} .s4{background:#fef2f2}.s4 .big{color:#dc2626}
+  .srow{ display:flex; gap:9px; align-items:flex-start; padding:9px 0; border-top:1px solid #f1f5f9; }
+  .gr{ background:#f1f5f9; color:#64748b; font-size:9px; font-weight:700; border-radius:6px; padding:2px 6px; flex:none; }
+  .srow .nm{ font-size:11px; font-weight:700; color:#1e293b; }
+  .srow .meta{ font-size:10px; color:#64748b; margin-top:2px; }
+  .tag-red{ background:#fee2e2; color:#dc2626; font-size:8.5px; font-weight:800; border-radius:20px; padding:1px 7px; }
+  .tag-amber{ background:#fef3c7; color:#b45309; font-size:8.5px; font-weight:800; border-radius:20px; padding:1px 7px; }
+  .feel-pill{ background:#dcfce7; color:#15803d; font-size:8.5px; font-weight:700; border-radius:20px; padding:1px 7px; }
+  .srow .right{ margin-left:auto; text-align:right; font-size:8.5px; color:#94a3b8; }
+
+  /* 表紙 */
+  .cover{ height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    background:linear-gradient(160deg,#4338ca 0%,#5b21b6 55%,#6d28d9 100%); color:#fff; }
+  .cover .badge{ border:1.5px solid rgba(255,255,255,.5); border-radius:30px; padding:6px 18px; font-size:12px; letter-spacing:2px; margin-bottom:26px; }
+  .cover h1{ font-size:40px; font-weight:900; letter-spacing:2px; line-height:1.35; }
+  .cover .sub{ font-size:15px; color:#ddd6fe; margin-top:18px; line-height:1.8; }
+  .cover .rule{ width:60px; height:4px; background:#fff; border-radius:4px; margin:30px auto; opacity:.85; }
+  .cover .foot{ position:absolute; bottom:20mm; font-size:11px; color:#c7d2fe; }
+
+  .flow{ display:flex; gap:10px; margin:16px 0 4px; }
+  .flow .f{ flex:1; border:1px solid #e2e8f0; border-radius:12px; padding:12px; background:#fff; position:relative; }
+  .flow .f .n{ width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#4338ca,#7c3aed);color:#fff;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;}
+  .flow .f h5{ font-size:12.5px; font-weight:800; color:#312e81; }
+  .flow .f p{ font-size:10.5px; color:#64748b; margin-top:4px; line-height:1.55; }
+  .flow .arr{ align-self:center; color:#c7d2fe; font-size:20px; font-weight:800; }
+</style>
+</head>
+<body>
+
+<!-- ============ 表紙 ============ -->
+<div class="page">
+  <div class="cover">
+    <div class="badge">つ な が る ま な び</div>
+    <svg width="120" height="120" viewBox="0 0 72 72" style="margin-bottom:24px">
+      <rect width="72" height="72" rx="20" fill="#ffffff" fill-opacity="0.14"/>
+      <rect x="1" y="1" width="70" height="70" rx="19" stroke="#fff" stroke-width="1" stroke-opacity="0.5"/>
+      <line x1="23" y1="22" x2="49" y2="22" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-opacity="0.8"/>
+      <path d="M54 28 Q60 52 44 58 Q34 63 24 55" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-opacity="0.8"/>
+      <circle cx="17" cy="22" r="5.5" fill="#fff"/>
+      <circle cx="54" cy="22" r="5.5" fill="#fff"/>
+      <circle cx="19" cy="53" r="7" fill="#fff"/>
+    </svg>
+    <h1>教材進捗<br>入力マニュアル</h1>
+    <div class="rule"></div>
+    <p class="sub">ログインのしかたから、テキスト進捗の入力まで<br>このマニュアル1冊で、はじめての方も迷いません。</p>
+    <div class="foot">株式会社 地域教育工房 ／ つながるまなび</div>
+  </div>
+</div>
+
+<!-- ============ P2: 全体の流れ + STEP1 ============ -->
+<div class="page">
+  <h2 class="sec"><span class="step-badge">流</span>はじめに ― 入力までの3ステップ</h2>
+  <p class="sec-sub">毎回の授業のあと、「どのテキストを・どこまで・どんな様子だったか」を残すだけです。</p>
+
+  <div class="flow">
+    <div class="f"><div class="n">1</div><h5>ログインする</h5><p>配布されたURLを開き、メールアドレスとパスワードを入力します。</p></div>
+    <div class="arr">›</div>
+    <div class="f"><div class="n">2</div><h5>メニューを開く</h5><p>左メニューの「教材進捗」をタップ／クリックします。</p></div>
+    <div class="arr">›</div>
+    <div class="f"><div class="n">3</div><h5>進捗を入力する</h5><p>生徒・テキスト・進んだ範囲などを選んで「記録する」。</p></div>
+  </div>
+
+  <h2 class="sec" style="margin-top:22px"><span class="step-badge">1</span>ログインする</h2>
+  <p class="sec-sub">ブラウザ（Chrome や Safari）で、塾から共有されたURLを開きます。</p>
+
+  <div class="browser">
+    <div class="bbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="url">🔒 https://（塾から共有されたURL）/login</span></div>
+    <div class="login" style="position:relative">
+      <div class="brand">
+        <div style="font-weight:800; font-size:13px">つながるまなび</div>
+        <div>
+          <h3>生徒の成長を、<br>データで見える化する。</h3>
+          <p>学力・学習習慣・学習法を多角的に診断し、<br>一人ひとりに最適な指導を実現します。</p>
+          <div class="feat">📊 AIによる多層診断レポート</div>
+          <div class="feat">📝 診断テストの作成・配布・採点</div>
+        </div>
+        <div style="font-size:8px;color:#a5b4fc">© つながるまなび</div>
+      </div>
+      <div class="form">
+        <div class="card">
+          <h4>ログイン</h4>
+          <div class="cs">アカウント情報を入力してください</div>
+          <span class="lbl"><span class="nb">1</span>メールアドレス</span>
+          <div class="inp">example@school.jp</div>
+          <span class="lbl"><span class="nb">2</span>パスワード</span>
+          <div class="inp">••••••••</div>
+          <div class="btn-primary"><span class="nb">3</span>ログイン →</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="ops">
+    <li><span class="num">1</span><span class="t"><b>メールアドレス</b>を入力します。<span class="sub">塾から発行されたあなた専用のアドレスです。</span></span></li>
+    <li><span class="num">2</span><span class="t"><b>パスワード</b>を入力します。<span class="sub">●で隠れて表示されます。打ち間違いに注意。</span></span></li>
+    <li><span class="num">3</span><span class="t"><b>「ログイン →」</b>をタップ／クリックします。これでダッシュボード画面が開きます。</span></li>
+  </ul>
+
+  <div class="tip amber"><b>うまくログインできないとき</b>　「メールアドレスまたはパスワードが正しくありません」と出たら、入力ミス（全角・スペース・大文字小文字）を確認してください。それでも入れない場合は、教室の管理者にお問い合わせください。</div>
+
+  <div class="pagefoot"><span>つながるまなび 教材進捗 入力マニュアル</span><span>2</span></div>
+</div>
+
+<!-- ============ P3: STEP2 メニュー ============ -->
+<div class="page">
+  <h2 class="sec"><span class="step-badge">2</span>メニューから「教材進捗」を開く</h2>
+  <p class="sec-sub">ログインすると下のような画面になります。左側のメニューから「教材進捗」を選びます。</p>
+
+  <div class="browser">
+    <div class="bbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="url">🔒 https://（塾から共有されたURL）/teacher/dashboard</span></div>
+    <div class="app" style="position:relative">
+      <div class="sidebar">
+        <div class="sb-logo"><span style="font-weight:800;font-size:12px;color:#334155">つながるまなび</span></div>
+        <div class="sb-nav">
+          <div class="sb-cap">メニュー</div>
+          <div class="sb-item"><span class="ic"></span>ダッシュボード</div>
+          <div class="sb-item"><span class="ic"></span>診断テスト</div>
+          <div class="sb-item"><span class="ic"></span>多層診断</div>
+          <div class="sb-item"><span class="ic"></span>生徒・講師管理</div>
+          <div class="sb-item"><span class="ic"></span>カルテ</div>
+          <div class="sb-item"><span class="ic"></span>報告書</div>
+          <div class="sb-item active"><span class="nb">1</span>教材進捗</div>
+        </div>
+        <div class="sb-user">
+          <div class="row"><span class="av">T</span><div><div class="nm">teacher@school.jp</div><div class="ro">講師</div></div></div>
+          <div class="sb-logout">⎋ ログアウト</div>
+        </div>
+      </div>
+      <div class="content">
+        <div style="font-size:13px;font-weight:800;color:#1e293b">ダッシュボード</div>
+        <div style="font-size:10px;color:#64748b;margin-top:3px">ようこそ。本日の予定や担当生徒の状況がここに表示されます。</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="font-size:9px;color:#94a3b8">本日の授業</div><div style="font-size:20px;font-weight:800;color:#4338ca;margin-top:4px">6</div></div>
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="font-size:9px;color:#94a3b8">未読メッセージ</div><div style="font-size:20px;font-weight:800;color:#dc2626;margin-top:4px">2</div></div>
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="font-size:9px;color:#94a3b8">進捗の記入率</div><div style="font-size:20px;font-weight:800;color:#15803d;margin-top:4px">82%</div></div>
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px"><div style="font-size:9px;color:#94a3b8">担当生徒</div><div style="font-size:20px;font-weight:800;color:#334155;margin-top:4px">14</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="ops">
+    <li><span class="num">1</span><span class="t">左メニューの<b>「教材進捗」</b>をタップ／クリックします。<span class="sub">選択中の項目は紫色で表示されます。</span></span></li>
+  </ul>
+
+  <div class="tip blue"><b>スマートフォンの場合</b>　画面が小さいときは左メニューが隠れています。画面右下の <b>「≡ メニュー」</b> を押すとメニューが開くので、その中から「教材進捗」を選んでください。</div>
+
+  <div class="pagefoot"><span>つながるまなび 教材進捗 入力マニュアル</span><span>3</span></div>
+</div>
+
+<!-- ============ P4: STEP3 入力フォーム ============ -->
+<div class="page">
+  <h2 class="sec"><span class="step-badge">3</span>進捗を入力する</h2>
+  <p class="sec-sub">「教材進捗」を開くと入力フォームが出ます。番号の順に選んで、最後に「記録する」を押します。</p>
+
+  <div class="browser">
+    <div class="bbar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="url">🔒 https://（塾から共有されたURL）/teacher/dashboard/progress</span></div>
+    <div style="background:#f8fafc; padding:14px">
+      <div style="font-size:13px;font-weight:800;color:#1e293b">教材進捗</div>
+      <div style="font-size:9.5px;color:#64748b;margin:2px 0 11px">使用テキストと進捗を記録します。記録には入力者（あなた）が残ります。</div>
+      <div class="formcard">
+        <div class="fc-head"><h4>進捗を入力</h4><span class="pill-user">入力者：山田 太郎</span></div>
+        <div class="grid2">
+          <div class="field"><span class="fl"><span class="nb">1</span>生徒 <span class="req">*</span></span><div class="fi val">【中3】鈴木 一郎<span class="caret">▼</span></div></div>
+          <div class="field"><span class="fl"><span class="nb">2</span>授業日</span><div class="fi val">2026-06-27 <span class="caret">📅</span></div></div>
+          <div class="field"><span class="fl"><span class="nb">3</span>科目</span><div class="fi val">英語<span class="caret">▼</span></div></div>
+          <div class="field"><span class="fl"><span class="nb">4</span>使用テキスト <span class="req">*</span></span><div class="fi val">eng3合本</div></div>
+          <div class="field"><span class="fl"><span class="nb">5</span>どこまで（単元・ページ）</span><div class="fi">例）Lesson7 p.42</div></div>
+          <div class="field"><span class="fl"><span class="nb">6</span>量（今日進んだ範囲）</span><div class="fi">例）4ページ / 大問3つ</div></div>
+        </div>
+        <div class="feel">
+          <span class="fl"><span class="nb">7</span>手応え</span>
+          <div class="opts"><span class="chip on">◎ 手応えあり</span><span class="chip">○ ふつう</span><span class="chip">△ 不安</span></div>
+        </div>
+        <div class="ta"><span class="fl"><span class="nb">8</span>様子・つまずき・次回方針</span><div class="box">例）符号ミスが続く。次回は復習から。</div></div>
+        <div class="submit"><div class="b"><span class="nb">9</span>記録する</div></div>
+      </div>
+    </div>
+  </div>
+
+  <ul class="ops" style="margin-top:12px">
+    <li><span class="num">1</span><span class="t"><b>生徒</b>を選びます（必須）。<span class="sub">【学年】氏名 の形で一覧から選択。</span></span></li>
+    <li><span class="num">2</span><span class="t"><b>授業日</b>。<span class="sub">通常は今日の日付が入っています。違う日なら変更。</span></span></li>
+    <li><span class="num">3</span><span class="t"><b>科目</b>を選びます（任意）。</span></li>
+    <li><span class="num">4</span><span class="t"><b>使用テキスト</b>を入力します（必須）。<span class="sub">一度使った名前は次回から候補に出ます。</span></span></li>
+    <li><span class="num">5</span><span class="t"><b>どこまで</b>進んだか（単元・ページ）。</span></li>
+    <li><span class="num">6</span><span class="t"><b>量</b>＝今日進んだ範囲。</span></li>
+    <li><span class="num">7</span><span class="t"><b>手応え</b>を ◎/○/△ から選びます。<span class="sub">もう一度押すと選択を外せます。</span></span></li>
+    <li><span class="num">8</span><span class="t"><b>様子・つまずき・次回方針</b>を自由に記入。</span></li>
+    <li><span class="num amber">9</span><span class="t"><b>「記録する」</b>を押して保存。<span class="sub">「進捗を記録しました」と出れば完了です。</span></span></li>
+  </ul>
+
+  <div class="pagefoot"><span>つながるまなび 教材進捗 入力マニュアル</span><span>4</span></div>
+</div>
+
+<!-- ============ P5: 状況ボード + FAQ ============ -->
+<div class="page">
+  <h2 class="sec"><span class="step-badge">✓</span>入力したあと ― 「入力状況」の見方</h2>
+  <p class="sec-sub">フォームの下に、生徒ごとの最新の進捗と記入状況が一覧で表示されます。</p>
+
+  <div class="board">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:13px;font-weight:800;color:#1e293b">入力状況</div>
+      <div style="font-size:9.5px;color:#64748b;border:1px solid #cbd5e1;border-radius:8px;padding:3px 9px">全学年 ▼</div>
+    </div>
+    <div class="sum">
+      <div class="s1"><div class="big">82%</div><div class="cap">記入率</div></div>
+      <div class="s2"><div class="big">11</div><div class="cap">記入済</div></div>
+      <div class="s3"><div class="big">2</div><div class="cap">7日以上停滞</div></div>
+      <div class="s4"><div class="big">1</div><div class="cap">未入力</div></div>
+    </div>
+    <div class="srow"><span class="gr">中3</span><div style="flex:1"><span class="nm">鈴木 一郎</span> <span class="feel-pill">◎ 手応えあり</span><div class="meta">eng3合本 ／ Lesson7 p.42</div></div><div class="right">2026-06-27<br>入力：山田 太郎</div></div>
+    <div class="srow"><span class="gr">中2</span><div style="flex:1"><span class="nm">田中 花子</span> <span class="tag-amber">9日停滞</span><div class="meta">数学ワークⅡ ／ p.88</div></div><div class="right">2026-06-18<br>入力：佐藤 みき</div></div>
+    <div class="srow"><span class="gr">中1</span><div style="flex:1"><span class="nm">高橋 健太</span> <span class="tag-red">未入力</span><div class="meta" style="color:#94a3b8">まだ記録がありません</div></div><div class="right"></div></div>
+  </div>
+
+  <ul class="ops" style="margin-top:14px">
+    <li><span class="num">●</span><span class="t"><b>記入率</b>…担当生徒のうち、最近きちんと記録できている割合です。</span></li>
+    <li><span class="num amber">▲</span><span class="t"><b>「○日停滞」</b>（黄）…最後の記録から7日以上あいた生徒。次の授業で記入を。</span></li>
+    <li><span class="num" style="background:#dc2626">✕</span><span class="t"><b>「未入力」</b>（赤）…まだ一度も記録がない生徒です。優先して入力しましょう。</span></li>
+  </ul>
+
+  <h2 class="sec" style="margin-top:20px"><span class="step-badge">Q</span>よくある質問</h2>
+  <div style="margin-top:4px">
+    <div class="tip blue" style="margin-top:10px"><b>Q. 入力をまちがえた／前の記録を直したい</b><br>A. 同じ生徒で正しい内容をもう一度「記録する」と、最新の記録として上に表示されます。過去の記録は履歴として残ります。</div>
+    <div class="tip blue" style="margin-top:9px"><b>Q. 続けて同じ生徒・同じテキストを入れたい</b><br>A. 「記録する」を押しても、生徒と使用テキストは残ります。「どこまで」「量」「手応え」「様子」だけ書き替えれば、すぐ次を記録できます。</div>
+    <div class="tip amber" style="margin-top:9px"><b>毎回の授業後に、ひと言でも残すのがコツ。</b>　短くてかまいません。「どこまで進んで・どんな様子だったか」が積み重なるほど、生徒一人ひとりの指導がつながっていきます。</div>
+  </div>
+
+  <div class="pagefoot"><span>つながるまなび 教材進捗 入力マニュアル</span><span>5</span></div>
+</div>
+
+</body>
+</html>
