@@ -15,6 +15,7 @@ type LessonReport = {
   test_subject: string | null;
   test_grade: string | null;
   student_name: string;
+  student_id: string | null;
   score: number | null;
   total: number | null;
   percentage: number | null;
@@ -25,6 +26,39 @@ type LessonReport = {
   report_source: "test" | "manual" | null;
   created_at: string;
 };
+
+// 教材進捗（textbook_progress）＝「何をどこまで進んだか」の単一の真実。
+// 報告書はこれを“参照表示”するだけ（コピーしない＝二元管理にしない）。
+type ProgressRow = {
+  id: string;
+  student_id: string;
+  student_name: string;
+  lesson_date: string;
+  subject: string | null;
+  textbook: string;
+  progress_where: string | null;
+  amount: string | null;
+  understanding: "good" | "normal" | "weak" | null;
+  comment: string | null;
+  teacher_name: string | null;
+};
+
+const UNDERSTANDING_MAP = {
+  good:   { label: "◎ 手応えあり", cls: "bg-green-100 text-green-700 border-green-300" },
+  normal: { label: "○ ふつう",     cls: "bg-blue-100 text-blue-700 border-blue-300" },
+  weak:   { label: "△ 不安",       cls: "bg-amber-100 text-amber-700 border-amber-300" },
+} as const;
+
+function UnderstandingPill({ u }: { u: ProgressRow["understanding"] }) {
+  if (!u) return null;
+  const m = UNDERSTANDING_MAP[u];
+  return <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${m.cls}`}>{m.label}</span>;
+}
+
+/** 1行サマリー文字列（一覧カード用）: 「eng3合本 ／ L7 p.42」 */
+function progressSummary(p: ProgressRow): string {
+  return [p.textbook, p.progress_where].filter(Boolean).join(" ／ ");
+}
 
 // ── つなぐ準拠 17チェック項目 ──────────────────────────────
 const CHECK_GROUPS = [
@@ -81,6 +115,77 @@ function ScorePill({ label, score }: { label: string; score: number }) {
 function statusBadge(s: LessonReport["status"]) {
   if (s === "sent") return <span className="rounded-full bg-green-100 px-3 py-0.5 text-xs font-bold text-green-700">送信済</span>;
   return <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-bold text-amber-700">下書き</span>;
+}
+
+// 報告書の中に「教材進捗（正式入力＝単一の真実）」を参照表示する。
+// データは textbook_progress から読むだけ。ここでは入力させない（入力は教材進捗画面＝唯一の入力口）。
+function ProgressBlock({ report }: { report: LessonReport }) {
+  const [rows, setRows] = useState<ProgressRow[] | null>(null);
+  const reportDate = report.created_at.slice(0, 10);
+
+  useEffect(() => {
+    (async () => {
+      let q = supabase
+        .from("textbook_progress")
+        .select("id,student_id,student_name,lesson_date,subject,textbook,progress_where,amount,understanding,comment,teacher_name")
+        .order("lesson_date", { ascending: false })
+        .limit(12);
+      q = report.student_id
+        ? q.eq("student_id", report.student_id)
+        : q.eq("student_name", report.student_name);
+      const { data } = await q;
+      setRows((data as ProgressRow[]) ?? []);
+    })();
+  }, [report.student_id, report.student_name]);
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm print:border print:border-slate-300">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-lg">📘</span>
+        <h3 className="font-bold text-slate-800">教材進捗（何をどこまで）</h3>
+        <span className="no-print rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-600">
+          正式入力より自動表示
+        </span>
+      </div>
+      <p className="no-print mb-3 text-xs text-slate-400">
+        「教材進捗」画面で入力された内容をそのまま表示しています（ここでは編集しません）。
+      </p>
+
+      {rows === null ? (
+        <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-2/3" /></div>
+      ) : rows.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center">
+          <p className="text-sm text-slate-500">この生徒の教材進捗はまだ入力されていません。</p>
+          <a href="/teacher/dashboard/progress"
+            className="no-print mt-2 inline-block rounded-xl bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+            教材進捗を入力する →
+          </a>
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {rows.map((p) => {
+            const sameDay = p.lesson_date === reportDate;
+            return (
+              <li key={p.id} className={`flex items-start gap-3 py-2.5 ${sameDay ? "-mx-2 rounded-xl bg-indigo-50/60 px-2" : ""}`}>
+                <span className="mt-0.5 shrink-0 text-xs font-semibold text-slate-400">{p.lesson_date}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-semibold text-slate-800">{p.textbook}</span>
+                    {p.progress_where && <span className="text-sm text-slate-500">／ {p.progress_where}</span>}
+                    {p.amount && <span className="text-xs text-slate-400">（{p.amount}）</span>}
+                    <UnderstandingPill u={p.understanding} />
+                    {sameDay && <span className="no-print rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white">この回</span>}
+                  </div>
+                  {p.comment && <p className="mt-0.5 text-xs text-slate-500">{p.comment}</p>}
+                </div>
+                <span className="shrink-0 text-[11px] text-slate-400">入力：{p.teacher_name ?? "—"}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function ReportDetailView({ report, onBack, onUpdated }: {
@@ -172,6 +277,9 @@ function ReportDetailView({ report, onBack, onUpdated }: {
             </div>
           </div>
         )}
+
+        {/* 教材進捗（正式入力＝単一の真実）を参照表示。これで「報告書でわかる」 */}
+        <ProgressBlock report={report} />
 
         {report.report_html ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -272,6 +380,30 @@ export default function ReportsPage() {
   const [filter, setFilter] = useState<"all" | "draft" | "sent">("all");
   const [studentFilter, setStudentFilter] = useState<string>("all");
   const [showManualForm, setShowManualForm] = useState(false);
+  const [latestProg, setLatestProg] = useState<{ byId: Map<string, ProgressRow>; byName: Map<string, ProgressRow> }>(
+    { byId: new Map(), byName: new Map() }
+  );
+
+  // 生徒ごとの最新の教材進捗（単一の真実）を読み込み、一覧カードにも反映する
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("textbook_progress")
+        .select("id,student_id,student_name,lesson_date,subject,textbook,progress_where,amount,understanding,comment,teacher_name")
+        .order("lesson_date", { ascending: false })
+        .limit(2000);
+      const byId = new Map<string, ProgressRow>();
+      const byName = new Map<string, ProgressRow>();
+      for (const p of (data as ProgressRow[]) ?? []) {
+        if (p.student_id && !byId.has(p.student_id)) byId.set(p.student_id, p);
+        if (p.student_name && !byName.has(p.student_name)) byName.set(p.student_name, p);
+      }
+      setLatestProg({ byId, byName });
+    })();
+  }, []);
+
+  const latestFor = (r: LessonReport): ProgressRow | null =>
+    (r.student_id ? latestProg.byId.get(r.student_id) : undefined) ?? latestProg.byName.get(r.student_name) ?? null;
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
@@ -424,6 +556,18 @@ export default function ReportsPage() {
                     </div>
                     <p className="text-lg font-bold text-slate-900">{r.student_name}</p>
                     <p className="mt-0.5 text-sm text-slate-500">{r.test_title}　{r.test_subject && `・ ${r.test_subject}`}　{r.test_grade}</p>
+                    {(() => {
+                      const p = latestFor(r);
+                      return p ? (
+                        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+                          <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700">📘 {progressSummary(p)}</span>
+                          <UnderstandingPill u={p.understanding} />
+                          <span className="text-slate-300">{p.lesson_date}</span>
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-slate-300">📘 教材進捗：未入力</p>
+                      );
+                    })()}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.percentage != null && <ScorePill label="正答率" score={r.percentage} />}
                       {r.score != null && r.total != null && (
