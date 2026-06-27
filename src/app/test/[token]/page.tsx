@@ -130,26 +130,6 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     }
   };
 
-  // 複数選択問題かどうかを判定（correct_answer は取得しないため type と本文で判定）
-  // 「全て選びなさい」「すべて選べ」など
-  const isMultiSelect = (q: Question): boolean =>
-    q.type === "multi-select" ||
-    /全て|すべて|全ての|すべての/.test(q.text);
-
-  // 複数選択の切り替え（選択肢をトグルしてカンマ区切りで保存）
-  const toggleMultiAnswer = (questionId: string, opt: string) => {
-    const current = answers[questionId] ? answers[questionId].split(",").filter(Boolean) : [];
-    const next = current.includes(opt)
-      ? current.filter((v) => v !== opt)
-      : [...current, opt].sort();
-    if (next.length === 0) {
-      const { [questionId]: _, ...rest } = answers;
-      setAnswers(rest);
-    } else {
-      setAnswers({ ...answers, [questionId]: next.join(",") });
-    }
-  };
-
   // ── ローディング・エラー ──
   if (loading) return <Center><p className="text-slate-500">読み込み中...</p></Center>;
   if (!test) return (
@@ -262,52 +242,16 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
                 </div>
                 <p className="text-slate-900 font-medium mb-4 leading-relaxed">{q.text}</p>
                 {(q.type === "multiple-choice" || q.type === "multi-select") && q.options && (
-                  isMultiSelect(q) ? (
-                    /* ── 複数選択（チェックボックス） ── */
-                    <div className="space-y-2">
-                      <p className="mb-2 flex items-center gap-1.5 rounded-xl bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-                        <span>☑</span> 当てはまるものを全て選んでください（複数選択可）
-                      </p>
-                      {q.options.map((opt, j) => {
-                        const selected = (answers[q.id]?.split(",") ?? []).includes(opt);
-                        return (
-                          <label key={j} className={`flex items-center gap-3 cursor-pointer p-3 rounded-2xl border-2 transition select-none ${
-                            selected ? "border-blue-400 bg-blue-50" : "border-slate-100 hover:bg-slate-50"
-                          }`}>
-                            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition ${
-                              selected ? "border-blue-500 bg-blue-500 text-white" : "border-slate-300 bg-white"
-                            }`}>
-                              {selected && (
-                                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </span>
-                            <input type="checkbox" checked={selected}
-                              onChange={() => toggleMultiAnswer(q.id, opt)}
-                              className="sr-only" />
-                            <span className="text-slate-700">{opt}</span>
-                          </label>
-                        );
-                      })}
-                      {answers[q.id] && (
-                        <p className="mt-1 text-xs text-slate-400">
-                          選択中: {answers[q.id].split(",").join("、")}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    /* ── 単一選択（ラジオボタン） ── */
-                    <div className="space-y-2">
-                      {q.options.map((opt, j) => (
-                        <label key={j} className={`flex items-center gap-3 cursor-pointer p-3 rounded-2xl border transition ${answers[q.id] === opt ? "border-blue-400 bg-blue-50" : "border-slate-100 hover:bg-slate-50"}`}>
-                          <input type="radio" name={q.id} value={opt} checked={answers[q.id] === opt}
-                            onChange={() => setAnswers({ ...answers, [q.id]: opt })} className="text-blue-600" />
-                          <span className="text-slate-700">{opt}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )
+                  /* ── 単一選択（ラジオボタン）。1問1答に統一 ── */
+                  <div className="space-y-2">
+                    {q.options.map((opt, j) => (
+                      <label key={j} className={`flex items-center gap-3 cursor-pointer p-3 rounded-2xl border transition ${answers[q.id] === opt ? "border-blue-400 bg-blue-50" : "border-slate-100 hover:bg-slate-50"}`}>
+                        <input type="radio" name={q.id} value={opt} checked={answers[q.id] === opt}
+                          onChange={() => setAnswers({ ...answers, [q.id]: opt })} className="text-blue-600" />
+                        <span className="text-slate-700">{opt}</span>
+                      </label>
+                    ))}
+                  </div>
                 )}
                 {q.type === "short-answer" && (
                   <div>
