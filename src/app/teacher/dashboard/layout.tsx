@@ -253,6 +253,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700" title={userEmail}>
           {userEmail.slice(0, 1).toUpperCase()}
         </div>
+        {userRole === "admin" && (
+          <Link href="/teacher/dashboard/modules" title="モジュール設定（機能のON/OFF）"
+            className={`flex h-9 w-9 items-center justify-center rounded-xl border transition ${
+              isActive("/teacher/dashboard/modules")
+                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-indigo-600"
+            }`}>
+            <Svg k="gear" className="h-4 w-4" />
+          </Link>
+        )}
         <button onClick={logout} title="ログアウト"
           className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600 transition hover:bg-red-100">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

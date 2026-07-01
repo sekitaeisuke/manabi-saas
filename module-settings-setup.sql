@@ -22,14 +22,8 @@ DROP POLICY IF EXISTS module_settings_select ON module_settings;
 CREATE POLICY module_settings_select ON module_settings FOR SELECT
   USING (auth_is_teacher());
 
--- 追加・更新・削除: 管理者(admin)のみ
+-- 追加・更新・削除: 管理者(admin)のみ（既存ヘルパー auth_teacher_role() に合わせる）
 DROP POLICY IF EXISTS module_settings_admin ON module_settings;
 CREATE POLICY module_settings_admin ON module_settings FOR ALL
-  USING (EXISTS (
-    SELECT 1 FROM teachers t
-    WHERE t.email = (auth.jwt() ->> 'email') AND t.role = 'admin'
-  ))
-  WITH CHECK (EXISTS (
-    SELECT 1 FROM teachers t
-    WHERE t.email = (auth.jwt() ->> 'email') AND t.role = 'admin'
-  ));
+  USING (auth_teacher_role() = 'admin')
+  WITH CHECK (auth_teacher_role() = 'admin');
