@@ -30,7 +30,7 @@ type TodayStudent = {
   id: string;
   name: string;
   grade: string;
-  firstAt: string;
+  firstAt: string | null;   // 授業予定の時刻（出席曜日のみの生徒は null）
   subjects: string[];
   karte: StudentKarteJson | null;
   karteAt: string | null;
@@ -127,6 +127,19 @@ export default function TeacherDashboardPage() {
       const e = map.get(l.student_id)!;
       if (l.subject && !e.subjects.includes(l.subject)) e.subjects.push(l.subject);
     }
+
+    // 出席曜日が今日を含む生徒も加える（授業予定が無くても拾う。カレンダー画面と同じ論理）
+    const todayLabel = ["日", "月", "火", "水", "木", "金", "土"][new Date().getDay()];
+    const { data: attStudents } = await supabase
+      .from("students")
+      .select("id, name, grade, attendance_days")
+      .contains("attendance_days", [todayLabel]);
+    for (const s of (attStudents ?? []) as { id: string; name: string; grade: string; attendance_days: string[] | null }[]) {
+      if (!map.has(s.id)) {
+        map.set(s.id, { id: s.id, name: s.name, grade: s.grade, firstAt: null, subjects: [], karte: null, karteAt: null, tasksDone: 0, tasksTotal: 0, lastProgress: null });
+      }
+    }
+
     const ids = [...map.keys()];
     if (ids.length > 0) {
       const [{ data: karteRows }, { data: taskRows }, { data: progRows }] = await Promise.all([
@@ -144,7 +157,13 @@ export default function TeacherDashboardPage() {
         const e = map.get(p.student_id); if (e && !e.lastProgress) e.lastProgress = p.lesson_date;
       }
     }
-    setTodayStudents([...map.values()]);
+    // 授業予定あり（時刻順）→ 出席曜日のみ（氏名順）
+    setTodayStudents([...map.values()].sort((a, b) => {
+      if (a.firstAt && b.firstAt) return a.firstAt.localeCompare(b.firstAt);
+      if (a.firstAt) return -1;
+      if (b.firstAt) return 1;
+      return a.name.localeCompare(b.name, "ja");
+    }));
 
     // ── C: 今日の教室（行事・テスト） ──
     const { data: evRows } = await supabase
@@ -247,7 +266,7 @@ export default function TeacherDashboardPage() {
       {/* ── A: 今日の授業（生徒 × カルテ） ── */}
       <section className="mb-6">
         <h2 className="mb-3 text-sm font-bold text-slate-900">
-          今日の授業{!loading && `（${todayStudents.length}人）`}
+          今日の生徒{!loading && `（${todayStudents.length}人）`}
         </h2>
         {loading ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -260,8 +279,9 @@ export default function TeacherDashboardPage() {
         ) : todayStudents.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-12 text-center text-slate-500">
             <p className="text-3xl mb-2">🗓️</p>
-            <p className="font-semibold text-slate-700">今日の授業予定はありません</p>
-            <p className="mt-1 text-sm text-slate-400">授業予定を登録すると、その生徒のカルテがここに並びます。</p>
+            <p className="font-semibold text-slate-700">今日来る生徒がいません</p>
+            <p className="mt-1 text-sm text-slate-400">生徒管理で「出席曜日」を入れると、その曜日に自動でここへ並びます。</p>
+            <Link href="/teacher/dashboard/schools" className="mt-4 inline-block rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">生徒の出席曜日を入力する →</Link>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -274,7 +294,7 @@ export default function TeacherDashboardPage() {
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-bold text-slate-900">{s.name} <span className="text-xs font-normal text-slate-400">{s.grade}</span></p>
                       <span className="shrink-0 text-xs text-slate-400">
-                        {new Date(s.firstAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                        {s.firstAt ? new Date(s.firstAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) : "出席予定"}
                         {s.subjects.length > 0 && ` ・ ${s.subjects.join("・")}`}
                       </span>
                     </div>
