@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Logo, LogoIcon } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
+import { HREF_MODULE, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
 
 type BadgeKey = "pending" | "unread" | "resched";
 type NavLeaf = { href: string; label: string; iconKey: IconKey; badge?: BadgeKey; adminOnly?: boolean };
@@ -83,6 +84,7 @@ const GROUPS: NavGroup[] = [
     { href: "/teacher/dashboard/messages",      label: "メッセージ", iconKey: "mail", badge: "unread" },
     { href: "/teacher/dashboard/notifications", label: "通知ログ",   iconKey: "bell", badge: "unread" },
     { href: "/teacher/dashboard/settings",      label: "通知設定",   iconKey: "gear" },
+    { href: "/teacher/dashboard/modules",       label: "モジュール設定", iconKey: "gear", adminOnly: true },
   ]},
 ];
 
@@ -90,6 +92,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [checking, setChecking] = useState(true);
   const [userEmail, setUserEmail] = useState("");
   const [userRole, setUserRole] = useState<"admin" | "teacher" | "part-time">("teacher");
+  const [enabledModules, setEnabledModules] = useState<Record<ModuleKey, boolean> | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -102,8 +105,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (!session) { router.replace("/login"); return; }
       const email = session.user.email ?? "";
       setUserEmail(email);
-      const { data: teacher } = await supabase.from("teachers").select("role").eq("email", email).single();
+      const { data: teacher } = await supabase.from("teachers").select("role, school_id").eq("email", email).single();
       if (teacher) setUserRole(teacher.role);
+      // 所属グループ → 有効モジュールを解決（ナビの出し分けに使う）
+      let groupName: string | null = null;
+      if (teacher?.school_id) {
+        const { data: school } = await supabase.from("schools").select("group_name").eq("id", teacher.school_id).maybeSingle();
+        groupName = school?.group_name ?? null;
+      }
+      const { data: ms } = await supabase.from("module_settings").select("scope, module_key, enabled");
+      setEnabledModules(resolveEnabled((ms as ModuleSettingRow[]) ?? [], groupName));
       setChecking(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -137,7 +148,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     pending: pendingCount, unread: unreadMessages, resched: pendingReschedules,
   };
   const leafBadge = (item: NavLeaf) => (item.badge ? badgeMap[item.badge] : 0);
-  const visibleItems = (g: NavGroup) => g.items.filter((it) => !it.adminOnly || userRole === "admin");
+  const visibleItems = (g: NavGroup) => g.items.filter((it) => {
+    if (it.adminOnly && userRole !== "admin") return false;
+    const mod = HREF_MODULE[it.href];
+    if (mod && enabledModules && !enabledModules[mod]) return false;  // 無効モジュールは非表示
+    return true;
+  });
   const groupBadge = (g: NavGroup) => visibleItems(g).reduce((sum, it) => sum + leafBadge(it), 0);
 
   const isActive = (href: string) =>
