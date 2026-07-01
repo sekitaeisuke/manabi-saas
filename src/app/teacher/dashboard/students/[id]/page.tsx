@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import type { Student } from "@/lib/supabase";
+import { authFetch } from "@/lib/authFetch";
+import { showToast } from "@/lib/toast";
+import { sanitizeHtml } from "@/lib/sanitize";
+import type { Student, StudentKarte } from "@/lib/supabase";
 import { Skeleton } from "@/components/Skeleton";
 
 const LESSON_STATUS_JA: Record<string, string> = {
@@ -18,6 +21,11 @@ type ParentLinked = { id: string; name: string; email: string; phone: string | n
 type LessonRow = { id: string; subject: string | null; scheduled_at: string; status: string; teacher_id: string | null };
 type ReportRow = { id: string; test_title: string; test_subject: string | null; percentage: number | null; status: string; created_at: string };
 type KarteRow = { id: string; subject: string; grade: string; status: string; created_at: string };
+type ProgressRow = {
+  id: string; lesson_date: string; subject: string | null; textbook: string;
+  progress_where: string | null; amount: string | null;
+  understanding: "good" | "normal" | "weak" | null; comment: string | null; teacher_name: string | null;
+};
 type DiagRow = {
   id: string; subject: string | null; grade: string | null; status: string;
   test_percentage: number | null;
@@ -30,6 +38,14 @@ type Msg = {
   status: string; created_at: string;
 };
 
+type HubTab = "overview" | "karte" | "learning" | "contact";
+
+const UNDERSTAND: Record<string, { label: string; cls: string }> = {
+  good:   { label: "◎ 手応え", cls: "bg-green-100 text-green-700" },
+  normal: { label: "○ ふつう", cls: "bg-blue-100 text-blue-700" },
+  weak:   { label: "△ 不安",   cls: "bg-amber-100 text-amber-700" },
+};
+
 export default function StudentDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -40,10 +56,14 @@ export default function StudentDetailPage() {
   const [lessons, setLessons] = useState<LessonRow[]>([]);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [karte, setKarte] = useState<KarteRow[]>([]);
+  const [progress, setProgress] = useState<ProgressRow[]>([]);
   const [diagnoses, setDiagnoses] = useState<DiagRow[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
+  const [dailyKarte, setDailyKarte] = useState<StudentKarte | null>(null);
   const [schoolName, setSchoolName] = useState<string>("—");
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<HubTab>("overview");
+  const [karteBusy, setKarteBusy] = useState(false);
   // 「現在時刻」はマウント時に一度だけ確定させ、レンダーを純粋に保つ（授業の前後判定の基準）
   const [now, setNow] = useState(0);
 
@@ -65,8 +85,10 @@ export default function StudentDetailPage() {
       { data: ls },
       { data: rs },
       { data: ks },
+      { data: ps },
       { data: ds },
       { data: msgs },
+      { data: dk },
     ] = await Promise.all([
       supabase.from("parent_student_links")
         .select("parent:parents(id, name, email, phone)")
@@ -86,6 +108,11 @@ export default function StudentDetailPage() {
         .eq("student_id", studentId)
         .order("created_at", { ascending: false })
         .limit(10),
+      supabase.from("textbook_progress")
+        .select("id, lesson_date, subject, textbook, progress_where, amount, understanding, comment, teacher_name")
+        .eq("student_id", studentId)
+        .order("lesson_date", { ascending: false })
+        .limit(10),
       supabase.from("questionnaire_responses")
         .select("id, subject, grade, status, test_percentage, habit_score, method_score, verbal_score, skill_score, created_at")
         .eq("student_id", studentId)
@@ -96,6 +123,11 @@ export default function StudentDetailPage() {
         .eq("student_id", studentId)
         .order("created_at", { ascending: false })
         .limit(10),
+      supabase.from("student_karte")
+        .select("*")
+        .eq("student_id", studentId)
+        .order("generated_at", { ascending: false })
+        .limit(1),
     ]);
 
     setParents((links ?? []).map((l: { parent: ParentLinked | ParentLinked[] | null }) =>
@@ -104,53 +136,56 @@ export default function StudentDetailPage() {
     setLessons((ls as LessonRow[]) ?? []);
     setReports((rs as ReportRow[]) ?? []);
     setKarte((ks as KarteRow[]) ?? []);
+    setProgress((ps as ProgressRow[]) ?? []);
     setDiagnoses((ds as DiagRow[]) ?? []);
     setMessages((msgs as Msg[]) ?? []);
+    setDailyKarte(((dk as StudentKarte[]) ?? [])[0] ?? null);
     setLoading(false);
   }, [studentId]);
 
   useEffect(() => { setNow(Date.now()); load(); }, [load]);
 
+  const regenerateKarte = async () => {
+    if (!studentId) return;
+    setKarteBusy(true);
+    try {
+      const res = await authFetch("/api/karte/daily-view/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId }),
+      });
+      const data = await res.json();
+      if (data.error) { showToast(data.error, "error"); return; }
+      showToast("カルテを更新しました", "success");
+      await load();
+    } catch (e) {
+      showToast("再生成に失敗しました: " + String(e), "error");
+    } finally {
+      setKarteBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="px-6 py-10">
-        <div className="mx-auto max-w-6xl space-y-6">
+        <div className="mx-auto max-w-5xl space-y-6">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-2">
               <Skeleton className="h-3 w-20" />
               <Skeleton className="h-8 w-48" />
               <Skeleton className="h-4 w-36" />
             </div>
-            <div className="flex gap-2">
-              <Skeleton className="h-10 w-24 rounded-2xl" />
-              <Skeleton className="h-10 w-28 rounded-2xl" />
-            </div>
+            <Skeleton className="h-10 w-28 rounded-2xl" />
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {[1, 2].map((i) => (
-              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-12 w-full rounded-xl" />
-                <Skeleton className="h-12 w-full rounded-xl" />
-              </div>
-            ))}
+          <div className="flex gap-2">
+            {[1,2,3,4].map((i) => <Skeleton key={i} className="h-9 w-24 rounded-2xl" />)}
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {[1, 2].map((i) => (
               <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
                 <Skeleton className="h-4 w-24" />
-                <Skeleton className="h-10 w-full rounded-xl" />
-                <Skeleton className="h-10 w-full rounded-xl" />
-                <Skeleton className="h-10 w-3/4 rounded-xl" />
-              </div>
-            ))}
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-10 w-full rounded-xl" />
-                <Skeleton className="h-10 w-full rounded-xl" />
+                <Skeleton className="h-12 w-full rounded-xl" />
+                <Skeleton className="h-12 w-full rounded-xl" />
               </div>
             ))}
           </div>
@@ -170,9 +205,17 @@ export default function StudentDetailPage() {
   const upcomingLessons = lessons.filter((l) => new Date(l.scheduled_at).getTime() >= now).slice(0, 5);
   const pastLessons = lessons.filter((l) => new Date(l.scheduled_at).getTime() < now).slice(0, 5);
 
+  const TABS: { key: HubTab; label: string; badge?: number }[] = [
+    { key: "overview", label: "概要" },
+    { key: "karte", label: "カルテ" },
+    { key: "learning", label: "学習記録", badge: reports.length + progress.length + diagnoses.length },
+    { key: "contact", label: "やりとり", badge: messages.length },
+  ];
+
   return (
     <div className="px-6 py-10 text-slate-900">
-      <div className="mx-auto max-w-6xl space-y-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        {/* ヘッダー */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs text-slate-400">{schoolName}</p>
@@ -191,166 +234,244 @@ export default function StudentDetailPage() {
           </div>
         </div>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          <Card title="保護者">
-            {parents.length === 0 ? (
-              <p className="text-xs text-slate-400">紐付けされた保護者はいません。</p>
-            ) : (
-              <ul className="space-y-2">
-                {parents.map((p) => (
-                  <li key={p.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-sm font-semibold text-slate-900">{p.name}</p>
-                    <p className="text-xs text-slate-500">{p.email}</p>
-                    {p.phone && <p className="text-xs text-slate-500">{p.phone}</p>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+        {/* タブ */}
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+          {TABS.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-semibold transition ${
+                tab === t.key ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}>
+              {t.label}
+              {t.badge != null && t.badge > 0 && (
+                <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold ${
+                  tab === t.key ? "bg-white/25 text-white" : "bg-slate-200 text-slate-600"
+                }`}>{t.badge}</span>
+              )}
+            </button>
+          ))}
+        </div>
 
-          <Card title="出席曜日">
-            {!student.attendance_days || student.attendance_days.length === 0 ? (
-              <p className="text-xs text-slate-400">未設定</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {student.attendance_days.map((d) => (
-                  <span key={d} className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">{d}</span>
-                ))}
+        {/* ── 概要 ── */}
+        {tab === "overview" && (
+          <div className="space-y-6">
+            <section className="grid gap-4 md:grid-cols-2">
+              <Card title="保護者">
+                {parents.length === 0 ? (
+                  <p className="text-xs text-slate-400">紐付けされた保護者はいません。</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {parents.map((p) => (
+                      <li key={p.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-sm font-semibold text-slate-900">{p.name}</p>
+                        <p className="text-xs text-slate-500">{p.email}</p>
+                        {p.phone && <p className="text-xs text-slate-500">{p.phone}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+              <Card title="出席曜日">
+                {!student.attendance_days || student.attendance_days.length === 0 ? (
+                  <p className="text-xs text-slate-400">未設定</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {student.attendance_days.map((d) => (
+                      <span key={d} className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">{d}</span>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </section>
+
+            <section className="grid gap-4 md:grid-cols-2">
+              <Card title={`今後の授業（${upcomingLessons.length}）`}>
+                {upcomingLessons.length === 0 ? (
+                  <p className="text-xs text-slate-400">予定なし</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {upcomingLessons.map((l) => (
+                      <li key={l.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                        <p className="font-semibold text-slate-900">
+                          {new Date(l.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {LESSON_STATUS_JA[l.status] ?? l.status}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+              <Card title={`過去の授業（${pastLessons.length}）`}>
+                {pastLessons.length === 0 ? (
+                  <p className="text-xs text-slate-400">記録なし</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {pastLessons.map((l) => (
+                      <li key={l.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                        <p className="font-semibold text-slate-900">
+                          {new Date(l.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {LESSON_STATUS_JA[l.status] ?? l.status}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            </section>
+
+            {diagnoses.length > 0 && <TrendChart responses={[...diagnoses].reverse()} />}
+          </div>
+        )}
+
+        {/* ── カルテ（日次＋3か月ビジョン）── */}
+        {tab === "karte" && (
+          <div className="space-y-6">
+            <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="font-bold text-slate-900">日次カルテ（現状＋今日/今週すべきこと）</h2>
+                  <p className="text-xs text-slate-500">
+                    {dailyKarte ? `更新 ${new Date(dailyKarte.generated_at).toLocaleString("ja-JP")}` : "まだ生成されていません"}
+                  </p>
+                </div>
+                <button onClick={regenerateKarte} disabled={karteBusy}
+                  className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-40">
+                  {karteBusy ? "生成中…" : dailyKarte ? "再生成" : "カルテを生成"}
+                </button>
               </div>
-            )}
-          </Card>
-        </section>
+              <style>{`
+                #student-karte h2 { font-size:1rem; font-weight:700; margin:16px 0 6px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
+                #student-karte p { line-height:1.85; font-size:0.9rem; color:#374151; margin:4px 0; }
+                #student-karte ul { padding-left:1.4rem; margin:4px 0; }
+                #student-karte li { line-height:1.8; font-size:0.9rem; color:#374151; }
+                #student-karte .meta { color:#64748b; font-size:0.8rem; }
+                #student-karte .empty { color:#94a3b8; }
+              `}</style>
+              {dailyKarte?.karte_html ? (
+                <div id="student-karte" dangerouslySetInnerHTML={{ __html: sanitizeHtml(dailyKarte.karte_html) }} />
+              ) : (
+                <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+                  「カルテを生成」を押すと、3か月ビジョン・教材進捗・報告書・保護者要望から今日/今週やることを自動でまとめます。
+                </p>
+              )}
+            </div>
 
-        <section className="grid gap-4 md:grid-cols-2">
-          <Card title={`今後の授業（${upcomingLessons.length}）`}>
-            {upcomingLessons.length === 0 ? (
-              <p className="text-xs text-slate-400">予定なし</p>
-            ) : (
-              <ul className="space-y-2">
-                {upcomingLessons.map((l) => (
-                  <li key={l.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-                    <p className="font-semibold text-slate-900">
-                      {new Date(l.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {LESSON_STATUS_JA[l.status] ?? l.status}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+            <Card title="3か月ビジョン（北極星）" link={{ href: "/teacher/dashboard/karte", label: "ビジョン画面 →" }}>
+              {karte.length === 0 ? (
+                <p className="text-xs text-slate-400">まだ3か月ビジョンはありません</p>
+              ) : (
+                <ul className="space-y-2">
+                  {karte.slice(0, 5).map((k) => (
+                    <li key={k.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <p className="truncate font-semibold text-slate-900">{k.subject}</p>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          k.status === "shared" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                        }`}>{k.status === "shared" ? "共有済" : "下書き"}</span>
+                      </div>
+                      <p className="mt-0.5 text-slate-500">{k.created_at.slice(0, 10)} ・ {k.grade}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        )}
 
-          <Card title={`過去の授業（${pastLessons.length}）`}>
-            {pastLessons.length === 0 ? (
+        {/* ── 学習記録（報告書・進捗・診断）── */}
+        {tab === "learning" && (
+          <div className="space-y-6">
+            <Card title="教材進捗（何をどこまで）" link={{ href: "/teacher/dashboard/progress", label: "進捗を入力 →" }}>
+              {progress.length === 0 ? (
+                <p className="text-xs text-slate-400">まだ進捗の記録はありません</p>
+              ) : (
+                <ul className="space-y-2">
+                  {progress.slice(0, 6).map((p) => (
+                    <li key={p.id} className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <span className="mt-0.5 shrink-0 text-slate-400">{p.lesson_date.slice(5)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900">
+                          {p.textbook}{p.progress_where && <span className="font-normal text-slate-500"> ／ {p.progress_where}</span>}
+                        </p>
+                        {p.comment && <p className="mt-0.5 line-clamp-1 text-slate-500">{p.comment}</p>}
+                      </div>
+                      {p.understanding && (
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${UNDERSTAND[p.understanding].cls}`}>
+                          {UNDERSTAND[p.understanding].label}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card title="報告書" link={{ href: "/teacher/dashboard/reports", label: "報告書を作成 →" }}>
+              {reports.length === 0 ? (
+                <p className="text-xs text-slate-400">まだ報告書はありません</p>
+              ) : (
+                <ul className="space-y-2">
+                  {reports.slice(0, 5).map((r) => (
+                    <li key={r.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <p className="truncate font-semibold text-slate-900">{r.test_title}</p>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          r.status === "sent" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                        }`}>{r.status === "sent" ? "送信済" : "下書き"}</span>
+                      </div>
+                      <p className="mt-0.5 text-slate-500">{r.created_at.slice(0, 10)} ・ {r.test_subject ?? "—"} ・ {r.percentage ?? "—"}%</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            <Card title="多層診断" link={{ href: "/teacher/dashboard/diagnosis", label: "診断画面 →" }}>
+              {diagnoses.length === 0 ? (
+                <p className="text-xs text-slate-400">まだ診断はありません</p>
+              ) : (
+                <ul className="space-y-2">
+                  {diagnoses.slice(0, 5).map((d) => (
+                    <li key={d.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <div className="flex items-center justify-between">
+                        <p className="truncate font-semibold text-slate-900">{d.subject ?? "—"}</p>
+                        <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                          {d.status === "pending" ? "未分析" : d.status === "analyzed" ? "分析済" : "承認済"}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-slate-500">{d.created_at.slice(0, 10)} ・ 正答率 {d.test_percentage ?? "—"}%</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          </div>
+        )}
+
+        {/* ── やりとり（保護者メッセージ）── */}
+        {tab === "contact" && (
+          <Card title="保護者とのメッセージ（最新）" link={{ href: "/teacher/dashboard/messages", label: "メッセージ画面 →" }}>
+            {messages.length === 0 ? (
               <p className="text-xs text-slate-400">記録なし</p>
             ) : (
               <ul className="space-y-2">
-                {pastLessons.map((l) => (
-                  <li key={l.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-                    <p className="font-semibold text-slate-900">
-                      {new Date(l.scheduled_at).toLocaleString("ja-JP", { month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">{l.subject ?? "—"} ・ {LESSON_STATUS_JA[l.status] ?? l.status}</p>
-                  </li>
-                ))}
+                {messages.map((m) => {
+                  const fromTeacher = m.direction === "teacher_to_parent";
+                  return (
+                    <li key={m.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate font-semibold text-slate-900">
+                          {fromTeacher ? "→ " : "← "}{m.subject ?? "(件名なし)"}
+                        </p>
+                        <span className="shrink-0 text-slate-400">{m.created_at.slice(0, 10)}</span>
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-slate-500">{m.message}</p>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>
-        </section>
-
-        {diagnoses.length > 0 && <TrendChart responses={[...diagnoses].reverse()} />}
-
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Card title="報告書" link={{ href: "/teacher/dashboard/reports", label: "一覧 →" }}>
-            {reports.length === 0 ? (
-              <p className="text-xs text-slate-400">まだ報告書はありません</p>
-            ) : (
-              <ul className="space-y-2">
-                {reports.slice(0, 5).map((r) => (
-                  <li key={r.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
-                    <div className="flex items-center justify-between">
-                      <p className="truncate font-semibold text-slate-900">{r.test_title}</p>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        r.status === "sent" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                      }`}>
-                        {r.status === "sent" ? "送信済" : "下書き"}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-slate-500">
-                      {r.created_at.slice(0, 10)} ・ {r.test_subject ?? "—"} ・ {r.percentage ?? "—"}%
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card title="3か月ビジョン" link={{ href: "/teacher/dashboard/karte", label: "一覧 →" }}>
-            {karte.length === 0 ? (
-              <p className="text-xs text-slate-400">まだ3か月ビジョンはありません</p>
-            ) : (
-              <ul className="space-y-2">
-                {karte.slice(0, 5).map((k) => (
-                  <li key={k.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
-                    <div className="flex items-center justify-between">
-                      <p className="truncate font-semibold text-slate-900">{k.subject}</p>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        k.status === "shared" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                      }`}>
-                        {k.status === "shared" ? "共有済" : "下書き"}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-slate-500">{k.created_at.slice(0, 10)} ・ {k.grade}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card title="多層診断" link={{ href: "/teacher/dashboard/diagnosis", label: "一覧 →" }}>
-            {diagnoses.length === 0 ? (
-              <p className="text-xs text-slate-400">まだ診断はありません</p>
-            ) : (
-              <ul className="space-y-2">
-                {diagnoses.slice(0, 5).map((d) => (
-                  <li key={d.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
-                    <div className="flex items-center justify-between">
-                      <p className="truncate font-semibold text-slate-900">{d.subject ?? "—"}</p>
-                      <span className="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                        {d.status === "pending" ? "未分析" : d.status === "analyzed" ? "分析済" : "承認済"}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-slate-500">
-                      {d.created_at.slice(0, 10)} ・ 正答率 {d.test_percentage ?? "—"}%
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </section>
-
-        <Card title="保護者とのメッセージ（最新）" link={{ href: "/teacher/dashboard/messages", label: "メッセージ画面 →" }}>
-          {messages.length === 0 ? (
-            <p className="text-xs text-slate-400">記録なし</p>
-          ) : (
-            <ul className="space-y-2">
-              {messages.map((m) => {
-                const fromTeacher = m.direction === "teacher_to_parent";
-                return (
-                  <li key={m.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="truncate font-semibold text-slate-900">
-                        {fromTeacher ? "→ " : "← "}{m.subject ?? "(件名なし)"}
-                      </p>
-                      <span className="shrink-0 text-slate-400">{m.created_at.slice(0, 10)}</span>
-                    </div>
-                    <p className="mt-0.5 line-clamp-2 text-slate-500">{m.message}</p>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
+        )}
       </div>
     </div>
   );
