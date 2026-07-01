@@ -81,7 +81,7 @@ export default function Home() {
           >
             <div>
               <p className="font-bold text-lg">保護者ログイン</p>
-              <p className="mt-0.5 text-sm text-blue-100">お子さまの学習状況・報告書・カルテを確認</p>
+              <p className="mt-0.5 text-sm text-blue-100">お子さまの学習状況・報告書・3か月ビジョンを確認</p>
             </div>
             <span className="text-2xl">→</span>
           </Link>

@@ -61,7 +61,8 @@ const GROUPS: NavGroup[] = [
   { key: "students", label: "生徒", iconKey: "users", items: [
     { href: "/teacher/dashboard/schools",       label: "生徒・講師管理", iconKey: "users" },
     { href: "/teacher/dashboard/parents",       label: "保護者管理",     iconKey: "parents" },
-    { href: "/teacher/dashboard/karte",         label: "カルテ",         iconKey: "card" },
+    { href: "/teacher/dashboard/karte",         label: "3か月ビジョン",  iconKey: "card" },
+    { href: "/teacher/dashboard/karte-daily",   label: "カルテ",         iconKey: "card" },
     { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
     { href: "/teacher/dashboard/progress",      label: "教材進捗",       iconKey: "book" },
     { href: "/teacher/dashboard/collaboration", label: "講師連携",       iconKey: "collab" },

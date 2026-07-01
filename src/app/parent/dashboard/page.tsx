@@ -221,7 +221,7 @@ export default function ParentOverviewPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-2xl">📋</span>
                     <div>
-                      <p className="font-bold text-violet-900">学習カルテが共有されました</p>
+                      <p className="font-bold text-violet-900">3か月ビジョンが共有されました</p>
                       <p className="text-xs text-violet-600 mt-0.5">
                         {latestKarte.created_at.slice(0, 10)} ・ {latestKarte.grade} ・ {latestKarte.subject}
                         {latestKarte.test_percentage != null && (
@@ -234,7 +234,7 @@ export default function ParentOverviewPage() {
                     href="/parent/dashboard/karte"
                     className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700"
                   >
-                    カルテを開く →
+                    3か月ビジョンを開く →
                   </Link>
                 </div>
                 {latestKarte.teacher_notes && (
@@ -254,7 +254,7 @@ export default function ParentOverviewPage() {
                     <div>
                       <h2 className="font-bold text-slate-900">今週の取り組み</h2>
                       <p className="text-xs text-slate-500">
-                        カルテの3か月方針から作成した、お子さまの毎日のやること（{weekTasks.filter((t) => t.done).length}/{weekTasks.length} 完了）
+                        3か月ビジョンから作成した、お子さまの毎日のやること（{weekTasks.filter((t) => t.done).length}/{weekTasks.length} 完了）
                       </p>
                     </div>
                   </div>
@@ -309,7 +309,7 @@ export default function ParentOverviewPage() {
                 href="/parent/dashboard/diagnosis"
               />
               <SummaryCard
-                title="学習カルテ"
+                title="3か月ビジョン"
                 value={latestKarte ? latestKarte.subject : "なし"}
                 sub={latestKarte ? `${latestKarte.grade} ・ ${latestKarte.created_at.slice(0, 10)}` : "講師が作成・共有します"}
                 href="/parent/dashboard/karte"
@@ -372,8 +372,8 @@ export default function ParentOverviewPage() {
             <section className="grid gap-4 md:grid-cols-2">
               <QuickLink
                 href="/parent/dashboard/karte"
-                title="カルテ"
-                description="お子さまの学習カルテ（共有された分のみ）を閲覧できます。"
+                title="3か月ビジョン"
+                description="お子さまの3か月ビジョン（共有された分のみ）を閲覧できます。"
               />
               <QuickLink
                 href="/parent/dashboard/reports"

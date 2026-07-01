@@ -45,7 +45,7 @@ export default function ParentKartePage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-xl font-bold text-slate-950">
-                {selected.student_name} ・ {selected.subject} カルテ
+                {selected.student_name} ・ {selected.subject} 3か月ビジョン
               </h1>
               <p className="mt-0.5 text-sm text-slate-500">
                 {selected.grade} ・ {selected.created_at.slice(0, 10)}
@@ -102,15 +102,15 @@ export default function ParentKartePage() {
     <div className="px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-5xl">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-slate-950">カルテ</h1>
-          <p className="mt-1 text-slate-600">講師から共有された学習カルテ（学習プラン）を確認できます。</p>
+          <h1 className="text-3xl font-bold text-slate-950">3か月ビジョン</h1>
+          <p className="mt-1 text-slate-600">講師から共有された3か月ビジョン（3か月後の到達イメージ）を確認できます。</p>
         </div>
 
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-12 text-center text-slate-400">読み込み中...</div>
         ) : plans.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            共有されたカルテはまだありません。
+            共有された3か月ビジョンはまだありません。
           </div>
         ) : (
           <div className="space-y-3">
@@ -118,7 +118,7 @@ export default function ParentKartePage() {
               <button key={p.id} onClick={() => setSelected(p)}
                 className="block w-full rounded-3xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md">
                 <p className="mb-1 text-xs text-slate-400">{p.created_at.slice(0, 10)}</p>
-                <p className="text-lg font-bold text-slate-900">{p.subject} カルテ</p>
+                <p className="text-lg font-bold text-slate-900">{p.subject} 3か月ビジョン</p>
                 <p className="mt-0.5 text-sm text-slate-500">{p.grade}</p>
                 {p.test_percentage != null && (
                   <span className="mt-3 inline-block rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">

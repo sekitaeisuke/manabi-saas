@@ -284,9 +284,9 @@ export default function StudentDetailPage() {
             )}
           </Card>
 
-          <Card title="カルテ" link={{ href: "/teacher/dashboard/karte", label: "一覧 →" }}>
+          <Card title="3か月ビジョン" link={{ href: "/teacher/dashboard/karte", label: "一覧 →" }}>
             {karte.length === 0 ? (
-              <p className="text-xs text-slate-400">まだカルテはありません</p>
+              <p className="text-xs text-slate-400">まだ3か月ビジョンはありません</p>
             ) : (
               <ul className="space-y-2">
                 {karte.slice(0, 5).map((k) => (

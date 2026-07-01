@@ -8,6 +8,7 @@ import { showToast } from "@/lib/toast";
 import { triggerConfetti } from "@/lib/confetti";
 import { Skeleton } from "@/components/Skeleton";
 import { GRADE_ORDER, SUBJECT_LIST } from "@/lib/curriculum";
+import { CHECK_GROUPS } from "@/lib/checkGroups";
 
 type LessonReport = {
   id: string;
@@ -60,44 +61,7 @@ function progressSummary(p: ProgressRow): string {
   return [p.textbook, p.progress_where].filter(Boolean).join(" ／ ");
 }
 
-// ── つなぐ準拠 17チェック項目 ──────────────────────────────
-const CHECK_GROUPS = [
-  {
-    label: "成果物",
-    color: "border-indigo-200 bg-indigo-50",
-    items: [
-      "1日の内容が終えられる",
-      "時間通りに進める",
-      "暗算・暗記がスムーズ",
-      "苦手単元も取り組める",
-      "問題量が多い",
-    ],
-  },
-  {
-    label: "読む",
-    color: "border-blue-200 bg-blue-50",
-    items: [
-      "問題を読む／わかる",
-      "解説を読む／わかる",
-      "ノートを読む／わかる",
-    ],
-  },
-  {
-    label: "書く",
-    color: "border-green-200 bg-green-50",
-    items: ["ノートを使う", "途中式を書く", "言葉を書いて練習する"],
-  },
-  {
-    label: "聞く",
-    color: "border-amber-200 bg-amber-50",
-    items: ["質問・相談する", "授業をわかるまで", "テスト情報収集"],
-  },
-  {
-    label: "考える",
-    color: "border-purple-200 bg-purple-50",
-    items: ["誤答原因がわかる", "教科バランス良い", "解き直しを実践"],
-  },
-] as const;
+// つなぐ準拠 17チェック項目は @/lib/checkGroups に単一定義（AI推定APIと共有）。
 
 function ScorePill({ label, score }: { label: string; score: number }) {
   const color =
@@ -641,6 +605,8 @@ function ManualReportForm({
   const [generating, setGenerating] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
   const [error, setError] = useState("");
+  const [estimating, setEstimating] = useState(false);
+  const [estimateNote, setEstimateNote] = useState("");
 
   useEffect(() => {
     supabase.from("students").select("id, name, grade").order("name").then(({ data }) => {
@@ -656,6 +622,33 @@ function ManualReportForm({
       else next.add(item);
       return next;
     });
+  };
+
+  // 学力診断・テスト結果から17項目をAI推定して下書きチェックを入れる（講師が確認・調整する前提）
+  const estimateChecks = async () => {
+    if (!studentName.trim()) { setError("生徒名を入力してください"); return; }
+    setEstimating(true);
+    setEstimateNote("");
+    try {
+      const res = await authFetch("/api/reports/estimate-checks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentName: studentName.trim(), studentId: studentId || undefined, subject }),
+      });
+      const data = await res.json();
+      if (data.error) { setEstimateNote(data.error); return; }
+      if (Array.isArray(data.checkedItems)) {
+        setCheckedItems(new Set(data.checkedItems));
+        setEstimateNote(
+          data.message ??
+            `17項目中${data.checkedItems.length}項目を「できている」と推定しました（下書き）。確認・調整してください。`
+        );
+      }
+    } catch (e) {
+      setEstimateNote("推定に失敗しました: " + String(e));
+    } finally {
+      setEstimating(false);
+    }
   };
 
   const selectStudent = (name: string) => {
@@ -876,12 +869,27 @@ function ManualReportForm({
 
         {/* 17チェック項目 */}
         <div className="no-print rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold text-slate-900">学習スキルチェック（17項目）</h2>
-            <span className="text-xs text-slate-400">
-              チェック済み: {checkedItems.size} / 17
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400">
+                チェック済み: {checkedItems.size} / 17
+              </span>
+              <button
+                type="button"
+                onClick={estimateChecks}
+                disabled={estimating || !studentName.trim()}
+                className="rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-40 transition"
+              >
+                {estimating ? "推定中..." : "診断・テストから17項目を推定（下書き）"}
+              </button>
+            </div>
           </div>
+          {estimateNote && (
+            <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-700">
+              {estimateNote}
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {CHECK_GROUPS.map((group) => (
               <div key={group.label} className={`rounded-2xl border p-4 ${group.color}`}>

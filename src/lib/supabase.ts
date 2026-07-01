@@ -136,6 +136,35 @@ export type LearningPlan = {
   created_at: string;
 };
 
+// ── 日次カルテ（student_karte）──────────────────────────────
+// 3か月ビジョン(learning_plans)を反映しつつ、教材進捗・最新報告書(17項目)・保護者ニーズを
+// 毎日1枚に集約する。生成は /api/karte/daily-view/generate。
+export type KarteAction = { subject?: string; content: string; amount?: string };
+
+export type StudentKarteJson = {
+  visionSummary: string;        // 3か月ビジョンの現在要約（北極星）
+  currentStatus: string;        // 現状サマリー（教材進捗＋報告書＋17項目から）
+  parentNeeds: string | null;   // 保護者ニーズ（要望メッセージの反映）
+  todaysActions: KarteAction[]; // 今日すべきこと（0〜3件）
+  weeklyActions: KarteAction[]; // 今週すべきこと（3〜6件）
+};
+
+export type StudentKarte = {
+  id: string;
+  student_id: string | null;
+  student_name: string;
+  grade: string | null;
+  learning_plan_id: string | null;
+  source_snapshot: unknown;
+  karte_html: string | null;
+  karte_json: StudentKarteJson | null;
+  status: "draft" | "shared";
+  generated_at: string;
+  generated_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DifficultyResult = { score: number; total: number };
 
 export type Diagnosis = {

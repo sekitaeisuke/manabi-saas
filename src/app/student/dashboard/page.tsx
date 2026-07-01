@@ -5,10 +5,10 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
-import type { Student, ShiftEvent } from "@/lib/supabase";
+import type { Student, ShiftEvent, StudentKarte } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
-type Tab = "todo" | "tests" | "messages" | "calendar" | "karte" | "settings";
+type Tab = "todo" | "tests" | "messages" | "calendar" | "mykarte" | "karte" | "settings";
 
 type DailyTask = {
   id: string;
@@ -77,6 +77,7 @@ export default function StudentDashboardPage() {
   const [studentRef, setStudentRef] = useState<Student | null>(null);
   const [kartes, setKartes] = useState<KartePlan[]>([]);
   const [selectedKarte, setSelectedKarte] = useState<KartePlan | null>(null);
+  const [myKarte, setMyKarte] = useState<StudentKarte | null>(null);
   const [activeMessageThread, setActiveMessageThread] = useState<string | null>(null);
   const [threadReply, setThreadReply] = useState("");
   const [calMonth, setCalMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
@@ -163,7 +164,7 @@ export default function StudentDashboardPage() {
 
       await fetchMessages(studentData as Student);
 
-      // カルテ取得（共有済みのみ）
+      // 3か月ビジョン取得（共有済みのみ）
       const { data: karteData } = await supabase
         .from("learning_plans")
         .select("id, subject, grade, test_percentage, teacher_notes, plan_html, created_at")
@@ -171,6 +172,16 @@ export default function StudentDashboardPage() {
         .eq("status", "shared")
         .order("created_at", { ascending: false });
       setKartes((karteData as KartePlan[]) ?? []);
+
+      // 日次カルテ（自分の shared 1件）
+      const { data: myKarteData } = await supabase
+        .from("student_karte")
+        .select("*")
+        .eq("student_id", studentData.id)
+        .eq("status", "shared")
+        .order("generated_at", { ascending: false })
+        .limit(1);
+      setMyKarte(((myKarteData as StudentKarte[]) ?? [])[0] ?? null);
 
       // 毎日のTODO（共有済みカルテのぶんのみ）
       const planIds = (karteData ?? []).map((k: { id: string }) => k.id);
@@ -393,6 +404,21 @@ export default function StudentDashboardPage() {
             })()}
           </button>
           <button
+            onClick={() => setTab("mykarte")}
+            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
+              tab === "mykarte"
+                ? "bg-violet-600 text-white"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            カルテ
+            {myKarte && tab !== "mykarte" && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 text-xs font-bold text-white">
+                1
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => { setTab("karte"); setSelectedKarte(null); }}
             className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
               tab === "karte"
@@ -400,7 +426,7 @@ export default function StudentDashboardPage() {
                 : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
-            カルテ
+            3か月ビジョン
             {kartes.length > 0 && tab !== "karte" && (
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 text-xs font-bold text-white">
                 {kartes.length}
@@ -436,7 +462,7 @@ export default function StudentDashboardPage() {
               <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-16 text-center text-slate-500">
                 <p className="text-5xl mb-3">📝</p>
                 <p className="font-semibold text-slate-700">まだTODOはありません</p>
-                <p className="mt-1 text-sm">先生がカルテ（学習方針）を共有すると、毎日のやることがここに表示されます。</p>
+                <p className="mt-1 text-sm">先生が3か月ビジョンを共有すると、毎日のやることがここに表示されます。</p>
               </div>
             ) : (
               <>
@@ -606,14 +632,48 @@ export default function StudentDashboardPage() {
           </section>
         )}
 
-        {/* カルテタブ */}
+        {/* 日次カルテタブ */}
+        {tab === "mykarte" && (
+          <section>
+            {!myKarte ? (
+              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
+                <p className="text-3xl mb-3">🗂️</p>
+                <p className="font-semibold text-slate-700">まだカルテがありません</p>
+                <p className="mt-1 text-sm text-slate-400">
+                  先生が「現状と今日やること」をまとめて共有すると、ここに表示されます。
+                </p>
+              </div>
+            ) : (
+              <div>
+                <p className="mb-3 text-xs text-slate-400">
+                  更新 {new Date(myKarte.generated_at).toLocaleString("ja-JP")}
+                </p>
+                <style>{`
+                  #student-karte h2 { font-size:1rem; font-weight:700; margin:20px 0 8px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
+                  #student-karte p { line-height:1.85; font-size:0.9rem; color:#374151; margin:4px 0; }
+                  #student-karte ul { padding-left:1.4rem; margin:4px 0; }
+                  #student-karte li { line-height:1.8; font-size:0.9rem; color:#374151; }
+                  #student-karte .meta { color:#64748b; font-size:0.8rem; }
+                  #student-karte .empty { color:#94a3b8; }
+                `}</style>
+                <div className="rounded-3xl border border-violet-100 bg-white px-6 py-8 shadow-sm">
+                  {myKarte.karte_html
+                    ? <div id="student-karte" dangerouslySetInnerHTML={{ __html: sanitizeHtml(myKarte.karte_html) }} />
+                    : <p className="text-slate-400">カルテの内容がありません。</p>}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* 3か月ビジョンタブ */}
         {tab === "karte" && (
           <section>
             {selectedKarte ? (
               <div>
                 <div className="mb-4 flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-slate-900">{selectedKarte.subject} カルテ</p>
+                    <p className="font-bold text-slate-900">{selectedKarte.subject} 3か月ビジョン</p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {selectedKarte.grade} ・ {selectedKarte.created_at.slice(0, 10)}
                       {selectedKarte.test_percentage != null && (
@@ -652,9 +712,9 @@ export default function StudentDashboardPage() {
             ) : kartes.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
                 <p className="text-3xl mb-3">📋</p>
-                <p className="font-semibold text-slate-700">まだカルテがありません</p>
+                <p className="font-semibold text-slate-700">まだ3か月ビジョンがありません</p>
                 <p className="mt-1 text-sm text-slate-400">
-                  先生が診断結果をもとにカルテを作成・共有すると、ここに表示されます。
+                  先生が診断結果をもとに3か月ビジョンを作成・共有すると、ここに表示されます。
                 </p>
               </div>
             ) : (
@@ -668,7 +728,7 @@ export default function StudentDashboardPage() {
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-900">{k.subject} カルテ</span>
+                          <span className="font-bold text-slate-900">{k.subject} 3か月ビジョン</span>
                           <span className="text-sm text-slate-500">{k.grade}</span>
                           {k.test_percentage != null && (
                             <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${

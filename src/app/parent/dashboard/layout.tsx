@@ -16,7 +16,7 @@ const NAV = [
   { href: "/parent/dashboard/calendar",   label: "授業カレンダー" },
   { href: "/parent/dashboard/reschedule", label: "振替リクエスト" },
   { href: "/parent/dashboard/reports",    label: "報告書" },
-  { href: "/parent/dashboard/karte",      label: "カルテ" },
+  { href: "/parent/dashboard/karte",      label: "3か月ビジョン" },
   { href: "/parent/dashboard/diagnosis",  label: "多層診断" },
   { href: "/parent/dashboard/settings",   label: "通知設定" },
 ];

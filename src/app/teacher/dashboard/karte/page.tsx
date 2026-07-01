@@ -107,8 +107,8 @@ function KartePageInner() {
         {/* ヘッダー */}
         <div className="mb-7 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-950">カルテ一覧</h1>
-            <p className="mt-0.5 text-sm text-slate-500">生徒ごとの3ヶ月学習方針書</p>
+            <h1 className="text-2xl font-bold text-slate-950">3か月ビジョン一覧</h1>
+            <p className="mt-0.5 text-sm text-slate-500">生徒ごとの3か月ビジョン（3か月後の到達イメージ＝北極星）</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setView("textbooks")}
@@ -179,8 +179,8 @@ CREATE TABLE learning_plans (
         ) : filtered.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-20 text-center text-slate-500">
             <p className="text-5xl mb-4">📋</p>
-            <p className="font-semibold text-slate-700">カルテがまだありません</p>
-            <p className="mt-1 text-sm">多層診断の「カルテを作成」ボタン、または「新規作成」から作成できます</p>
+            <p className="font-semibold text-slate-700">3か月ビジョンがまだありません</p>
+            <p className="mt-1 text-sm">多層診断の「3か月ビジョンを作成」ボタン、または「新規作成」から作成できます</p>
             <button onClick={() => setView("create")}
               className="mt-5 rounded-xl bg-violet-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">
               + 新規作成
@@ -221,7 +221,7 @@ CREATE TABLE learning_plans (
                       {plan.status === "shared" && (
                         <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">共有済</span>
                       )}
-                      <span className="text-xs font-medium text-violet-600 group-hover:underline">カルテを開く →</span>
+                      <span className="text-xs font-medium text-violet-600 group-hover:underline">3か月ビジョンを開く →</span>
                     </div>
                   </div>
                 </button>
@@ -234,7 +234,7 @@ CREATE TABLE learning_plans (
   );
 }
 
-// ─── カルテ詳細（読みやすさ最優先） ──────────────────────────
+// ─── 3か月ビジョン詳細（読みやすさ最優先） ──────────────────────────
 function KarteDetail({ plan, onBack, onUpdated }: {
   plan: LearningPlan;
   onBack: () => void;
@@ -378,13 +378,13 @@ function KarteDetail({ plan, onBack, onUpdated }: {
         </div>
       )}
 
-      {/* カルテ本体 */}
+      {/* 3か月ビジョン本体 */}
       <div className="mx-auto max-w-3xl px-6 py-10">
         {/* 毎日のTODO 進捗 */}
         <div className="no-print mb-6 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-bold text-slate-900">毎日のTODO（3か月方針から自動生成）</p>
+              <p className="text-sm font-bold text-slate-900">毎日のTODO（3か月ビジョンから自動生成）</p>
               <p className="text-xs text-slate-500">
                 {todoLoading ? "読み込み中…"
                   : todoTasks.length === 0 ? "まだ生成されていません"
@@ -494,9 +494,9 @@ function SelectDiagnosisStep({
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-950">カルテを作成</h1>
+            <h1 className="text-2xl font-bold text-slate-950">3か月ビジョンを作成</h1>
             <p className="mt-0.5 text-sm text-slate-500">
-              カルテと紐づいていない多層診断テストを選択してください
+              3か月ビジョンと紐づいていない多層診断テストを選択してください
             </p>
           </div>
           <button
@@ -536,7 +536,7 @@ function SelectDiagnosisStep({
         ) : unlinked.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center text-slate-500">
             <p className="text-4xl mb-3">📋</p>
-            <p className="font-semibold text-slate-700">カルテ未作成の診断テストはありません</p>
+            <p className="font-semibold text-slate-700">3か月ビジョン未作成の診断テストはありません</p>
             <p className="mt-1 text-sm text-slate-400">
               多層診断でAI分析・承認済みのテストがここに表示されます
             </p>
@@ -581,7 +581,7 @@ function SelectDiagnosisStep({
                       </div>
                     </div>
                     <span className="shrink-0 text-sm font-medium text-violet-600 group-hover:underline">
-                      このテストでカルテを作成 →
+                      このテストで3か月ビジョンを作成 →
                     </span>
                   </div>
                 </button>
@@ -603,7 +603,7 @@ function SelectDiagnosisStep({
   );
 }
 
-// ─── カルテ作成フロー ──────────────────────────────────────
+// ─── 3か月ビジョン作成フロー ──────────────────────────────────────
 function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () => void }) {
   const [flowStep, setFlowStep] = useState<"select" | "form">("select");
   const [unlinked, setUnlinked] = useState<DiagnosisResponse[]>([]);
@@ -797,7 +797,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
       return;
     }
 
-    // カルテ作成と同時に「毎日のTODO」を自動生成（plan_jsonがある場合のみ意味を持つ）
+    // 3か月ビジョン作成と同時に「毎日のTODO」を自動生成（plan_jsonがある場合のみ意味を持つ）
     if (inserted?.id && refinedJson) {
       try {
         await authFetch("/api/karte/daily-tasks/generate", {
@@ -829,7 +829,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
         {/* ヘッダー */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-950">カルテを作成</h1>
+            <h1 className="text-2xl font-bold text-slate-950">3か月ビジョンを作成</h1>
             {preset && (
               <p className="mt-0.5 text-sm text-violet-600">
                 診断データを取得済み（{preset.studentName}）
@@ -953,7 +953,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   生成中...
                 </span>
-              ) : genStep === 4 ? "再生成する" : "カルテを生成する"}
+              ) : genStep === 4 ? "再生成する" : "3か月ビジョンを生成する"}
             </button>
           </div>
 
@@ -981,14 +981,14 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                     </button>
                     <button onClick={save} disabled={saving || saved}
                       className="flex-2 rounded-xl bg-green-600 px-8 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50">
-                      {saved ? "保存済み ✓" : saving ? "保存＆TODO作成中..." : "カルテを保存する"}
+                      {saved ? "保存済み ✓" : saving ? "保存＆TODO作成中..." : "3か月ビジョンを保存する"}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="rounded-3xl border border-dashed border-slate-200 bg-white py-24 text-center text-slate-400">
                   <p className="text-5xl mb-4">📋</p>
-                  <p className="text-sm">左のフォームに入力して<br />「カルテを生成する」を押してください</p>
+                  <p className="text-sm">左のフォームに入力して<br />「3か月ビジョンを生成する」を押してください</p>
                 </div>
               )}
             </div>
@@ -1048,7 +1048,7 @@ function TextbookManager({ onBack }: { onBack: () => void }) {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-950">テキスト管理</h1>
-            <p className="mt-0.5 text-sm text-slate-500">カルテ作成時に選択するテキスト・教材を登録します</p>
+            <p className="mt-0.5 text-sm text-slate-500">3か月ビジョン作成時に選択するテキスト・教材を登録します</p>
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowForm(!showForm)}
@@ -1057,7 +1057,7 @@ function TextbookManager({ onBack }: { onBack: () => void }) {
             </button>
             <button onClick={onBack}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
-              カルテ一覧に戻る
+              3か月ビジョン一覧に戻る
             </button>
           </div>
         </div>
