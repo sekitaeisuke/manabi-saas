@@ -15,7 +15,7 @@ import {
 // ─── 型 ──────────────────────────────────────────────
 type Difficulty = "basic" | "standard" | "advanced";
 type TestType = "diagnostic" | "lesson";
-type AiStep = "idle" | "chatgpt" | "gemini" | "claude";
+type AiStep = "idle" | "chatgpt" | "claude";
 
 type GeneratedQuestion = {
   id: string;
@@ -613,13 +613,13 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     );
   };
 
-  const stepDone = (step: "chatgpt" | "gemini" | "claude") => {
-    const order: AiStep[] = ["chatgpt", "gemini", "claude"];
+  const stepDone = (step: "chatgpt" | "claude") => {
+    const order: AiStep[] = ["chatgpt", "claude"];
     const cur = order.indexOf(aiStep);
     return cur >= order.indexOf(step);
   };
 
-  const generate = async (step: "chatgpt" | "gemini" | "claude") => {
+  const generate = async (step: "chatgpt" | "claude") => {
     if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
     if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
     setGenerating(true);
@@ -628,8 +628,6 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       let body: Record<string, unknown>;
       if (step === "chatgpt") {
         body = { testType, title, subject, grade, selectedUnits, difficulties, count, instructions };
-      } else if (step === "gemini") {
-        body = { subject, grade, difficulties, instructions, questions };
       } else {
         body = { testType, title, subject, grade, instructions, questions };
       }
@@ -1083,15 +1081,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
               loading={generating && aiStep === "idle"}
               onClick={() => generate("chatgpt")} />
-            <AiStepButton step="gemini" label="GPT-4o-miniで修正" desc="問題の品質・難易度バランスを改善"
-              color="blue" done={stepDone("gemini")} num="2"
+            <AiStepButton step="claude" label="Claudeで完成" desc="表現・配点・HTMLの最終仕上げ"
+              color="purple" done={stepDone("claude")} num="2"
               disabled={generating || !stepDone("chatgpt")}
               loading={generating && aiStep === "chatgpt"}
-              onClick={() => generate("gemini")} />
-            <AiStepButton step="claude" label="Claudeで完成" desc="表現・配点・HTMLの最終仕上げ"
-              color="purple" done={stepDone("claude")} num="3"
-              disabled={generating || !stepDone("gemini")}
-              loading={generating && aiStep === "gemini"}
               onClick={() => generate("claude")} />
           </div>
           {generating && (

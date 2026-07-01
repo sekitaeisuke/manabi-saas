@@ -623,7 +623,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
   const [allTextbooks, setAllTextbooks] = useState<Textbook[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const [genStep, setGenStep] = useState(0); // 0=idle 1=chatgpt 2=gemini 3=claude 4=done
+  const [genStep, setGenStep] = useState(0); // 0=idle 1=chatgpt 2=claude 3=done（Gemini精査は廃止）
   const [planHtml, setPlanHtml] = useState("");
   const [refinedJson, setRefinedJson] = useState<unknown>(null); // 3か月方針の構造化JSON（日割りTODOの元）
   const [genError, setGenError] = useState("");
@@ -728,34 +728,25 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
         textbooks: selectedTextbooks,
       };
 
-      // Step 1: ChatGPT (GPT-4o) — 初稿作成
+      // Step 1: ChatGPT (GPT-4o) — 構造化された初稿（plan_json）を作成
       const r1 = await authFetch("/api/karte/generate/chatgpt", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(basePayload),
       });
       const d1 = await r1.json();
       if (d1.error) { setGenError("ChatGPT: " + d1.error); setGenStep(0); return; }
+      setRefinedJson(d1.draft ?? null);
 
-      // Step 2: Gemini (GPT-4o-mini) — 精査・改善
+      // Step 2: Claude — 初稿をそのまま仕上げてHTML化（Geminiの中間精査は廃止）
       setGenStep(2);
-      const r2 = await authFetch("/api/karte/generate/gemini", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draft: d1.draft, studentName, grade, subject }),
-      });
-      const d2 = await r2.json();
-      if (d2.error) { setGenError("Gemini: " + d2.error); setGenStep(0); return; }
-      setRefinedJson(d2.refined ?? null);
-
-      // Step 3: Claude — HTML仕上げ
-      setGenStep(3);
       const r3 = await authFetch("/api/karte/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...basePayload, refined: d2.refined }),
+        body: JSON.stringify({ ...basePayload, refined: d1.draft }),
       });
       const d3 = await r3.json();
       if (d3.error) { setGenError("Claude: " + d3.error); setGenStep(0); return; }
       setPlanHtml(d3.planHtml);
-      setGenStep(4);
+      setGenStep(3);
     } catch (e) {
       setGenError("生成に失敗しました: " + String(e));
       setGenStep(0);
@@ -912,15 +903,14 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
               </div>
             )}
 
-            {/* 3-step progress */}
-            {genStep >= 1 && genStep <= 3 && (
+            {/* 2-step progress */}
+            {genStep >= 1 && genStep <= 2 && (
               <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
                 <p className="mb-3 text-xs font-semibold text-violet-700">AI生成中...</p>
                 <div className="space-y-2">
                   {[
                     { step: 1, label: "ChatGPT が初稿を作成中", sub: "GPT-4o" },
-                    { step: 2, label: "Gemini が内容を精査中", sub: "GPT-4o-mini" },
-                    { step: 3, label: "Claude が仕上げ中", sub: "claude-sonnet-4-6" },
+                    { step: 2, label: "Claude が仕上げ中", sub: "claude-sonnet-4-6" },
                   ].map(({ step, label, sub }) => (
                     <div key={step} className="flex items-center gap-2.5">
                       <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
@@ -946,14 +936,14 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
             {genError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{genError}</p>}
             {saveError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{saveError}</p>}
 
-            <button onClick={generate} disabled={genStep >= 1 && genStep <= 3 || !studentName}
+            <button onClick={generate} disabled={(genStep >= 1 && genStep <= 2) || !studentName}
               className="w-full rounded-2xl bg-violet-600 py-3.5 font-semibold text-white hover:bg-violet-700 disabled:opacity-40 transition">
-              {genStep >= 1 && genStep <= 3 ? (
+              {genStep >= 1 && genStep <= 2 ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   生成中...
                 </span>
-              ) : genStep === 4 ? "再生成する" : "3か月ビジョンを生成する"}
+              ) : genStep === 3 ? "再生成する" : "3か月ビジョンを生成する"}
             </button>
           </div>
 
@@ -975,7 +965,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                     <div id="karte-preview" dangerouslySetInnerHTML={{ __html: sanitizeHtml(planHtml) }} />
                   </div>
                   <div className="mt-3 flex gap-2">
-                    <button onClick={generate} disabled={genStep >= 1 && genStep <= 3}
+                    <button onClick={generate} disabled={genStep >= 1 && genStep <= 2}
                       className="flex-1 rounded-xl border border-violet-200 bg-violet-50 py-2.5 text-sm text-violet-700 hover:bg-violet-100 disabled:opacity-40">
                       再生成
                     </button>
