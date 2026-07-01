@@ -124,6 +124,87 @@ async function judgeReportsWithAI(
   }
 }
 
+// ── カルテ（総合）から高緊急度を判定 ──────────────────────
+type KarteRow = {
+  id: string;
+  student_id: string | null;
+  student_name: string | null;
+  karte_json: {
+    currentStatus?: string;
+    cautions?: string;
+    textbookPace?: string;
+    parentNeeds?: string | null;
+  } | null;
+  generated_at: string;
+};
+
+type KarteSignal = {
+  student_id: string;
+  生徒: string;
+  現状: string;
+  気を付けること: string;
+  保護者要望: string | null;
+  最新正答率: number | null;
+  今週TODO: string;
+  進捗最終日: string | null;
+};
+
+const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+
+// カルテ総合サマリー＋補助シグナルから「チームで今すぐ気にかけるべき生徒」を Claude が判定。
+async function judgeKarteUrgency(
+  items: KarteSignal[]
+): Promise<Record<string, { urgent: boolean; reason: string }>> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || items.length === 0) return {};
+
+  const prompt =
+    `あなたは学習塾の主任講師です。以下は各生徒の「カルテ」総合サマリー（報告書・保護者の声・今日/今週やること・テキスト進捗を束ねたもの）です。\n` +
+    `講師チームで今すぐ気にかけて連携すべき「緊急度が高い」生徒を判定してください。\n` +
+    `緊急度が高い例: 成績が著しく低い／今週やることが全く進んでいない／保護者が強く心配や不満を示している／` +
+    `テキスト進捗が長期間止まっている／カルテの「気を付けること」が深刻（意欲低下・つまずきの放置・関係悪化 等）。\n` +
+    `通常運用の範囲・軽微なものは urgent=false。\n\n` +
+    `各生徒について {"student_id":"...","urgent":true/false,"reason":"30字以内の日本語の理由"} を作り、` +
+    `JSON配列のみを返してください（前後の説明文やコードフェンスは不要）。\n\n` +
+    `生徒一覧:\n${JSON.stringify(items, null, 2)}`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2048,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+    if (!res.ok) return {};
+    const data = await res.json();
+    let text: string = data.content?.[0]?.text ?? "";
+    text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const start = text.indexOf("[");
+    const end = text.lastIndexOf("]");
+    if (start === -1 || end === -1) return {};
+    const arr = JSON.parse(text.slice(start, end + 1)) as Array<{
+      student_id: string; urgent: boolean; reason?: string;
+    }>;
+    const out: Record<string, { urgent: boolean; reason: string }> = {};
+    for (const a of arr) {
+      if (a && typeof a.student_id === "string") {
+        out[a.student_id] = { urgent: !!a.urgent, reason: (a.reason ?? "").slice(0, 60) };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireTeacher(req);
   if (auth instanceof NextResponse) return auth;
@@ -287,8 +368,91 @@ export async function POST(req: NextRequest) {
       .upsert(logsToInsert, { onConflict: "source_type,source_id", ignoreDuplicates: true });
   }
 
+  // ── ③ カルテ（総合）から高緊急度を掲載 ──────────────────
+  // source_id は uuid 型のため karte では null を使い、重複は「その生徒の未対応カルテタスクが
+  // 既にあるか」で防ぐ（解決済み後に再び緊急なら再掲される）。
+  let createdKarte = 0;
+  const { data: karteRows } = await svc
+    .from("student_karte")
+    .select("id, student_id, student_name, karte_json, generated_at")
+    .not("student_id", "is", null);
+  const kartes = ((karteRows as KarteRow[]) ?? []).filter((k) => k.student_id);
+
+  if (kartes.length > 0) {
+    const { data: openKarte } = await svc
+      .from("collaboration_tasks")
+      .select("student_id")
+      .eq("source_type", "karte")
+      .eq("status", "open");
+    const alreadyOpen = new Set((openKarte ?? []).map((r) => r.student_id));
+    const targets = kartes.filter((k) => !alreadyOpen.has(k.student_id));
+
+    if (targets.length > 0) {
+      const tIds = targets.map((t) => t.student_id!) as string[];
+      const now = new Date();
+      const todayStr = keyOf(now);
+      const weekStr = keyOf(addDays(now, 6));
+
+      const [{ data: reps }, { data: kpmsgs }, { data: dtasks }, { data: progs }] = await Promise.all([
+        svc.from("lesson_reports").select("student_id, percentage, created_at").in("student_id", tIds).order("created_at", { ascending: false }),
+        svc.from("parent_messages").select("student_id, message, created_at").eq("direction", "parent_to_teacher").in("student_id", tIds).gte("created_at", since).order("created_at", { ascending: false }),
+        svc.from("daily_tasks").select("student_id, done, task_date").in("student_id", tIds).gte("task_date", todayStr).lte("task_date", weekStr),
+        svc.from("textbook_progress").select("student_id, lesson_date").in("student_id", tIds).order("lesson_date", { ascending: false }),
+      ]);
+
+      const latestRep = new Map<string, number | null>();
+      for (const r of (reps ?? []) as { student_id: string; percentage: number | null }[]) if (!latestRep.has(r.student_id)) latestRep.set(r.student_id, r.percentage);
+      const parentMsg = new Map<string, string>();
+      for (const m of (kpmsgs ?? []) as { student_id: string; message: string }[]) if (!parentMsg.has(m.student_id)) parentMsg.set(m.student_id, m.message);
+      const taskAgg = new Map<string, { done: number; total: number }>();
+      for (const t of (dtasks ?? []) as { student_id: string; done: boolean }[]) { const a = taskAgg.get(t.student_id) ?? { done: 0, total: 0 }; a.total++; if (t.done) a.done++; taskAgg.set(t.student_id, a); }
+      const lastProg = new Map<string, string>();
+      for (const p of (progs ?? []) as { student_id: string; lesson_date: string }[]) if (!lastProg.has(p.student_id)) lastProg.set(p.student_id, p.lesson_date);
+
+      const items: KarteSignal[] = targets.map((k) => {
+        const kj = k.karte_json ?? {};
+        const agg = taskAgg.get(k.student_id!) ?? { done: 0, total: 0 };
+        return {
+          student_id: k.student_id!,
+          生徒: k.student_name ?? "—",
+          現状: (kj.currentStatus ?? "").slice(0, 400),
+          気を付けること: (kj.cautions ?? "").slice(0, 300),
+          保護者要望: kj.parentNeeds ?? parentMsg.get(k.student_id!) ?? null,
+          最新正答率: latestRep.get(k.student_id!) ?? null,
+          今週TODO: agg.total > 0 ? `${agg.done}/${agg.total}件完了` : "なし",
+          進捗最終日: lastProg.get(k.student_id!) ?? null,
+        };
+      });
+
+      const verdicts = await judgeKarteUrgency(items);
+
+      const karteInserts = targets
+        .filter((k) => verdicts[k.student_id!]?.urgent)
+        .map((k) => {
+          const reason = verdicts[k.student_id!].reason || "カルテの緊急度が高い";
+          return {
+            created_by: null,
+            category: "student_guidance" as const,
+            title: `${k.student_name ?? "生徒"}：${reason}`.slice(0, 120),
+            description: (k.karte_json?.currentStatus ?? null),
+            student_id: k.student_id,
+            is_all_students: false,
+            status: "open" as const,
+            source_type: "karte" as const,
+            source_id: null,
+            auto_reason: reason,
+          };
+        });
+
+      if (karteInserts.length > 0) {
+        const { data: kins } = await svc.from("collaboration_tasks").insert(karteInserts).select("id");
+        createdKarte = kins?.length ?? 0;
+      }
+    }
+  }
+
   return NextResponse.json({
-    created,
-    scanned: { reports: newReports.length, diagnoses: (diagData ?? []).length },
+    created: created + createdKarte,
+    scanned: { reports: newReports.length, diagnoses: (diagData ?? []).length, kartes: kartes.length },
   });
 }

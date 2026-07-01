@@ -275,7 +275,7 @@ export default function StudentDetailPage() {
               {concerns.map((c) => (
                 <li key={c.id} className="text-sm text-amber-900">
                   ・{c.auto_reason || c.title}
-                  {c.source_type && <span className="ml-1 text-xs text-amber-600">（{c.source_type === "report" ? "報告書" : c.source_type === "diagnosis" ? "診断" : c.source_type}）</span>}
+                  {c.source_type && <span className="ml-1 text-xs text-amber-600">（{c.source_type === "report" ? "報告書" : c.source_type === "diagnosis" ? "診断" : c.source_type === "karte" ? "カルテ緊急" : c.source_type}）</span>}
                 </li>
               ))}
             </ul>

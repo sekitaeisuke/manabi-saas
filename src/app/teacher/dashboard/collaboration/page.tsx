@@ -5,7 +5,13 @@ import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import type { Student, Teacher } from "@/lib/supabase";
 
-type SourceType = "manual" | "report" | "diagnosis";
+type SourceType = "manual" | "report" | "diagnosis" | "karte";
+
+const AUTO_LABEL: Record<string, string> = {
+  report: "🔔 自動・報告書",
+  diagnosis: "🔔 自動・診断",
+  karte: "🔔 カルテ緊急",
+};
 
 type Category = "student_guidance" | "classroom_management" | "school_rules";
 type ViewMode = "list" | "calendar";
@@ -222,7 +228,7 @@ export default function TeacherCollaborationPage() {
   const teacherName = (id: string | null) => id ? teachers.find(t => t.id === id)?.name ?? "—" : "—";
   const studentName = (id: string | null) => id ? students.find(s => s.id === id)?.name ?? "—" : "—";
 
-  const isAutoTask = (t: Task) => t.source_type === "report" || t.source_type === "diagnosis";
+  const isAutoTask = (t: Task) => t.source_type === "report" || t.source_type === "diagnosis" || t.source_type === "karte";
   const filteredTasks = categoryFilter === "all" ? tasks : tasks.filter(t => t.category === categoryFilter);
   const autoTasks = filteredTasks.filter(isAutoTask);
   const manualTasks = filteredTasks.filter(t => !isAutoTask(t));
@@ -270,7 +276,7 @@ export default function TeacherCollaborationPage() {
             </span>
             {auto && (
               <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
-                {task.source_type === "diagnosis" ? "🔔 自動・診断" : "🔔 自動・報告書"}
+                {AUTO_LABEL[task.source_type ?? ""] ?? "🔔 自動"}
               </span>
             )}
             {task.category === "student_guidance" && (
@@ -464,7 +470,7 @@ export default function TeacherCollaborationPage() {
                     </span>
                     {isAutoTask(selectedTask) && (
                       <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-700">
-                        {selectedTask.source_type === "diagnosis" ? "🔔 自動・診断" : "🔔 自動・報告書"}
+                        {AUTO_LABEL[selectedTask.source_type ?? ""] ?? "🔔 自動"}
                       </span>
                     )}
                     {selectedTask.category === "student_guidance" && (
