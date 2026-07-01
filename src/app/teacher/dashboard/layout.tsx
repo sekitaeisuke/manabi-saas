@@ -52,20 +52,20 @@ const DASHBOARD: NavLeaf = { href: "/teacher/dashboard", label: "ダッシュボ
 
 // ── 6グループ（マウスon でフライアウト展開） ──────────────────
 const GROUPS: NavGroup[] = [
-  { key: "tests", label: "テスト", iconKey: "doc", items: [
-    { href: "/teacher/dashboard/tests",       label: "診断テスト",        iconKey: "doc",      badge: "pending" },
-    { href: "/teacher/dashboard/diagnosis",   label: "多層診断",          iconKey: "chart",    badge: "pending" },
-    { href: "/teacher/dashboard/analysis",    label: "分析",              iconKey: "bars" },
-    { href: "/teacher/dashboard/results",     label: "テスト結果・答案",  iconKey: "checkDoc" },
-  ]},
   { key: "students", label: "生徒", iconKey: "users", items: [
-    { href: "/teacher/dashboard/schools",       label: "生徒・講師管理", iconKey: "users" },
-    { href: "/teacher/dashboard/parents",       label: "保護者管理",     iconKey: "parents" },
-    { href: "/teacher/dashboard/karte",         label: "3か月ビジョン",  iconKey: "card" },
+    { href: "/teacher/dashboard/schools",       label: "生徒一覧・登録", iconKey: "users" },
     { href: "/teacher/dashboard/karte-daily",   label: "カルテ",         iconKey: "card" },
-    { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
+    { href: "/teacher/dashboard/karte",         label: "3か月ビジョン",  iconKey: "card" },
     { href: "/teacher/dashboard/progress",      label: "教材進捗",       iconKey: "book" },
+    { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
     { href: "/teacher/dashboard/collaboration", label: "講師連携",       iconKey: "collab" },
+    { href: "/teacher/dashboard/parents",       label: "保護者管理",     iconKey: "parents" },
+  ]},
+  { key: "tests", label: "テスト・診断", iconKey: "doc", items: [
+    { href: "/teacher/dashboard/tests",       label: "テスト作成・配布",  iconKey: "doc",      badge: "pending" },
+    { href: "/teacher/dashboard/diagnosis",   label: "多層診断",          iconKey: "chart",    badge: "pending" },
+    { href: "/teacher/dashboard/results",     label: "テスト結果・答案",  iconKey: "checkDoc" },
+    { href: "/teacher/dashboard/analysis",    label: "分析",              iconKey: "bars" },
   ]},
   { key: "schedule", label: "予定", iconKey: "calendar", items: [
     { href: "/teacher/dashboard/calendar",     label: "来塾カレンダー", iconKey: "calendar",   badge: "resched" },

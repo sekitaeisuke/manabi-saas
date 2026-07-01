@@ -39,6 +39,7 @@ type Msg = {
 };
 
 type DailyTaskRow = { id: string; task_date: string; subject: string | null; content: string; amount: string | null; done: boolean };
+type ConcernRow = { id: string; title: string; auto_reason: string | null; source_type: string | null };
 
 type HubTab = "overview" | "karte" | "learning" | "contact";
 
@@ -71,6 +72,7 @@ export default function StudentDetailPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [dailyKarte, setDailyKarte] = useState<StudentKarte | null>(null);
   const [dailyTasks, setDailyTasks] = useState<DailyTaskRow[]>([]);
+  const [concerns, setConcerns] = useState<ConcernRow[]>([]);
   const [schoolName, setSchoolName] = useState<string>("—");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<HubTab>("overview");
@@ -101,6 +103,7 @@ export default function StudentDetailPage() {
       { data: msgs },
       { data: dk },
       { data: dts },
+      { data: cc },
     ] = await Promise.all([
       supabase.from("parent_student_links")
         .select("parent:parents(id, name, email, phone)")
@@ -147,6 +150,12 @@ export default function StudentDetailPage() {
         .lte("task_date", keyOf(addDays(new Date(), 6)))
         .order("task_date", { ascending: true })
         .order("sort_order", { ascending: true }),
+      supabase.from("collaboration_tasks")
+        .select("id, title, auto_reason, source_type")
+        .eq("student_id", studentId)
+        .eq("status", "open")
+        .order("created_at", { ascending: false })
+        .limit(10),
     ]);
 
     setParents((links ?? []).map((l: { parent: ParentLinked | ParentLinked[] | null }) =>
@@ -160,6 +169,7 @@ export default function StudentDetailPage() {
     setMessages((msgs as Msg[]) ?? []);
     setDailyKarte(((dk as StudentKarte[]) ?? [])[0] ?? null);
     setDailyTasks((dts as DailyTaskRow[]) ?? []);
+    setConcerns((cc as ConcernRow[]) ?? []);
     setLoading(false);
   }, [studentId]);
 
@@ -253,6 +263,24 @@ export default function StudentDetailPage() {
             </Link>
           </div>
         </div>
+
+        {/* 気がかり（講師連携の自動掲載）を文脈表示 */}
+        {concerns.length > 0 && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-bold text-amber-900">⚠️ 気がかり（{concerns.length}件）</p>
+              <a href="/teacher/dashboard/collaboration" className="text-xs font-medium text-amber-700 hover:underline">講師連携で対応 →</a>
+            </div>
+            <ul className="space-y-1">
+              {concerns.map((c) => (
+                <li key={c.id} className="text-sm text-amber-900">
+                  ・{c.auto_reason || c.title}
+                  {c.source_type && <span className="ml-1 text-xs text-amber-600">（{c.source_type === "report" ? "報告書" : c.source_type === "diagnosis" ? "診断" : c.source_type}）</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* タブ */}
         <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
