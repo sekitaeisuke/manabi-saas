@@ -137,16 +137,15 @@ export type LearningPlan = {
 };
 
 // ── 日次カルテ（student_karte）──────────────────────────────
-// 3か月ビジョン(learning_plans)を反映しつつ、教材進捗・最新報告書(17項目)・保護者ニーズを
-// 毎日1枚に集約する。生成は /api/karte/daily-view/generate。
-export type KarteAction = { subject?: string; content: string; amount?: string };
-
+// 「今日/今週やること」は 3か月ビジョン由来の daily_tasks（チェック可）を単一の真実として表示する。
+// カルテはそれを中心に、AIが書く文脈（現状・テキストの進め方・気を付けること・保護者ニーズ）を束ねる。
+// 生成は /api/karte/daily-view/generate。
 export type StudentKarteJson = {
   visionSummary: string;        // 3か月ビジョンの現在要約（北極星）
   currentStatus: string;        // 現状サマリー（教材進捗＋報告書＋17項目から）
+  textbookPace: string;         // テキストをどれくらい進めるか（今週/今日の目安）
+  cautions: string;             // 何に気を付けるか
   parentNeeds: string | null;   // 保護者ニーズ（要望メッセージの反映）
-  todaysActions: KarteAction[]; // 今日すべきこと（0〜3件）
-  weeklyActions: KarteAction[]; // 今週すべきこと（3〜6件）
 };
 
 export type StudentKarte = {

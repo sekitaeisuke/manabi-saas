@@ -8,6 +8,18 @@ import { supabase } from "@/lib/supabase";
 import type { StudentKarte } from "@/lib/supabase";
 
 type StudentLite = { id: string; name: string; grade: string };
+type DailyTaskRow = { id: string; task_date: string; subject: string | null; content: string; amount: string | null; done: boolean; sort_order: number };
+
+const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+function taskDateLabel(key: string) {
+  const [y, m, dd] = key.split("-").map(Number);
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][new Date(y, m - 1, dd).getDay()];
+  return `${m}/${dd}（${wd}）`;
+}
+function groupByDate(tasks: DailyTaskRow[]): Record<string, DailyTaskRow[]> {
+  return tasks.reduce<Record<string, DailyTaskRow[]>>((acc, t) => { (acc[t.task_date] ??= []).push(t); return acc; }, {});
+}
 
 const AVATAR_COLORS = [
   "bg-violet-500", "bg-blue-500", "bg-emerald-500", "bg-rose-500",
@@ -30,6 +42,7 @@ export default function KarteDailyPage() {
   const [genName, setGenName] = useState("");
   const [genBusy, setGenBusy] = useState(false);
   const [search, setSearch] = useState("");
+  const [detailTasks, setDetailTasks] = useState<DailyTaskRow[]>([]);
 
   const fetchRows = useCallback(async () => {
     setLoading(true);
@@ -43,6 +56,25 @@ export default function KarteDailyPage() {
   }, []);
 
   useEffect(() => { fetchRows(); }, [fetchRows]);
+
+  // 詳細を開いたら、その生徒の「毎日のTODO（今日〜今週）」を取得（3か月ビジョン由来・単一の真実）
+  useEffect(() => {
+    if (!selected) { setDetailTasks([]); return; }
+    (async () => {
+      let q = supabase
+        .from("daily_tasks")
+        .select("id, task_date, subject, content, amount, done, sort_order")
+        .gte("task_date", keyOf(new Date()))
+        .lte("task_date", keyOf(addDays(new Date(), 6)))
+        .order("task_date", { ascending: true })
+        .order("sort_order", { ascending: true });
+      q = selected.learning_plan_id
+        ? q.eq("learning_plan_id", selected.learning_plan_id)
+        : q.eq("student_id", selected.student_id ?? "");
+      const { data } = await q;
+      setDetailTasks((data as DailyTaskRow[]) ?? []);
+    })();
+  }, [selected]);
 
   const regenerate = async (studentId: string | null, studentName: string) => {
     setBusyId(studentId ?? studentName);
@@ -142,6 +174,32 @@ export default function KarteDailyPage() {
               ? <div id="student-karte" dangerouslySetInnerHTML={{ __html: sanitizeHtml(selected.karte_html) }} />
               : <p className="text-slate-400">カルテHTMLがありません。</p>}
           </div>
+
+          {/* 毎日のTODO（3か月ビジョン由来・チェックは生徒側／ここは閲覧のみ） */}
+          <div className="mt-6 rounded-3xl border border-emerald-100 bg-white px-6 py-6 shadow-sm">
+            <h3 className="mb-1 font-bold text-slate-900">毎日のTODO（今日〜今週）</h3>
+            <p className="mb-3 text-xs text-slate-500">3か月ビジョンから自動生成。生徒がチェックします（ここでは閲覧のみ）。</p>
+            {detailTasks.length === 0 ? (
+              <p className="text-sm text-slate-400">この期間のTODOはありません（3か月ビジョンを作成すると生成されます）。</p>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(groupByDate(detailTasks)).map(([date, items]) => (
+                  <div key={date}>
+                    <p className="mb-1 text-xs font-semibold text-slate-500">{taskDateLabel(date)}</p>
+                    <ul className="space-y-1">
+                      {items.map((t) => (
+                        <li key={t.id} className="flex items-center gap-2 text-sm">
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${t.done ? "bg-emerald-400" : "bg-slate-300"}`} />
+                          <span className={t.done ? "text-slate-400 line-through" : "text-slate-700"}>{t.content}</span>
+                          {t.subject && <span className="text-xs text-slate-400">· {t.subject}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -200,7 +258,6 @@ export default function KarteDailyPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filtered.map((r) => {
               const bg = avatarColor(r.student_name);
-              const today = r.karte_json?.todaysActions ?? [];
               const busy = busyId === (r.student_id ?? r.student_name);
               return (
                 <div key={r.id} className="flex flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -215,16 +272,10 @@ export default function KarteDailyPage() {
                       </div>
                     </div>
                     <div className="px-5 py-3">
-                      <p className="mb-1 text-xs font-semibold text-slate-500">今日すべきこと</p>
-                      {today.length === 0 ? (
-                        <p className="text-xs text-slate-400">なし</p>
-                      ) : (
-                        <ul className="space-y-0.5">
-                          {today.slice(0, 3).map((a, i) => (
-                            <li key={i} className="truncate text-xs text-slate-700">・{a.content}</li>
-                          ))}
-                        </ul>
-                      )}
+                      <p className="mb-1 text-xs font-semibold text-slate-500">今の状況</p>
+                      <p className="line-clamp-3 text-xs text-slate-600">
+                        {r.karte_json?.currentStatus || "（未生成）"}
+                      </p>
                     </div>
                   </button>
                   <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-2.5">

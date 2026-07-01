@@ -2,22 +2,22 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-// 日次カルテ生成。3か月ビジョン(learning_plans)・教材進捗(textbook_progress)・
-// 最新報告書(lesson_reports,17項目)・保護者ニーズ(parent_messages)を素材に、
-// 1回の Claude 呼び出しで「現状＋今日/今週すべきこと」を作り student_karte に upsert する。
-//
+// 日次カルテ生成。
+// 「今日/今週やること」は 3か月ビジョン由来の daily_tasks（チェック可）を単一の真実として使うため、
+// ここでは作り直さない。AI は文脈だけを書く:
+//   currentStatus（現状）/ textbookPace（テキストの進め方）/ cautions（気を付けること）/ parentNeeds（保護者ニーズ）/ visionSummary。
+// 素材: 3か月ビジョン(learning_plans) + 教材進捗(textbook_progress) + 最新報告書(lesson_reports,17項目) +
+//       保護者要望(parent_messages) + 今週の daily_tasks（進め方の判断材料）。
 // 入力: { studentId?, studentName?, grade? }（1名） / { all: true }（対象生徒を一括）
-// daily_tasks には書き込まない（ビジョン由来の13週計画は温存し「予定」として読むだけ）。
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-type KarteAction = { subject?: string; content: string; amount?: string };
 type KarteJson = {
   visionSummary: string;
   currentStatus: string;
+  textbookPace: string;
+  cautions: string;
   parentNeeds: string | null;
-  todaysActions: KarteAction[];
-  weeklyActions: KarteAction[];
 };
 
 const esc = (s: unknown) =>
@@ -38,27 +38,16 @@ function weekEndKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// karte_json → 表示用HTML（追加AI呼び出しなし・sanitizeHtmlで表示）
+// karte_json（文脈）→ 表示用HTML。「今日/今週やること」は daily_tasks を各画面で別途チェック表示するため、ここには含めない。
 function buildHtml(k: KarteJson): string {
-  const actionList = (arr: KarteAction[]) =>
-    arr.length === 0
-      ? `<p class="empty">なし</p>`
-      : `<ul>${arr
-          .map((a) => {
-            const meta = [a.subject, a.amount].filter(Boolean).join("・");
-            return `<li>${esc(a.content)}${meta ? ` <span class="meta">（${esc(meta)}）</span>` : ""}</li>`;
-          })
-          .join("")}</ul>`;
+  const block = (icon: string, title: string, body: string) =>
+    body?.trim() ? `<h2>${icon} ${title}</h2><p>${esc(body)}</p>` : "";
   return `<div id="student-karte">
-  <h2>🌟 3か月ビジョン（北極星）</h2>
-  <p>${esc(k.visionSummary) || "（ビジョン未作成）"}</p>
-  <h2>📍 今の状況</h2>
-  <p>${esc(k.currentStatus)}</p>
-  ${k.parentNeeds ? `<h2>👪 保護者からの要望</h2><p>${esc(k.parentNeeds)}</p>` : ""}
-  <h2>✅ 今日すべきこと</h2>
-  ${actionList(k.todaysActions ?? [])}
-  <h2>🗓 今週すべきこと</h2>
-  ${actionList(k.weeklyActions ?? [])}
+  ${block("🌟", "3か月ビジョン（北極星）", k.visionSummary || "（ビジョン未作成）")}
+  ${block("📍", "今の状況", k.currentStatus)}
+  ${block("📖", "テキストの進め方", k.textbookPace)}
+  ${block("⚠️", "気を付けること", k.cautions)}
+  ${k.parentNeeds ? block("👪", "保護者からの要望", k.parentNeeds) : ""}
 </div>`;
 }
 
@@ -66,7 +55,9 @@ async function generateKarteJson(material: any): Promise<KarteJson | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
 
-  const prompt = `あなたは個別指導塾のベテラン講師です。以下の素材から、生徒1人の「今日のカルテ」を簡潔に作ってください。
+  const prompt = `あなたは個別指導塾のベテラン講師です。以下の素材から、生徒1人の「今日のカルテ」の文脈部分を簡潔に書いてください。
+※「今日/今週やること」の具体タスクは、3か月ビジョンから自動生成された毎日のTODO（別に表示）を使うので、ここでは作りません。
+　あなたは「現状・テキストの進め方・気を付けること・保護者ニーズ・ビジョン要約」だけを書きます。
 
 【生徒】${material.studentName}（${material.grade ?? "学年不明"}）
 
@@ -82,19 +73,19 @@ ${material.report || "（報告書なし）"}
 【保護者からの要望（新しい順）】
 ${material.parentNeeds || "（なし）"}
 
-【いまの予定TODO（ビジョンから自動生成した今週分）】
+【今週の毎日のTODO（3か月ビジョンから自動生成・チェック式で別表示）】
 ${material.plannedTodos || "（なし）"}
 
-【作成ルール】
-- 「テキストを、いまの手応え・進み方で終えるために、今日/今週やること」を現実に合わせて具体化する。
-- 予定TODOと現在地(進捗)がズレている場合は、現在地を優先して調整する。
-- todaysActions は0〜3件、weeklyActions は3〜6件。各アクションは content(30字以内・具体的)、subject(任意)、amount(分量・任意)。
-- currentStatus は200字以内で、できている点と課題を率直に。
-- parentNeeds は要望があれば1〜2文で要約、なければ null。
+【書くルール】
+- currentStatus: 200字以内。教材進捗と報告書17項目から、できている点と課題を率直に。
+- textbookPace: 「いまの手応え・進み方だと、テキストを今週どれくらい進めればよいか（章・ページ・単元の目安）」を具体的に1〜2文。進捗が遅れ気味なら現実的な調整も。
+- cautions: 「この生徒がつまずきやすい点・今日の指導や本人が気を付けること」を1〜2文。
+- parentNeeds: 保護者要望があれば1〜2文で要約、なければ null。
+- visionSummary: 3か月ビジョンの要点を1文で。
 - 出力はJSONのみ（前後の説明・コードフェンスなし）。
 
 【出力JSON形式】
-{"visionSummary":"...","currentStatus":"...","parentNeeds":"...またはnull","todaysActions":[{"subject":"数学","content":"...","amount":"2ページ"}],"weeklyActions":[{"subject":"英語","content":"...","amount":"..."}]}`;
+{"visionSummary":"...","currentStatus":"...","textbookPace":"...","cautions":"...","parentNeeds":"...またはnull"}`;
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -106,7 +97,7 @@ ${material.plannedTodos || "（なし）"}
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
-        max_tokens: 3000,
+        max_tokens: 2000,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -118,22 +109,12 @@ ${material.plannedTodos || "（なし）"}
     const e = text.lastIndexOf("}");
     if (s === -1 || e === -1) return null;
     const parsed = JSON.parse(text.slice(s, e + 1));
-    const arr = (v: any): KarteAction[] =>
-      Array.isArray(v)
-        ? v
-            .filter((t) => t && t.content)
-            .map((t) => ({
-              subject: t.subject ? String(t.subject).slice(0, 20) : undefined,
-              content: String(t.content).slice(0, 120),
-              amount: t.amount ? String(t.amount).slice(0, 40) : undefined,
-            }))
-        : [];
     return {
       visionSummary: String(parsed.visionSummary ?? "").slice(0, 400),
       currentStatus: String(parsed.currentStatus ?? "").slice(0, 400),
+      textbookPace: String(parsed.textbookPace ?? "").slice(0, 400),
+      cautions: String(parsed.cautions ?? "").slice(0, 400),
       parentNeeds: parsed.parentNeeds ? String(parsed.parentNeeds).slice(0, 300) : null,
-      todaysActions: arr(parsed.todaysActions).slice(0, 3),
-      weeklyActions: arr(parsed.weeklyActions).slice(0, 6),
     };
   } catch {
     return null;
@@ -211,7 +192,7 @@ async function generateOne(
     .map((m) => `・${String(m.message ?? "").slice(0, 300)}`)
     .join("\n");
 
-  // ⑤ 予定TODO（今日〜今週）
+  // ⑤ 今週の毎日のTODO（daily_tasks・進め方の判断材料。カルテには作り込まず参照のみ）
   let todoQ = svc
     .from("daily_tasks")
     .select("task_date, subject, content, amount")

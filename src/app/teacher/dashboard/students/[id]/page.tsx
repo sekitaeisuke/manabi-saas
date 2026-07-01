@@ -38,7 +38,17 @@ type Msg = {
   status: string; created_at: string;
 };
 
+type DailyTaskRow = { id: string; task_date: string; subject: string | null; content: string; amount: string | null; done: boolean };
+
 type HubTab = "overview" | "karte" | "learning" | "contact";
+
+const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+function taskDateLabel(key: string) {
+  const [y, m, dd] = key.split("-").map(Number);
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][new Date(y, m - 1, dd).getDay()];
+  return `${m}/${dd}（${wd}）`;
+}
 
 const UNDERSTAND: Record<string, { label: string; cls: string }> = {
   good:   { label: "◎ 手応え", cls: "bg-green-100 text-green-700" },
@@ -60,6 +70,7 @@ export default function StudentDetailPage() {
   const [diagnoses, setDiagnoses] = useState<DiagRow[]>([]);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [dailyKarte, setDailyKarte] = useState<StudentKarte | null>(null);
+  const [dailyTasks, setDailyTasks] = useState<DailyTaskRow[]>([]);
   const [schoolName, setSchoolName] = useState<string>("—");
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<HubTab>("overview");
@@ -89,6 +100,7 @@ export default function StudentDetailPage() {
       { data: ds },
       { data: msgs },
       { data: dk },
+      { data: dts },
     ] = await Promise.all([
       supabase.from("parent_student_links")
         .select("parent:parents(id, name, email, phone)")
@@ -128,6 +140,13 @@ export default function StudentDetailPage() {
         .eq("student_id", studentId)
         .order("generated_at", { ascending: false })
         .limit(1),
+      supabase.from("daily_tasks")
+        .select("id, task_date, subject, content, amount, done")
+        .eq("student_id", studentId)
+        .gte("task_date", keyOf(new Date()))
+        .lte("task_date", keyOf(addDays(new Date(), 6)))
+        .order("task_date", { ascending: true })
+        .order("sort_order", { ascending: true }),
     ]);
 
     setParents((links ?? []).map((l: { parent: ParentLinked | ParentLinked[] | null }) =>
@@ -140,6 +159,7 @@ export default function StudentDetailPage() {
     setDiagnoses((ds as DiagRow[]) ?? []);
     setMessages((msgs as Msg[]) ?? []);
     setDailyKarte(((dk as StudentKarte[]) ?? [])[0] ?? null);
+    setDailyTasks((dts as DailyTaskRow[]) ?? []);
     setLoading(false);
   }, [studentId]);
 
@@ -352,6 +372,31 @@ export default function StudentDetailPage() {
                 <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
                   「カルテを生成」を押すと、3か月ビジョン・教材進捗・報告書・保護者要望から今日/今週やることを自動でまとめます。
                 </p>
+              )}
+            </div>
+
+            <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+              <h2 className="mb-1 font-bold text-slate-900">毎日のTODO（今日〜今週）</h2>
+              <p className="mb-3 text-xs text-slate-500">3か月ビジョンから自動生成。生徒がチェックします（ここは閲覧のみ）。</p>
+              {dailyTasks.length === 0 ? (
+                <p className="text-sm text-slate-400">この期間のTODOはありません（3か月ビジョンを作成すると生成されます）。</p>
+              ) : (
+                <div className="space-y-3">
+                  {Object.entries(dailyTasks.reduce<Record<string, DailyTaskRow[]>>((acc, t) => { (acc[t.task_date] ??= []).push(t); return acc; }, {})).map(([date, items]) => (
+                    <div key={date}>
+                      <p className="mb-1 text-xs font-semibold text-slate-500">{taskDateLabel(date)}</p>
+                      <ul className="space-y-1">
+                        {items.map((t) => (
+                          <li key={t.id} className="flex items-center gap-2 text-sm">
+                            <span className={`h-2 w-2 shrink-0 rounded-full ${t.done ? "bg-emerald-400" : "bg-slate-300"}`} />
+                            <span className={t.done ? "text-slate-400 line-through" : "text-slate-700"}>{t.content}</span>
+                            {t.subject && <span className="text-xs text-slate-400">· {t.subject}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

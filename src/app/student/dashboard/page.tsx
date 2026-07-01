@@ -8,7 +8,7 @@ import { Logo } from "@/components/Logo";
 import type { Student, ShiftEvent, StudentKarte } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
-type Tab = "todo" | "tests" | "messages" | "calendar" | "mykarte" | "karte" | "settings";
+type Tab = "todo" | "tests" | "messages" | "calendar" | "karte" | "settings";
 
 type DailyTask = {
   id: string;
@@ -363,7 +363,7 @@ export default function StudentDashboardPage() {
                 : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
-            今日のTODO
+            カルテ
             {todayTasks.length - todayDone > 0 && tab !== "todo" && (
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-bold text-white">
                 {todayTasks.length - todayDone}
@@ -404,21 +404,6 @@ export default function StudentDashboardPage() {
             })()}
           </button>
           <button
-            onClick={() => setTab("mykarte")}
-            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "mykarte"
-                ? "bg-violet-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            カルテ
-            {myKarte && tab !== "mykarte" && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 text-xs font-bold text-white">
-                1
-              </span>
-            )}
-          </button>
-          <button
             onClick={() => { setTab("karte"); setSelectedKarte(null); }}
             className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
               tab === "karte"
@@ -455,9 +440,20 @@ export default function StudentDashboardPage() {
           </button>
         </div>
 
-        {/* 今日のTODOタブ */}
+        {/* カルテタブ（現状・進め方・注意・保護者ニーズ＋毎日のTODO） */}
         {tab === "todo" && (
           <div className="space-y-5">
+            {myKarte?.karte_html && (
+              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-sm">
+                <style>{`
+                  #student-karte h2 { font-size:1rem; font-weight:700; margin:16px 0 6px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
+                  #student-karte h2:first-child { margin-top:0; }
+                  #student-karte p { line-height:1.85; font-size:0.9rem; color:#374151; margin:4px 0; }
+                `}</style>
+                <div id="student-karte" dangerouslySetInnerHTML={{ __html: sanitizeHtml(myKarte.karte_html) }} />
+                <p className="mt-2 text-right text-[11px] text-slate-400">更新 {new Date(myKarte.generated_at).toLocaleString("ja-JP")}</p>
+              </div>
+            )}
             {dailyTasks.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-16 text-center text-slate-500">
                 <p className="text-5xl mb-3">📝</p>
@@ -627,40 +623,6 @@ export default function StudentDashboardPage() {
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* 日次カルテタブ */}
-        {tab === "mykarte" && (
-          <section>
-            {!myKarte ? (
-              <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">
-                <p className="text-3xl mb-3">🗂️</p>
-                <p className="font-semibold text-slate-700">まだカルテがありません</p>
-                <p className="mt-1 text-sm text-slate-400">
-                  先生が「現状と今日やること」をまとめて共有すると、ここに表示されます。
-                </p>
-              </div>
-            ) : (
-              <div>
-                <p className="mb-3 text-xs text-slate-400">
-                  更新 {new Date(myKarte.generated_at).toLocaleString("ja-JP")}
-                </p>
-                <style>{`
-                  #student-karte h2 { font-size:1rem; font-weight:700; margin:20px 0 8px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
-                  #student-karte p { line-height:1.85; font-size:0.9rem; color:#374151; margin:4px 0; }
-                  #student-karte ul { padding-left:1.4rem; margin:4px 0; }
-                  #student-karte li { line-height:1.8; font-size:0.9rem; color:#374151; }
-                  #student-karte .meta { color:#64748b; font-size:0.8rem; }
-                  #student-karte .empty { color:#94a3b8; }
-                `}</style>
-                <div className="rounded-3xl border border-violet-100 bg-white px-6 py-8 shadow-sm">
-                  {myKarte.karte_html
-                    ? <div id="student-karte" dangerouslySetInnerHTML={{ __html: sanitizeHtml(myKarte.karte_html) }} />
-                    : <p className="text-slate-400">カルテの内容がありません。</p>}
-                </div>
               </div>
             )}
           </section>
