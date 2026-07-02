@@ -33,7 +33,15 @@ type Task = {
   source_type: SourceType | null;
   source_id: string | null;
   auto_reason: string | null;
+  assignee_id: string | null;
+  assigned_by: string | null;
+  assigned_at: string | null;
 };
+
+// ロール上下: 管理者 > 講師 > 非常勤
+const ROLE_RANK: Record<string, number> = { admin: 3, teacher: 2, "part-time": 1 };
+const ROLE_LABEL: Record<string, string> = { admin: "管理者", teacher: "講師", "part-time": "非常勤" };
+const rankOf = (role: string | null | undefined) => ROLE_RANK[role ?? ""] ?? 1;
 
 type Message = {
   id: string;
@@ -66,6 +74,7 @@ const EMPTY_FORM = {
   is_all_students: false,
   due_date: "",
   scheduled_date: "",
+  assignee_id: "",
 };
 
 function dateKey(d: Date) {
@@ -82,6 +91,7 @@ function dueDateLabel(due: string | null): { text: string; cls: string } | null 
 
 export default function TeacherCollaborationPage() {
   const [myTeacherId, setMyTeacherId] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<string | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -107,8 +117,8 @@ export default function TeacherCollaborationPage() {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const { data: t } = await supabase.from("teachers").select("id").eq("email", session.user.email!).maybeSingle();
-      if (t) setMyTeacherId(t.id);
+      const { data: t } = await supabase.from("teachers").select("id, role").eq("email", session.user.email!).maybeSingle();
+      if (t) { setMyTeacherId(t.id); setMyRole(t.role); }
     })();
   }, []);
 
@@ -189,11 +199,24 @@ export default function TeacherCollaborationPage() {
       is_all_students: form.category === "student_guidance" ? form.is_all_students : false,
       due_date: form.due_date || null,
       scheduled_date: form.category === "student_guidance" && form.scheduled_date ? form.scheduled_date : null,
+      assignee_id: form.assignee_id || null,
+      assigned_by: form.assignee_id ? myTeacherId : null,
+      assigned_at: form.assignee_id ? new Date().toISOString() : null,
       status: "open",
     });
     setSaving(false);
     if (error) { setFormError(error.message); return; }
     setCreating(false); setForm(EMPTY_FORM); fetchTasks();
+  };
+
+  // ── 担当者を決める（上位ロールが自分と同じ〜下位ロールから選ぶ） ──
+  const assignTask = async (taskId: string, assigneeId: string) => {
+    if (!myTeacherId) return;
+    const patch = assigneeId
+      ? { assignee_id: assigneeId, assigned_by: myTeacherId, assigned_at: new Date().toISOString() }
+      : { assignee_id: null, assigned_by: null, assigned_at: null };
+    await supabase.from("collaboration_tasks").update(patch).eq("id", taskId);
+    setTasks(prev => prev.map(t => (t.id === taskId ? { ...t, ...patch } : t)));
   };
 
   const completeTask = async (taskId: string) => {
@@ -227,6 +250,56 @@ export default function TeacherCollaborationPage() {
 
   const teacherName = (id: string | null) => id ? teachers.find(t => t.id === id)?.name ?? "—" : "—";
   const studentName = (id: string | null) => id ? students.find(s => s.id === id)?.name ?? "—" : "—";
+
+  // 担当者に選べる候補＝自分と同じ〜下位ロール（＝自分のランク以下）
+  const assignCandidates = teachers.filter(t => rankOf(t.role) <= rankOf(myRole));
+
+  // このタスクの担当者を変更できるか
+  //   未割当 … 誰でも担当を決められる（未対応の抱え込みを防ぐ）
+  //   割当済 … 現担当者と同じ〜上位ロールだけが付け替えできる（下位が横取りしない）
+  const canAssign = (task: Task) => {
+    if (!task.assignee_id) return true;
+    const assignee = teachers.find(t => t.id === task.assignee_id);
+    return rankOf(myRole) >= rankOf(assignee?.role);
+  };
+
+  // 完了できるか＝担当者本人 or 担当者より上位ロール。未割当は完了不可（先に担当者を決める）
+  const canComplete = (task: Task) => {
+    if (!task.assignee_id) return false;
+    if (task.assignee_id === myTeacherId) return true;
+    const assignee = teachers.find(t => t.id === task.assignee_id);
+    return rankOf(myRole) > rankOf(assignee?.role);
+  };
+
+  // 担当者セレクト（カード・モーダル共通）
+  const renderAssignee = (task: Task) => {
+    const editable = canAssign(task);
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs font-semibold text-slate-500">担当</span>
+        {editable ? (
+          <select
+            value={task.assignee_id ?? ""}
+            onChange={(e) => assignTask(task.id, e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            className={`max-w-[10rem] rounded-lg border px-2 py-1 text-xs font-semibold ${task.assignee_id ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-300 bg-amber-50 text-amber-700"}`}
+          >
+            <option value="">— 未割当 —</option>
+            {task.assignee_id === myTeacherId ? null : (
+              <option value={myTeacherId ?? ""}>自分（{teacherName(myTeacherId)}）</option>
+            )}
+            {assignCandidates.map(t => (
+              <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
+            ))}
+          </select>
+        ) : (
+          <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${task.assignee_id ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-700"}`}>
+            {task.assignee_id ? teacherName(task.assignee_id) : "未割当"}
+          </span>
+        )}
+      </div>
+    );
+  };
 
   const isAutoTask = (t: Task) => t.source_type === "report" || t.source_type === "diagnosis" || t.source_type === "karte";
   const filteredTasks = categoryFilter === "all" ? tasks : tasks.filter(t => t.category === categoryFilter);
@@ -300,22 +373,26 @@ export default function TeacherCollaborationPage() {
             </span>
           </div>
         </button>
-        <div className="mt-3 flex items-center justify-end gap-2 border-t border-slate-100 pt-2.5">
-          <button onClick={() => selectTask(task.id)}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-            開く・返信
-          </button>
-          {auto ? (
-            <button onClick={() => resolveAuto(task.id)}
-              className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700">
-              ✓ 対応した（解決）
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+          {renderAssignee(task)}
+          <div className="flex items-center gap-2">
+            <button onClick={() => selectTask(task.id)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+              開く・返信
             </button>
-          ) : (
-            <button onClick={() => completeTask(task.id)}
-              className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700">
-              ✓ 完了
-            </button>
-          )}
+            {canComplete(task) ? (
+              <button onClick={() => (auto ? resolveAuto(task.id) : completeTask(task.id))}
+                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700">
+                {auto ? "✓ 対応した（解決）" : "✓ 完了"}
+              </button>
+            ) : (
+              <button disabled
+                title={task.assignee_id ? "担当者または上位ロールのみ完了できます" : "先に担当者を決めてください"}
+                className="cursor-not-allowed rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-400">
+                {task.assignee_id ? "✓ 完了" : "担当者未設定"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -500,13 +577,27 @@ export default function TeacherCollaborationPage() {
                 </div>
                 <button onClick={closeDetail} className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-sm text-slate-500 hover:bg-slate-50">✕</button>
               </div>
-              <div className="mt-3 flex justify-end">
-                {isAutoTask(selectedTask) ? (
-                  <button onClick={() => resolveAuto(selectedTask.id)}
-                    className="rounded-xl bg-green-600 px-4 py-2 text-xs font-bold text-white hover:bg-green-700">✓ 対応した（解決済）</button>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  {renderAssignee(selectedTask)}
+                  {selectedTask.assigned_by && selectedTask.assignee_id && (
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {teacherName(selectedTask.assigned_by)} が割当
+                      {selectedTask.assigned_at && ` · ${new Date(selectedTask.assigned_at).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
+                    </p>
+                  )}
+                </div>
+                {canComplete(selectedTask) ? (
+                  <button onClick={() => (isAutoTask(selectedTask) ? resolveAuto(selectedTask.id) : completeTask(selectedTask.id))}
+                    className="rounded-xl bg-green-600 px-4 py-2 text-xs font-bold text-white hover:bg-green-700">
+                    {isAutoTask(selectedTask) ? "✓ 対応した（解決済）" : "✓ 完了・削除"}
+                  </button>
                 ) : (
-                  <button onClick={() => completeTask(selectedTask.id)}
-                    className="rounded-xl bg-green-600 px-4 py-2 text-xs font-bold text-white hover:bg-green-700">✓ 完了・削除</button>
+                  <button disabled
+                    title={selectedTask.assignee_id ? "担当者または上位ロールのみ完了できます" : "先に担当者を決めてください"}
+                    className="cursor-not-allowed rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-400">
+                    {selectedTask.assignee_id ? "✓ 完了" : "担当者を決めてください"}
+                  </button>
                 )}
               </div>
             </div>
@@ -612,6 +703,18 @@ export default function TeacherCollaborationPage() {
                   rows={2} placeholder="具体的な状況や対応方針など"
                   className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-900" />
               </label>
+
+              {/* 担当者（自分と同じ〜下位ロールから選ぶ・後から変更可） */}
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">担当者（任意・後から決められます）</p>
+                <select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                  <option value="">— 未割当（後で担当を決める）—</option>
+                  {assignCandidates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
+                  ))}
+                </select>
+              </div>
 
               {/* 日付 */}
               <div className="grid grid-cols-2 gap-3">
