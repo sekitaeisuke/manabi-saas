@@ -455,6 +455,15 @@ const DURATION_OPTIONS: { label: string; value: number | null }[] = [
   { label: "無制限", value: null },
 ];
 
+// 生徒名の正規化（つなぐディレクトリの name_key と同じルール：空白/全角空白除去）
+const normalizeName = (s: string) => s.replace(/[\s　]/g, "").trim();
+
+// 保護者アカウントの初期パスワードを自動生成（10桁英数）。イベントハンドラ内でのみ使用。
+function genPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
 function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   students: Student[]; schools: School[]; teachers: Teacher[];
   schoolName: (id: string | null) => string; onRefresh: () => void;
@@ -467,8 +476,15 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
     lesson_start_time: "17:00",
     lesson_duration: 60 as number | null,
     lesson_teacher_id: "",
+    parent_name: "", parent_email: "",
   });
   const [saving, setSaving] = useState(false);
+  const [tsunaguLookup, setTsunaguLookup] = useState(false);
+  const [tsunaguHint, setTsunaguHint] = useState<string | null>(null);
+  // 生徒＋保護者を作成した直後に初期パスワードを1回だけ見せるためのモーダル
+  const [parentCreated, setParentCreated] = useState<
+    { studentName: string; email: string; password: string | null; note: string | null } | null
+  >(null);
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
   const [issuing, setIssuing] = useState(false);
   const [issuedResult, setIssuedResult] = useState<{ loginId: string; password: string } | null>(null);
@@ -506,6 +522,43 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
     onRefresh();
   };
 
+  // つなぐディレクトリを生徒名で照合し、保護者名・メールを自動補完する
+  const lookupTsunagu = async (rawName: string) => {
+    const key = normalizeName(rawName);
+    if (!key) return;
+    setTsunaguLookup(true);
+    setTsunaguHint(null);
+    const { data } = await supabase
+      .from("tsunagu_parent_directory")
+      .select("parent_name, parent_email, student_name")
+      .eq("name_key", key)
+      .order("synced_at", { ascending: false })
+      .limit(1);
+    setTsunaguLookup(false);
+    const hit = data?.[0];
+    if (hit && (hit.parent_email || hit.parent_name)) {
+      setForm((f) => ({
+        ...f,
+        parent_name: hit.parent_name ?? f.parent_name,
+        parent_email: hit.parent_email ?? f.parent_email,
+      }));
+      setTsunaguHint(
+        hit.parent_email
+          ? `つなぐ一致：${hit.parent_name ?? "保護者"}様 <${hit.parent_email}>`
+          : `つなぐ一致：${hit.parent_name ?? "保護者"}様（メール未登録・手入力で作成可）`
+      );
+    } else {
+      setTsunaguHint("つなぐ未登録。手入力で保護者を作成できます（メール空欄なら生徒のみ登録）");
+    }
+  };
+
+  const resetForm = () =>
+    setForm({
+      name: "", grade: "中1", school_id: "", attendance_days: [],
+      lesson_start_time: "17:00", lesson_duration: 60, lesson_teacher_id: "",
+      parent_name: "", parent_email: "",
+    });
+
   const save = async () => {
     if (!form.name) return;
     setSaving(true);
@@ -515,10 +568,45 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
       school_id: form.school_id || null,
       attendance_days: form.attendance_days.length > 0 ? form.attendance_days : null,
     }).select("id").single();
-    if (inserted && form.attendance_days.length > 0) {
+    if (!inserted) { setSaving(false); showToast("生徒の登録に失敗しました", "error"); return; }
+    if (form.attendance_days.length > 0) {
       await autoGenerateLessons(inserted.id, form.attendance_days, form.lesson_start_time, form.lesson_duration, form.lesson_teacher_id || null);
     }
-    setForm({ name: "", grade: "中1", school_id: "", attendance_days: [], lesson_start_time: "17:00", lesson_duration: 60, lesson_teacher_id: "" });
+
+    // 保護者メールがあれば、保護者アカウント（ID＝メール／自動生成PW）を作成し生徒に紐付ける。
+    // 生徒登録は成功済みなので、保護者作成に失敗しても生徒はロールバックしない。
+    const parentEmail = form.parent_email.trim();
+    if (parentEmail) {
+      const password = genPassword();
+      const res = await authFetch("/api/parent/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: parentEmail,
+          password,
+          name: form.parent_name.trim() || `${form.name}保護者`,
+          phone: null,
+          student_ids: [inserted.id],
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        showToast(`生徒は登録しましたが保護者作成に失敗：${json.error ?? "unknown"}`, "error");
+      } else {
+        // 既存メール流用時は json.note が入り password は無効（既存PWのまま）
+        setParentCreated({
+          studentName: form.name,
+          email: parentEmail,
+          password: json.note ? null : password,
+          note: json.note ?? null,
+        });
+      }
+    } else {
+      showToast("生徒を登録しました（保護者メール未入力のため保護者は未作成）", "info");
+    }
+
+    resetForm();
+    setTsunaguHint(null);
     setShowForm(false);
     setSaving(false);
     onRefresh();
@@ -675,6 +763,29 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
               </div>
             </div>
           )}
+
+          {/* ── 保護者（同時登録） ── */}
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-slate-700">保護者（同時に登録）</p>
+              <button type="button" onClick={() => lookupTsunagu(form.name)}
+                disabled={!form.name || tsunaguLookup}
+                className="rounded-xl border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-40">
+                {tsunaguLookup ? "つなぐ照合中…" : "つなぐから保護者を取得"}
+              </button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="保護者氏名" value={form.parent_name}
+                onChange={(v) => setForm({ ...form, parent_name: v })} placeholder="例：山田花子" />
+              <Field label="保護者メール（ログインID）" value={form.parent_email}
+                onChange={(v) => setForm({ ...form, parent_email: v })} placeholder="parent@example.com" />
+            </div>
+            {tsunaguHint && <p className="mt-2 text-xs text-slate-500">{tsunaguHint}</p>}
+            <p className="mt-2 text-xs text-slate-400">
+              メールを入れて登録すると、保護者アカウント（初期パスワード自動生成）を作成し、この生徒と自動で紐付けます。空欄なら生徒のみ登録します。
+            </p>
+          </div>
+
           <button onClick={save} disabled={!form.name || saving}
             className="mt-4 rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
             {saving ? "保存中..." : "登録する"}
@@ -831,6 +942,45 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
       )}
 
       {/* アカウント発行モーダル */}
+      {parentCreated && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-8 shadow-xl">
+            <div className="mb-4 text-center text-4xl">👪</div>
+            <h3 className="mb-1 text-center text-lg font-bold text-slate-900">保護者アカウント作成</h3>
+            <p className="mb-6 text-center text-sm text-slate-500">
+              {parentCreated.studentName}さんの保護者ログイン情報
+            </p>
+            <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
+              <div>
+                <p className="text-xs text-slate-500">ログインURL</p>
+                <p className="font-mono text-sm font-semibold text-indigo-700">
+                  {typeof window !== "undefined" ? window.location.origin : ""}/login/parent
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">ログインID（メール）</p>
+                <p className="font-mono text-sm font-bold text-slate-900 break-all">{parentCreated.email}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">初期パスワード</p>
+                {parentCreated.password ? (
+                  <p className="font-mono text-lg font-bold text-slate-900">{parentCreated.password}</p>
+                ) : (
+                  <p className="text-sm text-slate-600">{parentCreated.note ?? "既存アカウントのため未変更"}</p>
+                )}
+              </div>
+            </div>
+            <p className="mt-4 text-center text-xs text-amber-600">
+              パスワードはこの画面でしか表示されません。保護者へお伝えください。
+            </p>
+            <button onClick={() => setParentCreated(null)}
+              className="mt-4 w-full rounded-2xl bg-slate-950 py-3 font-semibold text-white hover:bg-slate-800">
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
+
       {accountModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-sm rounded-3xl bg-white p-8 shadow-xl">
