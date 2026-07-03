@@ -97,11 +97,27 @@ export default function ProgressPage() {
     })();
   }, [loadRecords]);
 
-  // 生徒ごとの最新進捗
+  // 生徒ごとの最新進捗（教科を問わず一番新しい1件）── サマリー・停滞判定に使う
   const latestByStudent = useMemo(() => {
     const m = new Map<string, Progress>();
     for (const r of records) {
       if (!m.has(r.student_id)) m.set(r.student_id, r); // records は新しい順
+    }
+    return m;
+  }, [records]);
+
+  // 生徒×教科ごとの最新進捗。複数教科を入力しても各教科の最新が漏れず出るようにする。
+  const latestByStudentSubject = useMemo(() => {
+    const m = new Map<string, Progress[]>();      // student_id → 教科ごと最新の配列
+    const seen = new Map<string, Set<string>>();  // student_id → 既出の教科キー
+    for (const r of records) {                    // records は新しい順
+      const subjectKey = r.subject ?? "__none__";
+      let subjects = seen.get(r.student_id);
+      if (!subjects) { subjects = new Set(); seen.set(r.student_id, subjects); m.set(r.student_id, []); }
+      if (!subjects.has(subjectKey)) {
+        subjects.add(subjectKey);
+        m.get(r.student_id)!.push(r);             // 各教科で最初に出た＝最新
+      }
     }
     return m;
   }, [records]);
@@ -308,8 +324,9 @@ export default function ProgressPage() {
 
         <div className="divide-y divide-slate-100">
           {sortedStudents.map((s) => {
-            const last = latestByStudent.get(s.id);
-            const stale = last && daysAgo(last.lesson_date) > STALE_DAYS;
+            const subjectRows = latestByStudentSubject.get(s.id) ?? [];
+            const overallLast = latestByStudent.get(s.id);
+            const stale = overallLast && daysAgo(overallLast.lesson_date) > STALE_DAYS;
             return (
               <div key={s.id} className="flex items-start gap-3 py-3">
                 <span className="mt-0.5 shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
@@ -318,25 +335,29 @@ export default function ProgressPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-slate-800">{s.name}</span>
-                    {!last && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">未入力</span>}
-                    {stale && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{daysAgo(last!.lesson_date)}日停滞</span>}
+                    {!overallLast && <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">未入力</span>}
+                    {stale && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{daysAgo(overallLast!.lesson_date)}日停滞</span>}
                   </div>
-                  {last ? (
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600">
-                      <span className="font-medium text-slate-700">{last.textbook}</span>
-                      {last.progress_where && <span className="text-slate-500">／ {last.progress_where}</span>}
-                      {understandingPill(last.understanding)}
+                  {subjectRows.length > 0 ? (
+                    <div className="mt-1 space-y-1.5">
+                      {subjectRows.map((p) => (
+                        <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
+                          <span className="shrink-0 rounded-md bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-600">
+                            {p.subject || "科目なし"}
+                          </span>
+                          <span className="font-medium text-slate-700">{p.textbook}</span>
+                          {p.progress_where && <span className="text-slate-500">／ {p.progress_where}</span>}
+                          {understandingPill(p.understanding)}
+                          <span className="ml-auto shrink-0 text-xs text-slate-400">
+                            {p.lesson_date}・入力：{p.teacher_name ?? "—"}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <p className="mt-1 text-sm text-slate-400">まだ記録がありません</p>
                   )}
                 </div>
-                {last && (
-                  <div className="shrink-0 text-right text-xs text-slate-400">
-                    <p>{last.lesson_date}</p>
-                    <p className="font-medium text-slate-500">入力：{last.teacher_name ?? "—"}</p>
-                  </div>
-                )}
               </div>
             );
           })}
