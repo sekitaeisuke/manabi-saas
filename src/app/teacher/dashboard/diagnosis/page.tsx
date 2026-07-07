@@ -1053,10 +1053,16 @@ type QResponse = {
   verbal_score: number | null;
   skill_score: number | null;
   report_html: string | null;
+  teacher_report_html: string | null;
+  bottleneck_layer: string | null;
+  bottleneck_label: string | null;
+  intervention: string | null;
   teacher_notes: string | null;
   ai_analysis: string | null;
   created_at: string;
 };
+
+const LAYER_NAME: Record<string, string> = { H1: "下位能力", H2: "学習方法", H3: "学習習慣" };
 
 function HumanCheckView({ onBack }: { onBack: () => void }) {
   const [responses, setResponses] = useState<QResponse[]>([]);
@@ -1173,7 +1179,13 @@ function HumanCheckView({ onBack }: { onBack: () => void }) {
 
 function QuestionnaireReportView({ response, onBack }: { response: QResponse; onBack: () => void }) {
   const [generating, setGenerating] = useState(false);
-  const [reportHtml, setReportHtml] = useState(response.report_html ?? "");
+  // 講師画面は「尖った」講師向けレポートを表示（旧データは report_html にフォールバック）
+  const [reportHtml, setReportHtml] = useState(response.teacher_report_html ?? response.report_html ?? "");
+  const [bottleneck, setBottleneck] = useState<{ layer: string | null; label: string | null; intervention: string | null }>({
+    layer: response.bottleneck_layer,
+    label: response.bottleneck_label,
+    intervention: response.intervention,
+  });
   const [notes, setNotes] = useState(response.teacher_notes ?? "");
   const [scores, setScores] = useState({
     habitScore: response.habit_score,
@@ -1196,7 +1208,8 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
       });
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
-      setReportHtml(data.reportHtml);
+      setReportHtml(data.teacherReportHtml ?? "");
+      setBottleneck({ layer: data.bottleneckLayer, label: data.bottleneckLabel, intervention: data.intervention });
       setScores({
         habitScore: data.habitScore,
         methodScore: data.methodScore,
@@ -1211,11 +1224,12 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
     }
   };
 
+  // report_html（保護者向け）と teacher_report_html は分析APIが確定保存済み。
+  // ここではメモと承認状態のみを更新し、両レポートを上書きしない。
   const save = async (newStatus?: QResponse["status"]) => {
     setSaving(true);
     const nextStatus = newStatus ?? status;
     await supabase.from("questionnaire_responses").update({
-      report_html: reportHtml,
       teacher_notes: notes,
       status: nextStatus,
     }).eq("session_id", response.session_id);
@@ -1276,6 +1290,25 @@ function QuestionnaireReportView({ response, onBack }: { response: QResponse; on
 
         {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
+        )}
+
+        {/* 主ボトルネック＋主介入（三角測定の結論） */}
+        {bottleneck.label && (
+          <div className="rounded-3xl border-2 border-rose-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-rose-600 px-3 py-0.5 text-xs font-bold text-white">
+                {bottleneck.layer}：{LAYER_NAME[bottleneck.layer ?? ""] ?? "主因"}
+              </span>
+              <p className="text-xs font-semibold text-slate-400">三角測定で特定した主ボトルネック</p>
+            </div>
+            <p className="mt-2 text-lg font-bold text-rose-800">{bottleneck.label}</p>
+            {bottleneck.intervention && (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="mb-1 text-xs font-semibold text-blue-500">▼ 主介入（次回すぐ実行する具体行動・1つ）</p>
+                <p className="text-base font-bold text-blue-900">{bottleneck.intervention}</p>
+              </div>
+            )}
+          </div>
         )}
 
         {/* 学力テストAI分析 */}

@@ -39,8 +39,13 @@ type DiagRow = {
   method_score: number | null;
   verbal_score: number | null;
   skill_score: number | null;
+  bottleneck_layer: string | null;
+  bottleneck_label: string | null;
+  intervention: string | null;
   created_at: string;
 };
+
+const DIAG_LAYER_NAME: Record<string, string> = { H1: "下位能力", H2: "学習方法", H3: "学習習慣" };
 
 type TaskInsert = {
   created_by: null;
@@ -311,7 +316,7 @@ export async function POST(req: NextRequest) {
   const { data: diagData } = await svc
     .from("questionnaire_responses")
     .select(
-      "id, student_id, student_name, subject, test_percentage, habit_score, method_score, verbal_score, skill_score, created_at"
+      "id, student_id, student_name, subject, test_percentage, habit_score, method_score, verbal_score, skill_score, bottleneck_layer, bottleneck_label, intervention, created_at"
     )
     .gte("created_at", since)
     .order("created_at", { ascending: false })
@@ -334,12 +339,19 @@ export async function POST(req: NextRequest) {
 
     const concern = lows.length > 0;
     if (concern) {
-      const reason = `学力診断：${lows.join("・")}`;
+      // 主ボトルネックが特定済みならそれを見出しに（無ければ従来のスコア列挙）
+      const layerName = d.bottleneck_layer ? DIAG_LAYER_NAME[d.bottleneck_layer] ?? "" : "";
+      const reason = d.bottleneck_label
+        ? `学力診断：${layerName ? `[${layerName}] ` : ""}${d.bottleneck_label}`
+        : `学力診断：${lows.join("・")}`;
+      const desc = d.bottleneck_label
+        ? `三角測定で特定した主ボトルネック（${d.subject ?? "—"}）。指標: ${lows.join("・")}。${d.intervention ? `\n主介入: ${d.intervention}` : ""}`
+        : `学力診断テストの結果が基準（${CONCERN_PERCENT}）を下回りました（${d.subject ?? "—"}）。`;
       tasksToInsert.push({
         created_by: null,
         category: "student_guidance",
         title: `${d.student_name ?? "生徒"}：${reason}`.slice(0, 120),
-        description: `学力診断テストの結果が基準（${CONCERN_PERCENT}）を下回りました（${d.subject ?? "—"}）。`,
+        description: desc,
         student_id: d.student_id ?? null,
         is_all_students: false,
         status: "open",
