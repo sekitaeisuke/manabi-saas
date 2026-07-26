@@ -105,3 +105,15 @@ export function internalHeaders(): Record<string, string> {
   const secret = process.env.INTERNAL_API_SECRET;
   return secret ? { "x-internal-secret": secret } : {};
 }
+
+/**
+ * 外部の信頼済みバッチ（ai-system automode 等）からの呼び出し判定。
+ * x-service-key ヘッダが SUPABASE_SERVICE_ROLE_KEY（＝元々DB全権を持つ最高権限の秘密）と
+ * 一致すれば true。cron/スキャン用の追加認証で、Vercel側の追加設定なしで使える
+ * （service role key は既に全機能が使用中）。
+ */
+export function isServiceKeyCall(req: NextRequest): boolean {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) return false;
+  return req.headers.get("x-service-key") === key;
+}

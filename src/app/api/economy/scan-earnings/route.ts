@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { requireAdmin, isInternalCall } from "@/lib/apiAuth";
+import { requireAdmin, isInternalCall, isServiceKeyCall } from "@/lib/apiAuth";
 
 // 【日次スキャン】既存シグナル（出席=顔認証入室・確認テスト合格=報告書・まなび=教材進捗・報告書提出）
 // を直近N日窓で読み、AC を冪等に自動付与する。二重付与は ac_award_once の source key で根絶。
@@ -36,7 +36,7 @@ async function runAwards(
 }
 
 export async function POST(req: NextRequest) {
-  if (!isInternalCall(req)) {
+  if (!isInternalCall(req) && !isServiceKeyCall(req)) {
     const auth = await requireAdmin(req);
     if (auth instanceof NextResponse) return auth;
   }
