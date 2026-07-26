@@ -5,10 +5,11 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
+import { EconomyPanel } from "@/components/EconomyPanel";
 import type { Student, ShiftEvent, StudentKarte } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
-type Tab = "todo" | "tests" | "messages" | "calendar" | "karte" | "settings";
+type Tab = "todo" | "tests" | "messages" | "calendar" | "karte" | "economy" | "settings";
 
 type DailyTask = {
   id: string;
@@ -419,6 +420,16 @@ export default function StudentDashboardPage() {
             )}
           </button>
           <button
+            onClick={() => setTab("economy")}
+            className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
+              tab === "economy"
+                ? "bg-amber-500 text-white"
+                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            経済（AC・自塾株）
+          </button>
+          <button
             onClick={() => setTab("calendar")}
             className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
               tab === "calendar"
@@ -528,6 +539,8 @@ export default function StudentDashboardPage() {
             )}
           </div>
         )}
+
+        {tab === "economy" && student && <EconomyPanel student={student} />}
 
         {tab === "settings" && studentRef && <StudentSettings student={studentRef} />}
 

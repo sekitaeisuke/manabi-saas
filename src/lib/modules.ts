@@ -12,7 +12,8 @@ export type ModuleKey =
   | "tests"
   | "shift"
   | "attendance"
-  | "parent_portal";
+  | "parent_portal"
+  | "class_stock";
 
 export type ModuleDef = {
   key: ModuleKey;
@@ -46,6 +47,9 @@ export const MODULES: ModuleDef[] = [
   { key: "parent_portal", label: "保護者ポータル・振替",
     description: "保護者からの振替リクエスト等", defaultEnabled: true,
     paths: ["/teacher/dashboard/reschedules"] },
+  { key: "class_stock", label: "塾内経済（AC・自塾株）",
+    description: "アカデミーコイン付与・貢献記録・報酬承認・自塾株の株価", defaultEnabled: false,
+    paths: ["/teacher/dashboard/economy"] },
 ];
 
 // href → moduleKey（載っていないhrefはコア＝常時表示）

@@ -61,6 +61,7 @@ const GROUPS: NavGroup[] = [
     { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
     { href: "/teacher/dashboard/collaboration", label: "講師連携",       iconKey: "collab" },
     { href: "/teacher/dashboard/parents",       label: "保護者管理",     iconKey: "parents" },
+    { href: "/teacher/dashboard/economy",       label: "塾内経済(AC・株)", iconKey: "chart" },
   ]},
   { key: "tests", label: "テスト・診断", iconKey: "doc", items: [
     { href: "/teacher/dashboard/tests",       label: "テスト作成・配布",  iconKey: "doc",      badge: "pending" },

@@ -62,6 +62,35 @@ export async function requireUser(req: NextRequest): Promise<{ email: string } |
 }
 
 /**
+ * ログイン中の生徒本人であることを検証し、students.id を解決して返す。
+ * 塾内経済（チェックイン・自塾株売買・報酬交換）など「本人だけが行える」ルートで使う。
+ * トークン → auth.uid() → students.auth_user_id で突合（service role で確実に）。
+ */
+export type StudentAuth = { studentId: string; email: string; schoolId: string | null };
+
+export async function requireStudent(req: NextRequest): Promise<StudentAuth | NextResponse> {
+  const authz = req.headers.get("authorization") ?? "";
+  const token = authz.startsWith("Bearer ") ? authz.slice(7).trim() : "";
+  if (!token) return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const authClient = createClient(url, anon);
+  const { data: { user }, error } = await authClient.auth.getUser(token);
+  if (error || !user?.id) {
+    return NextResponse.json({ error: "認証に失敗しました" }, { status: 401 });
+  }
+
+  const svc = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const { data: student } = await svc
+    .from("students").select("id, school_id").eq("auth_user_id", user.id).maybeSingle();
+  if (!student) {
+    return NextResponse.json({ error: "生徒アカウントではありません" }, { status: 403 });
+  }
+  return { studentId: student.id as string, email: user.email ?? "", schoolId: (student.school_id as string) ?? null };
+}
+
+/**
  * サーバ間内部呼び出し（例: notify/announcement → notify）の判定。
  * INTERNAL_API_SECRET が設定され、x-internal-secret ヘッダが一致すれば true。
  */
