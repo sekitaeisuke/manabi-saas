@@ -19,8 +19,18 @@ const CATEGORY_LABEL: Record<string, string> = {
   goods: "グッズ", card: "紹介カード", pass: "通い放題", online: "オンライン授業", other: "その他",
 };
 type Txn = { id: string; amount: number; type: string; description: string; created_at: string };
-type SchoolRow = { id: string; name: string; price: number };
+type SchoolRow = { id: string; name: string; price: number; support: number };
 type Benchmark = { name: string; price: number; prev_price: number | null; note: string | null };
+type EarnRule = { event_key: string; label: string; points: number };
+
+// 株価が下がる行動（講師がマイナス評価として記録＝みんなの株価が下がる）
+const PENALTY_HINTS = [
+  "宿題未提出", "忘れ物", "遅刻", "テスト不合格",
+  "私語", "こっそりスマホ", "こっそり息抜き", "ちょっと良くない",
+];
+const EARN_EMOJI: Record<string, string> = {
+  attend: "🏫", testpass: "💯", manabi: "📗", clean: "🧹", report: "📝", refer: "🤝", refereed: "🎁",
+};
 
 const TYPE_LABEL: Record<string, string> = {
   EARN_CHECKIN: "チェックイン", EARN_TASK: "課題", EARN_TEST: "テスト",
@@ -37,13 +47,16 @@ export function EconomyPanel({ student }: { student: Student }) {
   const [checkedIn, setCheckedIn] = useState(false);
   const [schools, setSchools] = useState<SchoolRow[]>([]);
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
+  const [earnRules, setEarnRules] = useState<EarnRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [qty, setQty] = useState(1);
+  const [voiceText, setVoiceText] = useState("");
+  const [voiceSent, setVoiceSent] = useState(false);
 
   const load = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const [w, h, ci, tx, chartRes, rw, lb] = await Promise.all([
+    const [w, h, ci, tx, chartRes, rw, lb, rl] = await Promise.all([
       supabase.from("student_wallets").select("balance, locked_balance").eq("student_id", student.id).maybeSingle(),
       supabase.from("class_stock_holdings").select("shares, avg_price").eq("student_id", student.id).maybeSingle(),
       supabase.from("check_ins").select("id").eq("student_id", student.id).eq("checkin_on", today).maybeSingle(),
@@ -52,6 +65,7 @@ export function EconomyPanel({ student }: { student: Student }) {
       authFetch("/api/stock/chart").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       authFetch("/api/economy/reward").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       authFetch("/api/stock/leaderboard").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      authFetch("/api/economy/rules").then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     if (w.data) setWallet(w.data as Wallet);
     setHolding((h.data as Holding) ?? { shares: 0, avg_price: 0 });
@@ -63,6 +77,7 @@ export function EconomyPanel({ student }: { student: Student }) {
     });
     if (rw?.items) setRewards(rw.items as Reward[]);
     if (lb) { setSchools((lb.schools as SchoolRow[]) ?? []); setBenchmarks((lb.benchmarks as Benchmark[]) ?? []); }
+    if (rl?.rules) setEarnRules(rl.rules as EarnRule[]);
     setLoading(false);
   }, [student.id]);
 
@@ -72,6 +87,7 @@ export function EconomyPanel({ student }: { student: Student }) {
   const val = holdingValuation(holding.shares, holding.avg_price, price);
   const maxBuy = maxBuyableShares(wallet.balance, wallet.locked_balance, price);
   const netWorth = wallet.balance + val.marketValue;
+  const ownSupport = schools.find((s) => s.id === student.school_id)?.support ?? 0;
 
   const points: StockPoint[] = useMemo(() => {
     const hist = chart.history.map((r) => ({
@@ -130,6 +146,20 @@ export function EconomyPanel({ student }: { student: Student }) {
     load();
   }
 
+  async function submitVoice() {
+    if (!voiceText.trim()) return;
+    setBusy(true);
+    const r = await authFetch("/api/economy/voice", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: voiceText.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok || d.ok === false) return showToast(d.error ?? "送信に失敗しました", "error");
+    showToast("株主の声を先生に届けました", "success");
+    setVoiceText(""); setVoiceSent(true);
+  }
+
   async function redeem(reward: Reward) {
     if (wallet.balance < reward.cost) return showToast("ACが足りません", "error");
     if (!confirm(`「${reward.title}」を ${reward.cost} AC で交換しますか？（先生の承認後に受け取れます）`)) return;
@@ -172,6 +202,82 @@ export function EconomyPanel({ student }: { student: Student }) {
         >
           {checkedIn ? "✓ チェックイン済み" : "チェックイン"}
         </button>
+      </div>
+
+      {/* 🛒 ポイント商店（陳列棚）── 最初に見える */}
+      <div className="rounded-3xl border border-amber-200 bg-amber-50/40 p-6 shadow-sm">
+        <div className="mb-4 flex items-end justify-between">
+          <div>
+            <p className="text-base font-extrabold text-amber-900">🛒 ポイント商店</p>
+            <p className="text-xs text-amber-700/80">ためた AC で交換しよう（交換は先生の承認後にうけとり）</p>
+          </div>
+          <p className="shrink-0 rounded-full bg-white px-3 py-1 text-sm font-extrabold text-emerald-600 shadow-sm">
+            のこり {wallet.balance.toLocaleString()} AC
+          </p>
+        </div>
+        {rewards.length === 0 ? (
+          <p className="rounded-2xl bg-white/70 px-4 py-6 text-center text-sm text-slate-400">
+            いまは商品がありません
+          </p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {rewards.map((r) => {
+              const affordable = wallet.balance >= r.cost;
+              const soldOut = r.stock !== null && r.stock <= 0;
+              return (
+                <div key={r.id} className="flex items-center justify-between rounded-2xl border border-amber-100 bg-white p-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      {r.category && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                          {CATEGORY_LABEL[r.category] ?? r.category}
+                        </span>
+                      )}
+                      <p className="truncate text-sm font-semibold text-slate-800">{r.title}</p>
+                    </div>
+                    {r.description && <p className="truncate text-xs text-slate-400">{r.description}</p>}
+                    <p className={`mt-1 text-sm font-extrabold ${affordable ? "text-amber-600" : "text-slate-400"}`}>{r.cost.toLocaleString()} AC</p>
+                  </div>
+                  <button
+                    onClick={() => redeem(r)}
+                    disabled={busy || !affordable || soldOut}
+                    className="ml-3 shrink-0 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400"
+                  >
+                    {soldOut ? "在庫切れ" : !affordable ? "AC不足" : "交換する"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 📈 AC の増やし方・減り方 */}
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="mb-3 text-sm font-bold text-slate-800">AC の増やし方・減り方</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-bold text-emerald-700">⬆ こうすると AC が増える</p>
+            <ul className="space-y-1.5">
+              {earnRules.map((r) => (
+                <li key={r.event_key} className="flex items-center justify-between rounded-xl bg-emerald-50/60 px-3 py-1.5 text-sm">
+                  <span className="text-slate-700">{EARN_EMOJI[r.event_key] ?? "⭐"} {r.label}</span>
+                  <span className="font-bold text-emerald-600">＋{r.points} AC</span>
+                </li>
+              ))}
+              {earnRules.length === 0 && <li className="text-xs text-slate-400">出席・確認テスト合格・まなび・掃除 など</li>}
+            </ul>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-bold text-red-600">⬇ みんなの株価が下がること</p>
+            <div className="flex flex-wrap gap-1.5">
+              {PENALTY_HINTS.map((p) => (
+                <span key={p} className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">{p}</span>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400">これらが増えると教室の株価が下がります。気をつけよう。</p>
+          </div>
+        </div>
       </div>
 
       {/* 自塾株チャート */}
@@ -278,36 +384,36 @@ export function EconomyPanel({ student }: { student: Student }) {
           </button>
         </div>
         <p className="mt-2 text-[11px] text-slate-400">※ 破産防止のため、投資はウォレット全体の50%までに制限されています。</p>
+
+        {/* 教室の応援金（みんなの投資＝教室の充実） */}
+        <div className="mt-4 rounded-2xl bg-indigo-50 p-4">
+          <div className="flex items-end justify-between">
+            <p className="text-sm font-bold text-indigo-900">🏫 この教室の応援金</p>
+            <p className="text-xl font-extrabold text-indigo-700 tabular-nums">{ownSupport.toLocaleString()} <span className="text-xs font-semibold text-indigo-400">AC</span></p>
+          </div>
+          <p className="mt-1 text-[11px] text-indigo-700/80">
+            みんなが自塾株に投資しているACの合計です。投資が増えるほど、教室の充実（新しい備品など）につながります。
+            自分たちのがんばりが、自分たちの教室をよくしていきます。
+          </p>
+        </div>
       </div>
 
-      {/* 報酬交換 */}
-      {rewards.length > 0 && (
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="mb-3 text-sm font-bold text-slate-800">AC で交換できる報酬</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {rewards.map((r) => (
-              <div key={r.id} className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    {r.category && (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                        {CATEGORY_LABEL[r.category] ?? r.category}
-                      </span>
-                    )}
-                    <p className="truncate text-sm font-semibold text-slate-800">{r.title}</p>
-                  </div>
-                  {r.description && <p className="truncate text-xs text-slate-400">{r.description}</p>}
-                  <p className="mt-1 text-xs font-bold text-amber-600">{r.cost.toLocaleString()} AC</p>
-                </div>
-                <button
-                  onClick={() => redeem(r)}
-                  disabled={busy || wallet.balance < r.cost || (r.stock !== null && r.stock <= 0)}
-                  className="ml-3 shrink-0 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400"
-                >
-                  {r.stock !== null && r.stock <= 0 ? "在庫切れ" : "交換"}
-                </button>
-              </div>
-            ))}
+      {/* 🗳 株主の声（自塾株を持っている人だけ） */}
+      {holding.shares > 0 && (
+        <div className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
+          <p className="text-sm font-bold text-violet-900">🗳 株主の声</p>
+          <p className="mb-3 text-xs text-violet-700/80">あなたは自塾株の株主です（{holding.shares}株）。教室への意見・要望を先生に伝えられます。</p>
+          <textarea
+            value={voiceText} onChange={(e) => { setVoiceText(e.target.value); setVoiceSent(false); }}
+            rows={3} maxLength={500} placeholder="例：自習室にホワイトボードがほしい／英検の対策コマを増やしてほしい"
+            className="w-full rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm outline-none focus:border-violet-400"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-[11px] text-violet-400">{voiceSent ? "送信しました。ありがとう！" : "先生が読みます"}</span>
+            <button onClick={submitVoice} disabled={busy || !voiceText.trim()}
+              className="rounded-2xl bg-violet-600 px-5 py-2 text-sm font-bold text-white transition hover:bg-violet-700 disabled:bg-slate-200 disabled:text-slate-400">
+              意見を送る
+            </button>
           </div>
         </div>
       )}
