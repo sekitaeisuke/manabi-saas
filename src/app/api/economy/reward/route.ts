@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const auth = await requireStudent(req);
   if (auth instanceof NextResponse) return auth;
   const svc = svcClient();
-  let q = svc.from("reward_items").select("id, title, description, cost, stock, school_id")
+  let q = svc.from("reward_items").select("id, title, description, cost, stock, school_id, category")
     .eq("active", true).order("cost", { ascending: true });
   // 自校 or 全校共通(school_id is null)
   if (auth.schoolId) q = q.or(`school_id.is.null,school_id.eq.${auth.schoolId}`);

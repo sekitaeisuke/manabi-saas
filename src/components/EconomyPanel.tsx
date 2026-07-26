@@ -13,7 +13,11 @@ type Wallet = { balance: number; locked_balance: number };
 type Holding = { shares: number; avg_price: number };
 type HistRow = { price: number; calculated_at: string };
 type Chart = { current_price: number; school_name: string | null; history: HistRow[] };
-type Reward = { id: string; title: string; description: string; cost: number; stock: number | null };
+type Reward = { id: string; title: string; description: string; cost: number; stock: number | null; category: string | null };
+
+const CATEGORY_LABEL: Record<string, string> = {
+  goods: "グッズ", card: "紹介カード", pass: "通い放題", online: "オンライン授業", other: "その他",
+};
 type Txn = { id: string; amount: number; type: string; description: string; created_at: string };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -213,7 +217,14 @@ export function EconomyPanel({ student }: { student: Student }) {
             {rewards.map((r) => (
               <div key={r.id} className="flex items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/60 p-4">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-800">{r.title}</p>
+                  <div className="flex items-center gap-1.5">
+                    {r.category && (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        {CATEGORY_LABEL[r.category] ?? r.category}
+                      </span>
+                    )}
+                    <p className="truncate text-sm font-semibold text-slate-800">{r.title}</p>
+                  </div>
                   {r.description && <p className="truncate text-xs text-slate-400">{r.description}</p>}
                   <p className="mt-1 text-xs font-bold text-amber-600">{r.cost.toLocaleString()} AC</p>
                 </div>

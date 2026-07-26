@@ -8,8 +8,14 @@ import { showToast } from "@/lib/toast";
 type Student = { id: string; name: string; grade: string; school_id: string | null };
 type School = { id: string; name: string; current_stock_price: number };
 type WalletRow = { student_id: string; balance: number; locked_balance: number };
-type RewardItem = { id: string; title: string; description: string; cost: number; stock: number | null; active: boolean; school_id: string | null };
-type ExchangeRow = { id: string; student_name: string | null; reward_title: string | null; cost: number; created_at: string };
+type RewardItem = { id: string; title: string; description: string; cost: number; stock: number | null; active: boolean; school_id: string | null; category: string | null };
+type ExchangeRow = { id: string; student_name: string | null; reward_title: string | null; cost: number; created_at: string; status?: string };
+type Rule = { event_key: string; label: string; points: number; threshold: number | null; enabled: boolean };
+type ReferralRow = {
+  id: string; referrer_student_id: string; referrer_name: string | null;
+  friend_name: string; friend_student_id: string | null; status: string; created_at: string;
+};
+type ScanResult = { dry: boolean; total_count: number; total_ac: number; detail: Record<string, { count: number; ac: number }> };
 type CalcResult = {
   school_id: string; school_name: string;
   prev_price: number; new_price: number; change_rate: number;
@@ -32,7 +38,16 @@ export default function TeacherEconomyPage() {
   const [wallets, setWallets] = useState<Record<string, WalletRow>>({});
   const [rewards, setRewards] = useState<RewardItem[]>([]);
   const [pending, setPending] = useState<ExchangeRow[]>([]);
+  const [approved, setApproved] = useState<ExchangeRow[]>([]);
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 紹介フォーム
+  const [refStudent, setRefStudent] = useState("");
+  const [refFriend, setRefFriend] = useState("");
+  const [rCategory, setRCategory] = useState("goods");
 
   // 付与フォーム
   const [studentId, setStudentId] = useState("");
@@ -51,13 +66,19 @@ export default function TeacherEconomyPage() {
   const [preview, setPreview] = useState<CalcResult[] | null>(null);
 
   const load = useCallback(async () => {
-    const [st, sc, wl, rw, ex] = await Promise.all([
+    const [st, sc, wl, rw, ex, exA, ru, rf] = await Promise.all([
       supabase.from("students").select("id, name, grade, school_id").order("name"),
       supabase.from("schools").select("id, name, current_stock_price").order("name"),
       supabase.from("student_wallets").select("student_id, balance, locked_balance"),
-      supabase.from("reward_items").select("id, title, description, cost, stock, active, school_id").order("cost"),
-      supabase.from("reward_exchanges").select("id, student_name, reward_title, cost, created_at")
+      supabase.from("reward_items").select("id, title, description, cost, stock, active, school_id, category").order("cost"),
+      supabase.from("reward_exchanges").select("id, student_name, reward_title, cost, created_at, status")
         .eq("status", "pending").order("created_at", { ascending: true }),
+      supabase.from("reward_exchanges").select("id, student_name, reward_title, cost, created_at, status")
+        .eq("status", "approved").order("created_at", { ascending: true }),
+      supabase.from("ac_rules").select("event_key, label, points, threshold, enabled"),
+      supabase.from("referral_rewards")
+        .select("id, referrer_student_id, referrer_name, friend_name, friend_student_id, status, created_at")
+        .order("created_at", { ascending: false }).limit(50),
     ]);
     setStudents((st.data as Student[]) ?? []);
     setSchools((sc.data as School[]) ?? []);
@@ -66,6 +87,9 @@ export default function TeacherEconomyPage() {
     setWallets(wmap);
     setRewards((rw.data as RewardItem[]) ?? []);
     setPending((ex.data as ExchangeRow[]) ?? []);
+    setApproved((exA.data as ExchangeRow[]) ?? []);
+    setRules((ru.data as Rule[]) ?? []);
+    setReferrals((rf.data as ReferralRow[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -104,7 +128,7 @@ export default function TeacherEconomyPage() {
     if (!rTitle.trim() || rCost <= 0) return showToast("タイトルと正の必要ACが必要です", "error");
     setBusy(true);
     const { error } = await supabase.from("reward_items").insert({
-      title: rTitle.trim(), description: rDesc.trim(), cost: rCost, active: true,
+      title: rTitle.trim(), description: rDesc.trim(), cost: rCost, active: true, category: rCategory,
     });
     setBusy(false);
     if (error) return showToast(error.message, "error");
@@ -140,6 +164,84 @@ export default function TeacherEconomyPage() {
     if (!r.ok) return showToast(d.error ?? "計算に失敗しました", "error");
     setPreview(d.schools as CalcResult[]);
     if (!dry) { showToast("株価を更新しました", "success"); load(); }
+  }
+
+  // 獲得ルールの編集（pt・合格ライン・ON/OFF）
+  async function saveRule(rule: Rule, patch: Partial<Rule>) {
+    const next = { ...rule, ...patch };
+    setRules((prev) => prev.map((x) => (x.event_key === rule.event_key ? next : x)));
+    const { error } = await supabase.from("ac_rules")
+      .update({ points: next.points, threshold: next.threshold, enabled: next.enabled })
+      .eq("event_key", rule.event_key);
+    if (error) showToast(error.message, "error");
+  }
+
+  // 獲得スキャン（自動付与）
+  async function runScan(dry: boolean) {
+    setBusy(true);
+    const r = await authFetch(`/api/economy/scan-earnings${dry ? "?dry=1" : ""}`, { method: "POST" });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) return showToast(d.error ?? "スキャンに失敗しました", "error");
+    setScanResult(d as ScanResult);
+    if (!dry) { showToast(`自動付与 ${d.total_count}件・計${d.total_ac}AC`, "success"); load(); }
+  }
+
+  // 受け渡し完了
+  async function completeExchange(exchange_id: string) {
+    setBusy(true);
+    const r = await authFetch("/api/economy/exchange/approve", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ exchange_id, complete: true }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) return showToast(d.error ?? "失敗しました", "error");
+    showToast("受け渡し完了にしました", "success");
+    load();
+  }
+
+  // 紹介
+  async function createReferral() {
+    if (!refStudent || !refFriend.trim()) return showToast("紹介者(生徒)と友人名が必要です", "error");
+    setBusy(true);
+    const r = await authFetch("/api/economy/referral", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "create", referrer_student_id: refStudent, friend_name: refFriend.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok) return showToast(d.error ?? "登録に失敗しました", "error");
+    showToast("紹介を登録しました", "success");
+    setRefFriend("");
+    load();
+  }
+
+  async function refEnroll(id: string) {
+    setBusy(true);
+    const r = await authFetch("/api/economy/referral", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "enroll", referral_id: id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok || d.ok === false) return showToast(d.error ?? "失敗しました", "error");
+    showToast(`紹介者に +${d.awarded} AC`, "success");
+    load();
+  }
+
+  async function refLink(id: string, friend_student_id: string) {
+    if (!friend_student_id) return;
+    setBusy(true);
+    const r = await authFetch("/api/economy/referral", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "link", referral_id: id, friend_student_id }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok || d.ok === false) return showToast(d.error ?? "失敗しました", "error");
+    showToast(`被紹介者に +${d.awarded} AC`, "success");
+    load();
   }
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">読み込み中…</div>;
@@ -200,6 +302,73 @@ export default function TeacherEconomyPage() {
               </tbody>
             </table>
             <p className="mt-1 text-[11px] text-slate-400">プレビューは保存されません。数値は各成分の寄与率（%）です。</p>
+          </div>
+        )}
+      </section>
+
+      {/* 獲得ルール & 自動スキャン */}
+      <section className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-6 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-emerald-900">獲得ルール（自動付与）</h2>
+            <p className="text-xs text-emerald-700/80">出席・確認テスト合格・まなび使用は自動。掃除は kiosk のボタン。pt は編集できます。</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => runScan(true)} disabled={busy}
+              className="rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50">
+              スキャン（プレビュー）
+            </button>
+            <button onClick={() => { if (confirm("直近の行動から AC を自動付与します。よろしいですか？")) runScan(false); }} disabled={busy}
+              className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700">
+              今すぐ自動付与
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-2xl border border-emerald-100 bg-white">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-slate-400">
+                <th className="p-2 text-left">ルール</th><th className="p-2 text-right">pt</th>
+                <th className="p-2 text-right">合格ライン</th><th className="p-2 text-center">有効</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map((rule) => (
+                <tr key={rule.event_key} className="border-t border-slate-100">
+                  <td className="p-2 font-semibold text-slate-700">{rule.label}</td>
+                  <td className="p-2 text-right">
+                    <input type="number" value={rule.points}
+                      onChange={(e) => saveRule(rule, { points: Math.floor(Number(e.target.value) || 0) })}
+                      className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
+                  </td>
+                  <td className="p-2 text-right">
+                    {rule.event_key === "testpass" ? (
+                      <input type="number" value={rule.threshold ?? 80}
+                        onChange={(e) => saveRule(rule, { threshold: Math.floor(Number(e.target.value) || 0) })}
+                        className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
+                    ) : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="p-2 text-center">
+                    <input type="checkbox" checked={rule.enabled}
+                      onChange={(e) => saveRule(rule, { enabled: e.target.checked })} className="h-4 w-4 accent-emerald-600" />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {scanResult && (
+          <div className="mt-3 rounded-2xl bg-white p-3 text-xs text-slate-600">
+            <p className="font-semibold text-slate-800">
+              {scanResult.dry ? "候補（未保存）" : "付与しました"}：合計 {scanResult.total_count}件 / {scanResult.total_ac} AC
+            </p>
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              {Object.entries(scanResult.detail).map(([k, v]) => (
+                <span key={k}>{k}: {v.count}件 / {v.ac}AC</span>
+              ))}
+            </div>
           </div>
         )}
       </section>
@@ -280,6 +449,69 @@ export default function TeacherEconomyPage() {
             ))}
           </ul>
         )}
+
+        {/* 承認済み → 受け渡し/実施の完了 */}
+        {approved.length > 0 && (
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <h3 className="mb-2 text-xs font-bold text-slate-500">承認済み・受け渡し待ち（{approved.length}件）</h3>
+            <ul className="divide-y divide-slate-100">
+              {approved.map((p) => (
+                <li key={p.id} className="flex items-center justify-between py-2.5">
+                  <p className="text-sm text-slate-700">{p.student_name} → {p.reward_title}</p>
+                  <button onClick={() => completeExchange(p.id)} disabled={busy}
+                    className="rounded-xl bg-slate-800 px-4 py-1.5 text-xs font-bold text-white hover:bg-slate-700">受け渡し完了</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
+
+      {/* 友人紹介（講師確認型） */}
+      <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
+        <h2 className="mb-1 text-sm font-bold text-violet-900">友人紹介</h2>
+        <p className="mb-3 text-xs text-violet-700/80">紹介を登録→入塾確定で紹介者に付与→友人が生徒登録されたら紐付けて被紹介者に付与。</p>
+        <div className="mb-4 flex flex-wrap items-end gap-2">
+          <select value={refStudent} onChange={(e) => setRefStudent(e.target.value)}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <option value="">紹介者（生徒）…</option>
+            {students.map((s) => <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>)}
+          </select>
+          <input value={refFriend} onChange={(e) => setRefFriend(e.target.value)} placeholder="友人の名前"
+            className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          <button onClick={createReferral} disabled={busy}
+            className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-700">登録</button>
+        </div>
+        {referrals.length === 0 ? (
+          <p className="text-sm text-slate-400">まだ紹介はありません</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {referrals.map((rf) => (
+              <li key={rf.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">{rf.referrer_name} → {rf.friend_name}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {rf.status === "pending" ? "紹介登録済み" : rf.status === "enrolled" ? "入塾確定・紹介者付与済み" : "完了（両者付与済み）"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {rf.status === "pending" && (
+                    <button onClick={() => refEnroll(rf.id)} disabled={busy}
+                      className="rounded-xl bg-violet-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-violet-700">入塾確定（紹介者+）</button>
+                  )}
+                  {rf.status === "enrolled" && (
+                    <select defaultValue="" disabled={busy}
+                      onChange={(e) => { if (e.target.value) refLink(rf.id, e.target.value); }}
+                      className="rounded-xl border border-violet-200 px-2 py-1.5 text-xs">
+                      <option value="">友人を生徒から選び被紹介者付与…</option>
+                      {students.map((s) => <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>)}
+                    </select>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* 報酬マスタ */}
@@ -290,6 +522,14 @@ export default function TeacherEconomyPage() {
             className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
           <input value={rDesc} onChange={(e) => setRDesc(e.target.value)} placeholder="説明（任意）"
             className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          <select value={rCategory} onChange={(e) => setRCategory(e.target.value)}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <option value="goods">グッズ</option>
+            <option value="card">紹介カード</option>
+            <option value="pass">通い放題</option>
+            <option value="online">オンライン授業</option>
+            <option value="other">その他</option>
+          </select>
           <input type="number" value={rCost} onChange={(e) => setRCost(Math.floor(Number(e.target.value) || 0))}
             className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
           <button onClick={createReward} disabled={busy}

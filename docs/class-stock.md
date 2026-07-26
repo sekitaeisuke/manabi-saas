@@ -1,3 +1,36 @@
+# 塾内経済（アカデミーコイン・自塾株）
+
+## Phase 2：AC獲得の自動化 ＋ 紹介 ＋ 購入ショップ（`class-stock-earn-setup.sql`）
+
+**目的**：AC の付与を講師の手入力から**自動化**する。既存シグナルを直近N日窓で読み、
+`ac_award_once`（source key で冪等）で二重付与なく付与する。
+
+| ルール(event_key) | 既定pt | 自動ソース | 冪等キー |
+|---|---|---|---|
+| attend | 3 | `student_room_logs`(type='entry'・`recorded_at`) | `attend:{student}:{date}`（1日1回） |
+| testpass | 10 | `lesson_reports`(report_source='test', percentage≥合格ライン80) | `testpass:{report_id}` |
+| manabi | 1 | `textbook_progress` | `manabi:{student}:{date}`（1日1回） |
+| report | 0(既定OFF) | `lesson_reports` | `report:{report_id}` |
+| clean | 1 | kiosk「🧹掃除した」ボタン（顔認証直後・当日1回） | `clean:{student}:{date}` |
+| refer | 1000 | 紹介(講師確認) | `refer:{referral_id}` |
+| refereed | 100 | 紹介(講師確認)・友人が生徒化後 | `refereed:{referral_id}` |
+
+- pt・合格ライン・ON/OFF は `ac_rules` 表で編集可（講師画面）。コード直書きにしない。
+- 冪等：`ac_transactions(source_type,source_id)` の一意索引＋`ac_award_once`(ON CONFLICT DO NOTHING)。
+  何度スキャンしても増えない。
+- 実行：`POST /api/economy/scan-earnings`（内部secret or admin・`?dry=1`でプレビュー）。
+  講師 `/teacher/dashboard/economy` の「獲得ルール」→「今すぐ自動付与」から手動実行可。
+- **日次cron推奨**（例 毎晩23:30）に scan-earnings を x-internal-secret で。株価週次計算とは別枠。
+- kiosk 掃除：`POST /api/economy/kiosk-action`（匿名端末だが「直近15分に顔認証入室あり」を要件化）。
+- 紹介(講師確認型)：`referral_rewards`＋`/api/economy/referral`（create→enroll→link）。
+- 購入ショップ：`reward_items.category`（goods/card/pass/online/other）を追加。承認済み→
+  「受け渡し完了(completed)」を `/api/economy/exchange/approve`（{complete:true}）で。seedに
+  グッズ/紹介カード/1週間通い放題/オンライン授業。
+
+> セットアップ：Supabase SQL Editor で **`class-stock-earn-setup.sql`**（Phase1実行済みが前提・冪等）。
+
+---
+
 # 塾内経済（アカデミーコイン・自塾株）Phase 1
 
 自塾成長連動型「教室株式」× 塾内エコノミー の第一段（**実課金なし**）。
