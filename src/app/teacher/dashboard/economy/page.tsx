@@ -16,6 +16,7 @@ type ReferralRow = {
   friend_name: string; friend_student_id: string | null; status: string; created_at: string;
 };
 type ScanResult = { dry: boolean; total_count: number; total_ac: number; detail: Record<string, { count: number; ac: number }> };
+type Benchmark = { id: string; name: string; price: number; note: string | null; active: boolean };
 type CalcResult = {
   school_id: string; school_name: string;
   prev_price: number; new_price: number; change_rate: number;
@@ -48,6 +49,7 @@ export default function TeacherEconomyPage() {
   const [approved, setApproved] = useState<ExchangeRow[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
+  const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -73,7 +75,7 @@ export default function TeacherEconomyPage() {
   const [preview, setPreview] = useState<CalcResult[] | null>(null);
 
   const load = useCallback(async () => {
-    const [st, sc, wl, rw, ex, exA, ru, rf] = await Promise.all([
+    const [st, sc, wl, rw, ex, exA, ru, rf, bm] = await Promise.all([
       supabase.from("students").select("id, name, grade, school_id").order("name"),
       supabase.from("schools").select("id, name, current_stock_price").order("name"),
       supabase.from("student_wallets").select("student_id, balance, locked_balance"),
@@ -86,6 +88,7 @@ export default function TeacherEconomyPage() {
       supabase.from("referral_rewards")
         .select("id, referrer_student_id, referrer_name, friend_name, friend_student_id, status, created_at")
         .order("created_at", { ascending: false }).limit(50),
+      supabase.from("stock_benchmarks").select("id, name, price, note, active").order("sort_order"),
     ]);
     setStudents((st.data as Student[]) ?? []);
     setSchools((sc.data as School[]) ?? []);
@@ -97,6 +100,7 @@ export default function TeacherEconomyPage() {
     setApproved((exA.data as ExchangeRow[]) ?? []);
     setRules((ru.data as Rule[]) ?? []);
     setReferrals((rf.data as ReferralRow[]) ?? []);
+    setBenchmarks((bm.data as Benchmark[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -180,6 +184,15 @@ export default function TeacherEconomyPage() {
     const { error } = await supabase.from("ac_rules")
       .update({ points: next.points, threshold: next.threshold, enabled: next.enabled })
       .eq("event_key", rule.event_key);
+    if (error) showToast(error.message, "error");
+  }
+
+  // ライバル塾（目標株価）の編集
+  async function saveBenchmark(b: Benchmark, patch: Partial<Benchmark>) {
+    const next = { ...b, ...patch };
+    setBenchmarks((prev) => prev.map((x) => (x.id === b.id ? next : x)));
+    const { error } = await supabase.from("stock_benchmarks")
+      .update({ name: next.name, price: next.price, active: next.active }).eq("id", b.id);
     if (error) showToast(error.message, "error");
   }
 
@@ -309,6 +322,33 @@ export default function TeacherEconomyPage() {
               </tbody>
             </table>
             <p className="mt-1 text-[11px] text-slate-400">プレビューは保存されません。数値は各成分の寄与率（%）です。</p>
+          </div>
+        )}
+      </section>
+
+      {/* ライバル塾（目標株価） */}
+      <section className="rounded-3xl border border-amber-100 bg-amber-50/40 p-6 shadow-sm">
+        <h2 className="mb-1 text-sm font-bold text-amber-900">ライバル塾（目標株価）</h2>
+        <p className="mb-3 text-xs text-amber-700/80">生徒の「経済」タブに🎯目標として表示されます（投資は自塾のみ・ライバルは表示専用）。目標株価は自由に設定してください。</p>
+        {benchmarks.length === 0 ? (
+          <p className="text-sm text-slate-400">ライバル塾がありません（class-stock-benchmarks-setup.sql を実行してください）</p>
+        ) : (
+          <div className="space-y-2">
+            {benchmarks.map((b) => (
+              <div key={b.id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-white px-3 py-2">
+                <input value={b.name} onChange={(e) => saveBenchmark(b, { name: e.target.value })}
+                  className="w-28 rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold" />
+                <span className="text-xs text-slate-400">目標株価</span>
+                <input type="number" value={b.price}
+                  onChange={(e) => saveBenchmark(b, { price: Math.floor(Number(e.target.value) || 0) })}
+                  className="w-28 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
+                <span className="text-xs text-slate-400">AC</span>
+                <label className="ml-auto flex items-center gap-1 text-xs text-slate-600">
+                  <input type="checkbox" checked={b.active} onChange={(e) => saveBenchmark(b, { active: e.target.checked })}
+                    className="h-4 w-4 accent-amber-500" />表示
+                </label>
+              </div>
+            ))}
           </div>
         )}
       </section>
