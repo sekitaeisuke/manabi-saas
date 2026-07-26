@@ -7,7 +7,7 @@ import { Logo, LogoIcon } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { HREF_MODULE, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
 
-type BadgeKey = "pending" | "unread" | "resched";
+type BadgeKey = "pending" | "unread" | "resched" | "economy";
 type NavLeaf = { href: string; label: string; iconKey: IconKey; badge?: BadgeKey; adminOnly?: boolean };
 type NavGroup = { key: string; label: string; iconKey: IconKey; items: NavLeaf[] };
 
@@ -61,7 +61,7 @@ const GROUPS: NavGroup[] = [
     { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
     { href: "/teacher/dashboard/collaboration", label: "講師連携",       iconKey: "collab" },
     { href: "/teacher/dashboard/parents",       label: "保護者管理",     iconKey: "parents" },
-    { href: "/teacher/dashboard/economy",       label: "塾内経済(AC・株)", iconKey: "chart" },
+    { href: "/teacher/dashboard/economy",       label: "塾内経済(AC・株)", iconKey: "chart", badge: "economy" },
   ]},
   { key: "tests", label: "テスト・診断", iconKey: "doc", items: [
     { href: "/teacher/dashboard/tests",       label: "テスト作成・配布",  iconKey: "doc",      badge: "pending" },
@@ -98,6 +98,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [pendingCount, setPendingCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [pendingReschedules, setPendingReschedules] = useState(0);
+  const [economyCount, setEconomyCount] = useState(0);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -126,14 +127,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const fetchCounts = async () => {
-      const [{ count: pending }, { count: unread }, { count: resched }] = await Promise.all([
+      const [{ count: pending }, { count: unread }, { count: resched }, { count: exch }, { count: voice }, { count: refer }] = await Promise.all([
         supabase.from("questionnaire_responses").select("*", { count: "exact", head: true }).eq("status", "pending"),
         supabase.from("parent_messages").select("*", { count: "exact", head: true }).eq("status", "unread"),
         supabase.from("reschedule_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("reward_exchanges").select("*", { count: "exact", head: true }).eq("status", "pending"),
+        supabase.from("shareholder_voices").select("*", { count: "exact", head: true }).neq("status", "done"),
+        supabase.from("referral_rewards").select("*", { count: "exact", head: true }).eq("status", "pending"),
       ]);
       setPendingCount(pending ?? 0);
       setUnreadMessages(unread ?? 0);
       setPendingReschedules(resched ?? 0);
+      setEconomyCount((exch ?? 0) + (voice ?? 0) + (refer ?? 0));
     };
     fetchCounts();
     const timer = setInterval(fetchCounts, 60000);
@@ -146,7 +151,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   const badgeMap: Record<BadgeKey, number> = {
-    pending: pendingCount, unread: unreadMessages, resched: pendingReschedules,
+    pending: pendingCount, unread: unreadMessages, resched: pendingReschedules, economy: economyCount,
   };
   const leafBadge = (item: NavLeaf) => (item.badge ? badgeMap[item.badge] : 0);
   const visibleItems = (g: NavGroup) => g.items.filter((it) => {

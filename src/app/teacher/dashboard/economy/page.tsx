@@ -738,7 +738,7 @@ export default function TeacherEconomyPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-slate-400">
-                <th className="p-2 text-left">生徒</th><th className="p-2 text-right">保有AC</th><th className="p-2 text-right">投資中AC</th>
+                <th className="p-2 text-left">生徒</th><th className="p-2 text-right">保有AC</th><th className="p-2 text-right">投資中AC</th><th className="p-2 text-right"></th>
               </tr>
             </thead>
             <tbody>
@@ -749,6 +749,10 @@ export default function TeacherEconomyPage() {
                     <td className="p-2 font-semibold text-slate-700">{s.name}<span className="ml-1 text-xs text-slate-400">{s.grade}</span></td>
                     <td className="p-2 text-right text-emerald-600">{(w?.balance ?? 0).toLocaleString()}</td>
                     <td className="p-2 text-right text-amber-600">{(w?.locked_balance ?? 0).toLocaleString()}</td>
+                    <td className="p-2 text-right">
+                      <Link href={`/teacher/dashboard/economy/preview?student=${s.id}`}
+                        className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-indigo-600 hover:bg-indigo-50">👁 見る</Link>
+                    </td>
                   </tr>
                 );
               })}

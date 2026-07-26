@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { holdingValuation } from "@/lib/classStock";
@@ -38,9 +39,10 @@ const EARN_EMOJI: Record<string, string> = {
 };
 const PENALTY_HINTS = ["宿題未提出", "忘れ物", "遅刻", "テスト不合格", "私語", "こっそりスマホ", "こっそり息抜き", "ちょっと良くない"];
 
-export default function EconomyPreviewPage() {
+function EconomyPreviewInner() {
+  const params = useSearchParams();
   const [students, setStudents] = useState<Student[]>([]);
-  const [studentId, setStudentId] = useState("");
+  const [studentId, setStudentId] = useState(params.get("student") ?? "");
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [view, setView] = useState<"student" | "parent">("student");
   const [loading, setLoading] = useState(false);
@@ -291,4 +293,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 function Empty({ text }: { text: string }) {
   return <p className="text-sm text-slate-400">{text}</p>;
+}
+
+export default function EconomyPreviewPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-slate-400">読み込み中…</div>}>
+      <EconomyPreviewInner />
+    </Suspense>
+  );
 }

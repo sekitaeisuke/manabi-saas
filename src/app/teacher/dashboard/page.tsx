@@ -15,6 +15,9 @@ type Counts = {
   pendingDiagnoses: number;
   draftReports: number;
   concerns: number;
+  economyApprovals: number;
+  economyVoices: number;
+  economyReferrals: number;
 };
 
 type ActivityItem = {
@@ -86,6 +89,9 @@ export default function TeacherDashboardPage() {
       { count: pendingDiagnoses },
       { count: draftReports },
       { count: concerns },
+      { count: ecoApprovals },
+      { count: ecoVoices },
+      { count: ecoReferrals },
     ] = await Promise.all([
       supabase.from("reschedule_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("parent_messages").select("*", { count: "exact", head: true }).eq("status", "unread").eq("direction", "parent_to_teacher"),
@@ -93,6 +99,9 @@ export default function TeacherDashboardPage() {
       supabase.from("questionnaire_responses").select("*", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("lesson_reports").select("*", { count: "exact", head: true }).eq("status", "draft"),
       supabase.from("collaboration_tasks").select("*", { count: "exact", head: true }).eq("status", "open"),
+      supabase.from("reward_exchanges").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      supabase.from("shareholder_voices").select("*", { count: "exact", head: true }).neq("status", "done"),
+      supabase.from("referral_rewards").select("*", { count: "exact", head: true }).eq("status", "pending"),
     ]);
     setCounts({
       pendingReschedules: pendingReschedules ?? 0,
@@ -101,6 +110,9 @@ export default function TeacherDashboardPage() {
       pendingDiagnoses: pendingDiagnoses ?? 0,
       draftReports: draftReports ?? 0,
       concerns: concerns ?? 0,
+      economyApprovals: ecoApprovals ?? 0,
+      economyVoices: ecoVoices ?? 0,
+      economyReferrals: ecoReferrals ?? 0,
     });
 
     // ── A: 今日授業する生徒 × カルテ ──
@@ -226,6 +238,9 @@ export default function TeacherDashboardPage() {
     { label: "未分析の診断", count: counts.pendingDiagnoses, href: "/teacher/dashboard/diagnosis" },
     { label: "未送信の報告書", count: counts.draftReports, href: "/teacher/dashboard/reports" },
     { label: "気がかりな生徒", count: counts.concerns, href: "/teacher/dashboard/collaboration" },
+    { label: "報酬交換の承認", count: counts.economyApprovals, href: "/teacher/dashboard/economy" },
+    { label: "株主の声", count: counts.economyVoices, href: "/teacher/dashboard/economy" },
+    { label: "友達紹介の申請", count: counts.economyReferrals, href: "/teacher/dashboard/economy" },
   ].filter((i) => i.count > 0) : [];
 
   return (
