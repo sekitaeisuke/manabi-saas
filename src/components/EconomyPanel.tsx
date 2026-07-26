@@ -385,10 +385,10 @@ export function EconomyPanel({ student }: { student: Student }) {
         </div>
         <p className="mt-2 text-[11px] text-slate-400">※ 破産防止のため、投資はウォレット全体の50%までに制限されています。</p>
 
-        {/* 教室の応援金（みんなの投資＝教室の充実） */}
+        {/* 教室の応援AC（みんなの投資＝教室の充実） */}
         <div className="mt-4 rounded-2xl bg-indigo-50 p-4">
           <div className="flex items-end justify-between">
-            <p className="text-sm font-bold text-indigo-900">🏫 この教室の応援金</p>
+            <p className="text-sm font-bold text-indigo-900">🏫 この教室の応援AC</p>
             <p className="text-xl font-extrabold text-indigo-700 tabular-nums">{ownSupport.toLocaleString()} <span className="text-xs font-semibold text-indigo-400">AC</span></p>
           </div>
           <p className="mt-1 text-[11px] text-indigo-700/80">

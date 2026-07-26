@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     svc.from("student_wallets").select("student_id, locked_balance"),
   ]);
 
-  // 教室の「応援金」＝在籍生徒の投資運用中AC(locked)の合計
+  // 教室の「応援AC」＝在籍生徒の投資運用中AC(locked)の合計
   const schoolOfStudent = new Map((students ?? []).map((s) => [s.id as string, s.school_id as string | null]));
   const support: Record<string, number> = {};
   for (const w of wallets ?? []) {
