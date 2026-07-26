@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
@@ -281,9 +282,13 @@ export default function TeacherEconomyPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">塾内経済（アカデミーコイン・自塾株）</h1>
-        <p className="text-sm text-slate-500">AC はゲーム内ポイントで現金価値はありません。生徒の学習・貢献・成長で自塾株が動きます。</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">塾内経済（アカデミーコイン・自塾株）</h1>
+          <p className="text-sm text-slate-500">AC はゲーム内ポイントで現金価値はありません。生徒の学習・貢献・成長で自塾株が動きます。</p>
+        </div>
+        <Link href="/teacher/dashboard/economy/preview"
+          className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700">🔍 生徒/保護者プレビュー</Link>
       </div>
 
       {/* 自塾株の株価 & 週次計算 */}
