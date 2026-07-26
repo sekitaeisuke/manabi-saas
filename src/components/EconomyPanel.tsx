@@ -20,6 +20,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 type Txn = { id: string; amount: number; type: string; description: string; created_at: string };
 type SchoolRow = { id: string; name: string; price: number; support: number };
+type MyReferral = { id: string; friend_name: string; status: string; created_at: string };
 type Benchmark = { name: string; price: number; prev_price: number | null; note: string | null };
 type EarnRule = { event_key: string; label: string; points: number };
 
@@ -31,6 +32,21 @@ const PENALTY_HINTS = [
 const EARN_EMOJI: Record<string, string> = {
   attend: "🏫", testpass: "💯", manabi: "📗", clean: "🧹", report: "📝", refer: "🤝", refereed: "🎁",
 };
+
+// チェックインの連続日数（今日 or 昨日から遡って連続している日数）
+function computeStreak(dates: string[]): number {
+  if (dates.length === 0) return 0;
+  const set = new Set(dates);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const cur = new Date();
+  if (!set.has(iso(cur))) {
+    cur.setDate(cur.getDate() - 1);
+    if (!set.has(iso(cur))) return 0;
+  }
+  let n = 0;
+  while (set.has(iso(cur))) { n++; cur.setDate(cur.getDate() - 1); }
+  return n;
+}
 
 const TYPE_LABEL: Record<string, string> = {
   EARN_CHECKIN: "チェックイン", EARN_TASK: "課題", EARN_TEST: "テスト",
@@ -53,10 +69,13 @@ export function EconomyPanel({ student }: { student: Student }) {
   const [qty, setQty] = useState(1);
   const [voiceText, setVoiceText] = useState("");
   const [voiceSent, setVoiceSent] = useState(false);
+  const [myReferrals, setMyReferrals] = useState<MyReferral[]>([]);
+  const [friendName, setFriendName] = useState("");
+  const [streak, setStreak] = useState(0);
 
   const load = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const [w, h, ci, tx, chartRes, rw, lb, rl] = await Promise.all([
+    const [w, h, ci, tx, chartRes, rw, lb, rl, ref, streakRows] = await Promise.all([
       supabase.from("student_wallets").select("balance, locked_balance").eq("student_id", student.id).maybeSingle(),
       supabase.from("class_stock_holdings").select("shares, avg_price").eq("student_id", student.id).maybeSingle(),
       supabase.from("check_ins").select("id").eq("student_id", student.id).eq("checkin_on", today).maybeSingle(),
@@ -66,6 +85,10 @@ export function EconomyPanel({ student }: { student: Student }) {
       authFetch("/api/economy/reward").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       authFetch("/api/stock/leaderboard").then((r) => (r.ok ? r.json() : null)).catch(() => null),
       authFetch("/api/economy/rules").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      supabase.from("referral_rewards").select("id, friend_name, status, created_at")
+        .eq("referrer_student_id", student.id).order("created_at", { ascending: false }).limit(10),
+      supabase.from("check_ins").select("checkin_on").eq("student_id", student.id)
+        .order("checkin_on", { ascending: false }).limit(60),
     ]);
     if (w.data) setWallet(w.data as Wallet);
     setHolding((h.data as Holding) ?? { shares: 0, avg_price: 0 });
@@ -78,6 +101,8 @@ export function EconomyPanel({ student }: { student: Student }) {
     if (rw?.items) setRewards(rw.items as Reward[]);
     if (lb) { setSchools((lb.schools as SchoolRow[]) ?? []); setBenchmarks((lb.benchmarks as Benchmark[]) ?? []); }
     if (rl?.rules) setEarnRules(rl.rules as EarnRule[]);
+    setMyReferrals((ref.data as MyReferral[]) ?? []);
+    setStreak(computeStreak(((streakRows.data as { checkin_on: string }[]) ?? []).map((r) => r.checkin_on)));
     setLoading(false);
   }, [student.id]);
 
@@ -88,6 +113,15 @@ export function EconomyPanel({ student }: { student: Student }) {
   const maxBuy = maxBuyableShares(wallet.balance, wallet.locked_balance, price);
   const netWorth = wallet.balance + val.marketValue;
   const ownSupport = schools.find((s) => s.id === student.school_id)?.support ?? 0;
+  const referAmount = earnRules.find((r) => r.event_key === "refer")?.points ?? 1000;
+  const refereedAmount = earnRules.find((r) => r.event_key === "refereed")?.points ?? 100;
+  // 次のごほうび＝いま買えない一番安い商品（頑張る目標）
+  const nextReward = useMemo(() => {
+    const cands = rewards.filter((r) => r.cost > wallet.balance && (r.min_shares ?? 0) <= holding.shares)
+      .sort((a, b) => a.cost - b.cost);
+    return cands[0] ?? null;
+  }, [rewards, wallet.balance, holding.shares]);
+  const refStatusLabel: Record<string, string> = { pending: "先生が確認中", enrolled: `入塾確定！＋${referAmount} AC 🎉`, completed: "完了 🎉" };
 
   const points: StockPoint[] = useMemo(() => {
     const hist = chart.history.map((r) => ({
@@ -146,6 +180,22 @@ export function EconomyPanel({ student }: { student: Student }) {
     load();
   }
 
+  async function submitReferral() {
+    if (!friendName.trim()) return;
+    setBusy(true);
+    const r = await authFetch("/api/economy/referral/submit", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ friend_name: friendName.trim() }),
+    });
+    const d = await r.json().catch(() => ({}));
+    setBusy(false);
+    if (!r.ok || d.ok === false) return showToast(d.error ?? "送信に失敗しました", "error");
+    showToast("紹介を先生に伝えました！", "success");
+    triggerConfetti();
+    setFriendName("");
+    load();
+  }
+
   async function submitVoice() {
     if (!voiceText.trim()) return;
     setBusy(true);
@@ -190,8 +240,11 @@ export function EconomyPanel({ student }: { student: Student }) {
       {/* チェックイン */}
       <div className="flex items-center justify-between rounded-3xl border border-emerald-100 bg-emerald-50/50 p-5">
         <div>
-          <p className="text-sm font-bold text-emerald-800">今日のチェックイン</p>
-          <p className="text-xs text-emerald-700/80">毎日ログインで AC がもらえます</p>
+          <p className="text-sm font-bold text-emerald-800">
+            今日のチェックイン
+            {streak > 0 && <span className="ml-2 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-extrabold text-orange-600">🔥 {streak}日連続</span>}
+          </p>
+          <p className="text-xs text-emerald-700/80">{streak >= 2 ? "連続記録がのびてるよ！明日も続けよう" : "毎日ログインで AC がもらえます"}</p>
         </div>
         <button
           onClick={checkin}
@@ -215,6 +268,21 @@ export function EconomyPanel({ student }: { student: Student }) {
             のこり {wallet.balance.toLocaleString()} AC
           </p>
         </div>
+
+        {/* 次のごほうびまで（がんばる目標） */}
+        {nextReward && (
+          <div className="mb-4 rounded-2xl bg-white/80 p-3">
+            <div className="mb-1 flex items-center justify-between text-xs font-bold">
+              <span className="text-slate-700">🎯 次のごほうび「{nextReward.title}」まで</span>
+              <span className="text-amber-600">あと {(nextReward.cost - wallet.balance).toLocaleString()} AC</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-amber-100">
+              <div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.min(100, Math.round((wallet.balance / nextReward.cost) * 100))}%` }} />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">あと少し！ 出席・テスト・まなびでコツコツ貯めよう</p>
+          </div>
+        )}
+
         {rewards.length === 0 ? (
           <p className="rounded-2xl bg-white/70 px-4 py-6 text-center text-sm text-slate-400">
             いまは商品がありません
@@ -254,6 +322,46 @@ export function EconomyPanel({ student }: { student: Student }) {
               );
             })}
           </div>
+        )}
+      </div>
+
+      {/* 🤝 友達を紹介しよう（一番大きく稼げる！） */}
+      <div className="overflow-hidden rounded-3xl border border-pink-200 bg-gradient-to-br from-pink-50 via-rose-50 to-amber-50 p-6 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-base font-extrabold text-rose-700">🤝 友達をさそって ＋{referAmount.toLocaleString()} AC！</p>
+            <p className="mt-1 text-xs text-rose-700/80">
+              友達が体験に来て入塾したら、キミに <b className="text-rose-600">{referAmount.toLocaleString()} AC</b>、
+              友達にも <b className="text-rose-600">{refereedAmount.toLocaleString()} AC</b> プレゼント！ 一番大きく稼げるチャンス。
+            </p>
+          </div>
+          <span className="hidden shrink-0 text-4xl sm:block">🎁</span>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            value={friendName} onChange={(e) => setFriendName(e.target.value)}
+            maxLength={40} placeholder="紹介したい友達の名前"
+            className="min-w-0 flex-1 rounded-2xl border border-rose-200 bg-white px-4 py-2.5 text-sm outline-none focus:border-rose-400"
+          />
+          <button onClick={submitReferral} disabled={busy || !friendName.trim()}
+            className="rounded-2xl bg-rose-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-rose-600 disabled:bg-slate-200 disabled:text-slate-400">
+            先生に伝える
+          </button>
+        </div>
+        <p className="mt-1.5 text-[11px] text-rose-500/80">名前を伝えると先生が確認します。入塾が決まったらACが入るよ。</p>
+
+        {myReferrals.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {myReferrals.map((rf) => (
+              <li key={rf.id} className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-1.5 text-xs">
+                <span className="font-semibold text-slate-700">{rf.friend_name}</span>
+                <span className={`font-bold ${rf.status === "pending" ? "text-slate-400" : "text-rose-600"}`}>
+                  {refStatusLabel[rf.status] ?? rf.status}
+                </span>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
