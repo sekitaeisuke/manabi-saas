@@ -28,7 +28,14 @@ const CONTRIB_KINDS = [
   { key: "rule", label: "自習室ルール遵守" }, { key: "help", label: "仲間のサポート" },
 ] as const;
 const NEG_KINDS = [
-  { key: "tardy", label: "無断遅刻" }, { key: "homework_missing", label: "宿題未提出" },
+  { key: "homework_missing", label: "宿題未提出" },
+  { key: "forgot_item", label: "忘れ物" },
+  { key: "tardy", label: "遅刻" },
+  { key: "test_fail", label: "テスト不合格" },
+  { key: "chatting", label: "私語" },
+  { key: "sneaky_phone", label: "こっそりスマホ" },
+  { key: "slacking", label: "こっそり息抜き" },
+  { key: "minor_bad", label: "ちょっと良くない" },
 ] as const;
 
 export default function TeacherEconomyPage() {
