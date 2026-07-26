@@ -17,6 +17,7 @@ type Snapshot = {
   rewards: { id: string; title: string; description: string; cost: number; stock: number | null; category: string | null; min_shares: number | null }[];
   rules: { event_key: string; label: string; points: number }[];
   voices: { id: string; message: string; status: string; created_at: string; shares: number | null }[];
+  referrals: { id: string; friend_name: string; status: string; created_at: string }[];
   history: { price: number; calculated_at: string }[];
 };
 
@@ -70,6 +71,10 @@ export default function EconomyPreviewPage() {
     hist.push({ price, label: "現在" });
     return hist;
   }, [snap, price]);
+  const referAmount = snap?.rules.find((r) => r.event_key === "refer")?.points ?? 1000;
+  const refereedAmount = snap?.rules.find((r) => r.event_key === "refereed")?.points ?? 100;
+  const nextReward = snap ? snap.rewards.filter((r) => r.cost > snap.wallet.balance && (r.min_shares ?? 0) <= snap.holding.shares).sort((a, b) => a.cost - b.cost)[0] : null;
+  const refStatusLabel: Record<string, string> = { pending: "先生が確認中", enrolled: `入塾確定！＋${referAmount} AC`, completed: "完了" };
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4">
@@ -118,6 +123,17 @@ export default function EconomyPreviewPage() {
               <>
                 {/* 商店 */}
                 <Section title="🛒 ポイント商店">
+                  {nextReward && (
+                    <div className="mb-3 rounded-2xl bg-amber-50 p-3">
+                      <div className="mb-1 flex items-center justify-between text-xs font-bold">
+                        <span className="text-slate-700">🎯 次のごほうび「{nextReward.title}」まで</span>
+                        <span className="text-amber-600">あと {(nextReward.cost - snap.wallet.balance).toLocaleString()} AC</span>
+                      </div>
+                      <div className="h-2.5 overflow-hidden rounded-full bg-amber-100">
+                        <div className="h-full rounded-full bg-amber-400" style={{ width: `${Math.min(100, Math.round((snap.wallet.balance / nextReward.cost) * 100))}%` }} />
+                      </div>
+                    </div>
+                  )}
                   {snap.rewards.length === 0 ? <Empty text="いまは商品がありません" /> : (
                     <div className="grid gap-2 sm:grid-cols-2">
                       {snap.rewards.map((r) => (
@@ -134,6 +150,22 @@ export default function EconomyPreviewPage() {
                     </div>
                   )}
                 </Section>
+
+                {/* 友達紹介 */}
+                <div className="overflow-hidden rounded-3xl border border-pink-200 bg-gradient-to-br from-pink-50 via-rose-50 to-amber-50 p-5">
+                  <p className="text-base font-extrabold text-rose-700">🤝 友達をさそって ＋{referAmount.toLocaleString()} AC！</p>
+                  <p className="mt-1 text-xs text-rose-700/80">入塾したらキミに {referAmount.toLocaleString()} AC・友達にも {refereedAmount.toLocaleString()} AC。生徒画面では「先生に伝える」ボタンから申請できます。</p>
+                  {snap.referrals.length > 0 && (
+                    <ul className="mt-3 space-y-1.5">
+                      {snap.referrals.map((rf) => (
+                        <li key={rf.id} className="flex items-center justify-between rounded-xl bg-white/70 px-3 py-1.5 text-xs">
+                          <span className="font-semibold text-slate-700">{rf.friend_name}</span>
+                          <span className="font-bold text-rose-600">{refStatusLabel[rf.status] ?? rf.status}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
 
                 {/* 増減 */}
                 <Section title="AC の増やし方・減り方">

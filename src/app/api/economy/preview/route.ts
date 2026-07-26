@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     .eq("active", true).order("cost", { ascending: true });
   shopQ = schoolId ? shopQ.or(`school_id.is.null,school_id.eq.${schoolId}`) : shopQ.is("school_id", null);
 
-  const [w, h, tx, ex, rw, rules, voices, school, hist, students, wallets] = await Promise.all([
+  const [w, h, tx, ex, rw, rules, voices, referrals, school, hist, students, wallets] = await Promise.all([
     svc.from("student_wallets").select("balance, locked_balance").eq("student_id", studentId).maybeSingle(),
     svc.from("class_stock_holdings").select("shares, avg_price").eq("student_id", studentId).maybeSingle(),
     svc.from("ac_transactions").select("id, amount, type, description, created_at")
@@ -34,6 +34,8 @@ export async function GET(req: NextRequest) {
     svc.from("ac_rules").select("event_key, label, points").eq("enabled", true).gt("points", 0),
     svc.from("shareholder_voices").select("id, message, status, created_at, shares")
       .eq("student_id", studentId).order("created_at", { ascending: false }).limit(20),
+    svc.from("referral_rewards").select("id, friend_name, status, created_at")
+      .eq("referrer_student_id", studentId).order("created_at", { ascending: false }).limit(10),
     schoolId ? svc.from("schools").select("name, current_stock_price").eq("id", schoolId).maybeSingle() : Promise.resolve({ data: null }),
     schoolId ? svc.from("class_stock_history").select("price, calculated_at").eq("school_id", schoolId).order("calculated_at", { ascending: true }).limit(52) : Promise.resolve({ data: [] }),
     schoolId ? svc.from("students").select("id").eq("school_id", schoolId) : Promise.resolve({ data: [] }),
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest) {
     rewards: rw.data ?? [],
     rules: (rules.data ?? []).sort((a, b) => b.points - a.points),
     voices: voices.data ?? [],
+    referrals: referrals.data ?? [],
     history: hist.data ?? [],
   });
 }
