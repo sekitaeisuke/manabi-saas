@@ -344,6 +344,7 @@ export default function ReportsPage() {
   const [filter, setFilter] = useState<"all" | "draft" | "sent">("all");
   const [studentFilter, setStudentFilter] = useState<string>("all");
   const [showManualForm, setShowManualForm] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
   const [latestProg, setLatestProg] = useState<{ byId: Map<string, ProgressRow>; byName: Map<string, ProgressRow> }>(
     { byId: new Map(), byName: new Map() }
   );
@@ -384,6 +385,19 @@ export default function ReportsPage() {
   const handleUpdated = (updated: LessonReport) => {
     setReports((prev) => prev.map((r) => r.id === updated.id ? updated : r));
     setSelected(updated);
+  };
+
+  // 一覧から1クリックで保護者に送信（開かずに送れる）
+  const sendOne = async (r: LessonReport) => {
+    if (!r.report_html) { showToast("本文が未生成です。開いて編集してから送信してください", "info"); return; }
+    if (!confirm(`${r.student_name} の報告書を保護者に送信します。よろしいですか？`)) return;
+    setSendingId(r.id);
+    const { error } = await supabase.from("lesson_reports").update({ status: "sent" }).eq("id", r.id);
+    setSendingId(null);
+    if (error) { showToast(error.message, "error"); return; }
+    setReports((prev) => prev.map((x) => x.id === r.id ? { ...x, status: "sent" } : x));
+    showToast(`${r.student_name} の報告書を送信しました`, "success");
+    triggerConfetti();
   };
 
   if (selected) {
@@ -546,14 +560,22 @@ export default function ReportsPage() {
                       </p>
                     )}
                   </div>
-                  <button onClick={() => setSelected(r)}
-                    className={`shrink-0 rounded-2xl px-5 py-2.5 text-sm font-semibold transition shadow-sm ${
-                      r.status === "sent"
-                        ? "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
-                        : "bg-indigo-600 text-white hover:bg-indigo-700"
-                    }`}>
-                    {r.status === "sent" ? "確認する" : "開いて編集"}
-                  </button>
+                  <div className="flex shrink-0 flex-col gap-2">
+                    <button onClick={() => setSelected(r)}
+                      className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition shadow-sm ${
+                        r.status === "sent"
+                          ? "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                          : "bg-indigo-600 text-white hover:bg-indigo-700"
+                      }`}>
+                      {r.status === "sent" ? "確認する" : "開いて編集"}
+                    </button>
+                    {r.status === "draft" && r.report_html && (
+                      <button onClick={() => sendOne(r)} disabled={sendingId === r.id}
+                        className="rounded-2xl border border-emerald-300 bg-emerald-50 px-5 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50">
+                        {sendingId === r.id ? "送信中…" : "✓ 送信"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

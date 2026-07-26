@@ -57,12 +57,14 @@ function daysSince(date: string | null): number | null {
 }
 
 const QUICK_ACTIONS = [
-  { title: "生徒・講師管理", desc: "生徒一覧から操作卓へ", href: "/teacher/dashboard/schools" },
-  { title: "来塾カレンダー", desc: "来塾予定・テスト割当・授業", href: "/teacher/dashboard/calendar" },
-  { title: "診断テスト作成", desc: "AIで問題生成しURLで配布", href: "/teacher/dashboard/tests" },
-  { title: "多層診断", desc: "学力・学習習慣・学習の質", href: "/teacher/dashboard/diagnosis" },
+  { title: "テスト作成", desc: "AIでボタン1つで問題作成・配布", href: "/teacher/dashboard/tests" },
+  { title: "報告書を書く", desc: "手動作成・未送信の送信", href: "/teacher/dashboard/reports" },
+  { title: "教材進捗を入力", desc: "何をどこまで・理解度", href: "/teacher/dashboard/progress" },
   { title: "カルテ（日次）", desc: "現状＋今日やることの一覧・一括生成", href: "/teacher/dashboard/karte-daily" },
+  { title: "生徒・講師管理", desc: "生徒一覧から操作卓へ", href: "/teacher/dashboard/schools" },
   { title: "メッセージ", desc: "保護者・生徒との連絡", href: "/teacher/dashboard/messages" },
+  { title: "多層診断", desc: "学力・学習習慣・学習の質", href: "/teacher/dashboard/diagnosis" },
+  { title: "塾内経済（AC・株）", desc: "承認・株主の声・株価", href: "/teacher/dashboard/economy" },
 ];
 
 export default function TeacherDashboardPage() {

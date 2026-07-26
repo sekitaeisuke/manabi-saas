@@ -657,6 +657,38 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     setGenerating(false);
   };
 
+  // ①ChatGPTで作成 →②Claudeで完成 を1ボタンで一気通貫（手数削減）
+  const generateAll = async () => {
+    if (!title) { showToast("テスト名を入力してください", "info"); return; }
+    if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
+    if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
+    setGenerating(true); setErrorMsg(""); setAiStep("idle");
+    const hdr = { "Content-Type": "application/json" };
+    try {
+      // step1: ChatGPT
+      const r1 = await authFetch("/api/generate/chatgpt", { method: "POST", headers: hdr,
+        body: JSON.stringify({ testType, title, subject, grade, selectedUnits, difficulties, count, instructions }) });
+      const d1 = await r1.json().catch(() => null);
+      if (!d1 || d1.error) { setErrorMsg(`[chatgpt] ${d1?.error ?? `サーバーエラー (HTTP ${r1.status})`}`); setGenerating(false); return; }
+      const q1 = (d1.questions as GeneratedQuestion[]) ?? [];
+      if (d1.html) setGeneratedHtml(d1.html as string);
+      if (q1.length) setQuestions(q1);
+      setAiStep("chatgpt");
+      // step2: Claude（chatgptの結果 q1 をそのまま使う）
+      const r2 = await authFetch("/api/generate/claude", { method: "POST", headers: hdr,
+        body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q1 }) });
+      const d2 = await r2.json().catch(() => null);
+      if (!d2 || d2.error) { setErrorMsg(`[claude] ${d2?.error ?? `サーバーエラー (HTTP ${r2.status})`}`); setGenerating(false); return; }
+      if (d2.html) setGeneratedHtml(d2.html as string);
+      if (d2.questions) setQuestions(d2.questions as GeneratedQuestion[]);
+      setAiStep("claude");
+      setPhase("preview");
+    } catch (e) {
+      setErrorMsg(`AI生成エラー: ${String(e)}`);
+    }
+    setGenerating(false);
+  };
+
   const startAnswers = () => {
     const init: Record<string, string> = {};
     questions.forEach((q) => { init[q.id] = ""; });
@@ -1073,20 +1105,28 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
 
         {/* AI生成フロー */}
         <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <h2 className="mb-2 text-xl font-semibold">AI生成フロー</h2>
-          <p className="mb-5 text-sm text-slate-500">ステップ順に実行してHTMLテストを完成させてください</p>
-          <div className="space-y-3">
-            <AiStepButton step="chatgpt" label="ChatGPTで作成" desc="選択単元・難易度に合わせたHTMLテストを生成"
-              color="slate" done={stepDone("chatgpt")} num="1"
-              disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
-              loading={generating && aiStep === "idle"}
-              onClick={() => generate("chatgpt")} />
-            <AiStepButton step="claude" label="Claudeで完成" desc="表現・配点・HTMLの最終仕上げ"
-              color="purple" done={stepDone("claude")} num="2"
-              disabled={generating || !stepDone("chatgpt")}
-              loading={generating && aiStep === "chatgpt"}
-              onClick={() => generate("claude")} />
-          </div>
+          <h2 className="mb-2 text-xl font-semibold">AIで作成</h2>
+          <p className="mb-5 text-sm text-slate-500">ボタン1つで問題を作成します（AIが下書き→仕上げまで自動）</p>
+          <button onClick={generateAll}
+            disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
+            className="w-full rounded-2xl bg-indigo-600 px-6 py-4 text-lg font-bold text-white transition hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
+            {generating ? (aiStep === "chatgpt" ? "AIが仕上げ中…" : "AIが作成中…") : "🤖 AIでテストを作成"}
+          </button>
+          <details className="mt-3">
+            <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">1ステップずつ実行する（上級者向け）</summary>
+            <div className="mt-2 space-y-3">
+              <AiStepButton step="chatgpt" label="ChatGPTで作成" desc="選択単元・難易度に合わせたHTMLテストを生成"
+                color="slate" done={stepDone("chatgpt")} num="1"
+                disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
+                loading={generating && aiStep === "idle"}
+                onClick={() => generate("chatgpt")} />
+              <AiStepButton step="claude" label="Claudeで完成" desc="表現・配点・HTMLの最終仕上げ"
+                color="purple" done={stepDone("claude")} num="2"
+                disabled={generating || !stepDone("chatgpt")}
+                loading={generating && aiStep === "chatgpt"}
+                onClick={() => generate("claude")} />
+            </div>
+          </details>
           {generating && (
             <div className="mt-4 text-center text-sm text-slate-500 animate-pulse">
               AIが処理中です。しばらくお待ちください...
@@ -1115,7 +1155,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             <li className="flex gap-2"><span className="text-slate-400">2.</span>テスト名・科目・学年を入力</li>
             <li className="flex gap-2"><span className="text-slate-400">3.</span>出題単元をチェック</li>
             <li className="flex gap-2"><span className="text-slate-400">4.</span>難易度を選択</li>
-            <li className="flex gap-2"><span className="text-slate-400">5.</span>AI生成（3ステップ）</li>
+            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す</li>
             <li className="flex gap-2"><span className="text-slate-400">6.</span>HTMLプレビューで確認</li>
             <li className="flex gap-2"><span className="text-slate-400">7.</span>解答を入力して分析</li>
             <li className="flex gap-2"><span className="text-slate-400">8.</span>レポートを印刷・保存</li>
