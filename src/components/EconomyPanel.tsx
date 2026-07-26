@@ -20,7 +20,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 type Txn = { id: string; amount: number; type: string; description: string; created_at: string };
 type SchoolRow = { id: string; name: string; price: number };
-type Benchmark = { name: string; price: number; note: string | null };
+type Benchmark = { name: string; price: number; prev_price: number | null; note: string | null };
 
 const TYPE_LABEL: Record<string, string> = {
   EARN_CHECKIN: "チェックイン", EARN_TASK: "課題", EARN_TEST: "テスト",
@@ -86,8 +86,9 @@ export function EconomyPanel({ student }: { student: Student }) {
   // 株価ランキング（自塾各教室＋ライバル塾）。自塾は投資可、ライバルは目標(投資不可)。
   const ranking = useMemo(() => {
     const rows = [
-      ...schools.map((s) => ({ name: s.name, price: s.price, kind: "school" as const, own: s.id === student.school_id })),
-      ...benchmarks.map((b) => ({ name: b.name, price: b.price, kind: "rival" as const, own: false })),
+      ...schools.map((s) => ({ name: s.name, price: s.price, kind: "school" as const, own: s.id === student.school_id, change: 0 })),
+      ...benchmarks.map((b) => ({ name: b.name, price: b.price, kind: "rival" as const, own: false,
+        change: b.prev_price == null ? 0 : b.price - b.prev_price })),
     ].sort((a, b) => b.price - a.price);
     const maxP = Math.max(price, ...rows.map((r) => r.price), 1);
     return { rows, maxP };
@@ -222,8 +223,12 @@ export function EconomyPanel({ student }: { student: Student }) {
                   <div className="relative h-6 flex-1 overflow-hidden rounded-lg bg-slate-100">
                     <div className={`h-full rounded-lg ${barCls} ${isRival ? "opacity-70" : ""}`} style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="w-16 shrink-0 text-right text-xs font-bold tabular-nums text-slate-700">
-                    {r.price.toLocaleString()}
+                  <div className="w-20 shrink-0 text-right text-xs font-bold tabular-nums text-slate-700">
+                    {r.change !== 0 && (
+                      <span className={r.change > 0 ? "text-emerald-600" : "text-red-500"}>
+                        {r.change > 0 ? "▲" : "▼"}
+                      </span>
+                    )}{" "}{r.price.toLocaleString()}
                   </div>
                 </div>
               );

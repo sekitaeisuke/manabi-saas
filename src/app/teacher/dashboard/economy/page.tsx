@@ -16,7 +16,7 @@ type ReferralRow = {
   friend_name: string; friend_student_id: string | null; status: string; created_at: string;
 };
 type ScanResult = { dry: boolean; total_count: number; total_ac: number; detail: Record<string, { count: number; ac: number }> };
-type Benchmark = { id: string; name: string; price: number; note: string | null; active: boolean };
+type Benchmark = { id: string; name: string; price: number; note: string | null; active: boolean; auto_move: boolean; volatility: number };
 type CalcResult = {
   school_id: string; school_name: string;
   prev_price: number; new_price: number; change_rate: number;
@@ -88,7 +88,7 @@ export default function TeacherEconomyPage() {
       supabase.from("referral_rewards")
         .select("id, referrer_student_id, referrer_name, friend_name, friend_student_id, status, created_at")
         .order("created_at", { ascending: false }).limit(50),
-      supabase.from("stock_benchmarks").select("id, name, price, note, active").order("sort_order"),
+      supabase.from("stock_benchmarks").select("id, name, price, note, active, auto_move, volatility").order("sort_order"),
     ]);
     setStudents((st.data as Student[]) ?? []);
     setSchools((sc.data as School[]) ?? []);
@@ -192,7 +192,8 @@ export default function TeacherEconomyPage() {
     const next = { ...b, ...patch };
     setBenchmarks((prev) => prev.map((x) => (x.id === b.id ? next : x)));
     const { error } = await supabase.from("stock_benchmarks")
-      .update({ name: next.name, price: next.price, active: next.active }).eq("id", b.id);
+      .update({ name: next.name, price: next.price, active: next.active, auto_move: next.auto_move, volatility: next.volatility })
+      .eq("id", b.id);
     if (error) showToast(error.message, "error");
   }
 
@@ -329,7 +330,7 @@ export default function TeacherEconomyPage() {
       {/* ライバル塾（目標株価） */}
       <section className="rounded-3xl border border-amber-100 bg-amber-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-amber-900">ライバル塾（目標株価）</h2>
-        <p className="mb-3 text-xs text-amber-700/80">生徒の「経済」タブに🎯目標として表示されます（投資は自塾のみ・ライバルは表示専用）。目標株価は自由に設定してください。</p>
+        <p className="mb-3 text-xs text-amber-700/80">生徒の「経済」タブに🎯目標として表示（投資は自塾のみ）。<b>自動変動</b>ONにすると、週次計算のたびに「変動幅」の範囲でライバルも上下します。</p>
         {benchmarks.length === 0 ? (
           <p className="text-sm text-slate-400">ライバル塾がありません（class-stock-benchmarks-setup.sql を実行してください）</p>
         ) : (
@@ -343,6 +344,15 @@ export default function TeacherEconomyPage() {
                   onChange={(e) => saveBenchmark(b, { price: Math.floor(Number(e.target.value) || 0) })}
                   className="w-28 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
                 <span className="text-xs text-slate-400">AC</span>
+                <label className="flex items-center gap-1 text-xs text-slate-600">
+                  <input type="checkbox" checked={b.auto_move} onChange={(e) => saveBenchmark(b, { auto_move: e.target.checked })}
+                    className="h-4 w-4 accent-amber-500" />自動変動
+                </label>
+                <span className="text-xs text-slate-400">変動幅±</span>
+                <input type="number" value={Math.round((b.volatility ?? 0) * 100)}
+                  onChange={(e) => saveBenchmark(b, { volatility: Math.max(0, Number(e.target.value) || 0) / 100 })}
+                  className="w-14 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
+                <span className="text-xs text-slate-400">%</span>
                 <label className="ml-auto flex items-center gap-1 text-xs text-slate-600">
                   <input type="checkbox" checked={b.active} onChange={(e) => saveBenchmark(b, { active: e.target.checked })}
                     className="h-4 w-4 accent-amber-500" />表示

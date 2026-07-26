@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin, isInternalCall } from "@/lib/apiAuth";
-import { computeNewPrice, type WeeklyAggregate } from "@/lib/classStock";
+import { computeNewPrice, STOCK_FLOOR, type WeeklyAggregate } from "@/lib/classStock";
 
 // 【週次 Cron】自塾株の株価アルゴリズムを校舎ごとに実行する。
 //   毎週日曜 23:59 に x-internal-secret 付きで叩く（Vercel Cron / 外部スケジューラ）。
@@ -102,5 +102,22 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ok: true, dry, calculated_at: new Date().toISOString(), schools: results });
+  // ライバル塾（ベンチマーク）も毎週すこし上下させる（自動変動ON のもの）。
+  const rivals: unknown[] = [];
+  const { data: benchmarks } = await svc
+    .from("stock_benchmarks").select("id, name, price, volatility, auto_move").eq("active", true);
+  for (const b of benchmarks ?? []) {
+    if (!b.auto_move) continue;
+    const vol = typeof b.volatility === "number" ? b.volatility : 0.04;
+    const swing = (Math.random() * 2 - 1) * vol;                 // -vol..+vol
+    const newPrice = Math.max(STOCK_FLOOR, Math.round((b.price ?? 0) * (1 + swing)));
+    if (!dry) {
+      await svc.from("stock_benchmarks")
+        .update({ prev_price: b.price, price: newPrice }).eq("id", b.id);
+    }
+    rivals.push({ name: b.name, prev_price: b.price, new_price: newPrice, change_rate: swing });
+  }
+
+  return NextResponse.json({ ok: true, dry, calculated_at: new Date().toISOString(), schools: results, rivals });
 }
+

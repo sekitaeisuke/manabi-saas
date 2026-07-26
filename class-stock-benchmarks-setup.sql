@@ -9,12 +9,20 @@
 CREATE TABLE IF NOT EXISTS stock_benchmarks (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,                 -- 表示名（例: M塾 / 月光G塾）
-  price       integer NOT NULL DEFAULT 0,    -- 目標株価(AC)
+  price       integer NOT NULL DEFAULT 0,    -- 現在の株価(AC)
+  prev_price  integer,                       -- 直前株価（▲▼表示用）
   note        text,                          -- ひとこと（例: 全員で目指すライバル）
   sort_order  integer NOT NULL DEFAULT 0,
   active      boolean NOT NULL DEFAULT true,
+  auto_move   boolean NOT NULL DEFAULT true,       -- 週次で自動変動するか
+  volatility  double precision NOT NULL DEFAULT 0.04, -- 1週間の上下の幅（0.04=±4%）
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- 既存テーブルにも列を追加（再実行で足りるように）
+ALTER TABLE stock_benchmarks ADD COLUMN IF NOT EXISTS prev_price integer;
+ALTER TABLE stock_benchmarks ADD COLUMN IF NOT EXISTS auto_move  boolean NOT NULL DEFAULT true;
+ALTER TABLE stock_benchmarks ADD COLUMN IF NOT EXISTS volatility double precision NOT NULL DEFAULT 0.04;
 
 -- seed（存在しなければ）。目標株価は仮の初期値。講師画面で編集してください。
 INSERT INTO stock_benchmarks (name, price, note, sort_order)

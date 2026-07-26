@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const [{ data: schools }, { data: benchmarks }] = await Promise.all([
     svc.from("schools").select("id, name, current_stock_price").order("current_stock_price", { ascending: false }),
-    svc.from("stock_benchmarks").select("name, price, note").eq("active", true).order("price", { ascending: true }),
+    svc.from("stock_benchmarks").select("name, price, prev_price, note").eq("active", true).order("price", { ascending: true }),
   ]);
 
   return NextResponse.json({
