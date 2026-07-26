@@ -55,6 +55,7 @@ export default function TeacherEconomyPage() {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"todo" | "config" | "status">("todo");
 
   // 紹介フォーム
   const [refStudent, setRefStudent] = useState("");
@@ -280,7 +281,16 @@ export default function TeacherEconomyPage() {
     load();
   }
 
+  const openVoices = voices.filter((v) => v.status !== "done").length;
+  const pendingRefs = referrals.filter((r) => r.status === "pending").length;
+
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">読み込み中…</div>;
+
+  const TABS: { key: "todo" | "config" | "status"; label: string }[] = [
+    { key: "todo", label: "📋 対応" },
+    { key: "config", label: "⚙ 設定" },
+    { key: "status", label: "📊 状況" },
+  ];
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4">
@@ -293,7 +303,44 @@ export default function TeacherEconomyPage() {
           className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700">🔍 生徒/保護者プレビュー</Link>
       </div>
 
+      {/* 要対応バー（今やることが一目でわかる） */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
+        <span className="mr-1 text-xs font-bold text-slate-400">要対応</span>
+        {([
+          { label: "交換承認", n: pending.length },
+          { label: "株主の声", n: openVoices },
+          { label: "紹介申請", n: pendingRefs },
+        ] as const).map((a) => (
+          <button key={a.label} onClick={() => setTab("todo")}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+              a.n > 0 ? "bg-rose-50 text-rose-600 hover:bg-rose-100" : "bg-slate-50 text-slate-400"
+            }`}>
+            {a.label}
+            <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 ${a.n > 0 ? "bg-rose-500 text-white" : "bg-slate-200 text-slate-500"}`}>{a.n}</span>
+          </button>
+        ))}
+        <button onClick={() => setTab("status")}
+          className="ml-auto rounded-full bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100">株価・週次計算 →</button>
+      </div>
+
+      {/* タブ */}
+      <div className="flex gap-2">
+        {TABS.map((t) => {
+          const badge = t.key === "todo" ? pending.length + openVoices + pendingRefs : 0;
+          return (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-bold transition ${
+                tab === t.key ? "bg-indigo-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}>
+              {t.label}
+              {badge > 0 && <span className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs ${tab === t.key ? "bg-white/25 text-white" : "bg-rose-500 text-white"}`}>{badge}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       {/* 自塾株の株価 & 週次計算 */}
+      {tab === "status" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-800">自塾株の株価</h2>
@@ -345,8 +392,10 @@ export default function TeacherEconomyPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* ライバル塾（目標株価） */}
+      {tab === "config" && (
       <section className="rounded-3xl border border-amber-100 bg-amber-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-amber-900">ライバル塾（目標株価）</h2>
         <p className="mb-3 text-xs text-amber-700/80">生徒の「経済」タブに🎯目標として表示（投資は自塾のみ）。<b>自動変動</b>ONにすると、週次計算のたびに「変動幅」の範囲でライバルも上下します。</p>
@@ -381,8 +430,10 @@ export default function TeacherEconomyPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* 獲得ルール & 自動スキャン */}
+      {tab === "config" && (
       <section className="rounded-3xl border border-emerald-100 bg-emerald-50/40 p-6 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <div>
@@ -448,8 +499,10 @@ export default function TeacherEconomyPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* AC付与・貢献記録 */}
+      {tab === "todo" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-3 text-sm font-bold text-slate-800">AC を付与・貢献を記録</h2>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -501,8 +554,10 @@ export default function TeacherEconomyPage() {
           </button>
         </div>
       </section>
+      )}
 
       {/* 交換申請の承認 */}
+      {tab === "todo" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-3 text-sm font-bold text-slate-800">報酬交換の承認待ち（{pending.length}件）</h2>
         {pending.length === 0 ? (
@@ -542,8 +597,10 @@ export default function TeacherEconomyPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* 友人紹介（講師確認型） */}
+      {tab === "todo" && (
       <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-violet-900">友人紹介</h2>
         <p className="mb-3 text-xs text-violet-700/80">紹介を登録→入塾確定で紹介者に付与→友人が生徒登録されたら紐付けて被紹介者に付与。</p>
@@ -589,8 +646,10 @@ export default function TeacherEconomyPage() {
           </ul>
         )}
       </section>
+      )}
 
       {/* 株主の声 */}
+      {tab === "todo" && (
       <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-violet-900">🗳 株主の声</h2>
         <p className="mb-3 text-xs text-violet-700/80">自塾株を持つ生徒からの意見・要望（保有株数つき）。</p>
@@ -618,8 +677,10 @@ export default function TeacherEconomyPage() {
           </ul>
         )}
       </section>
+      )}
 
       {/* 報酬マスタ */}
+      {tab === "config" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-3 text-sm font-bold text-slate-800">報酬アイテム</h2>
         <div className="mb-4 flex flex-wrap items-end gap-2">
@@ -667,8 +728,10 @@ export default function TeacherEconomyPage() {
           </ul>
         )}
       </section>
+      )}
 
       {/* 生徒ウォレット一覧 */}
+      {tab === "status" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-3 text-sm font-bold text-slate-800">生徒ウォレット</h2>
         <div className="overflow-x-auto">
@@ -693,6 +756,7 @@ export default function TeacherEconomyPage() {
           </table>
         </div>
       </section>
+      )}
     </div>
   );
 }
