@@ -9,7 +9,7 @@ import { showToast } from "@/lib/toast";
 type Student = { id: string; name: string; grade: string; school_id: string | null };
 type School = { id: string; name: string; current_stock_price: number };
 type WalletRow = { student_id: string; balance: number; locked_balance: number };
-type RewardItem = { id: string; title: string; description: string; cost: number; stock: number | null; active: boolean; school_id: string | null; category: string | null };
+type RewardItem = { id: string; title: string; description: string; cost: number; stock: number | null; active: boolean; school_id: string | null; category: string | null; min_shares: number | null };
 type ExchangeRow = { id: string; student_name: string | null; reward_title: string | null; cost: number; created_at: string; status?: string };
 type Rule = { event_key: string; label: string; points: number; threshold: number | null; enabled: boolean };
 type ReferralRow = {
@@ -60,6 +60,7 @@ export default function TeacherEconomyPage() {
   const [refStudent, setRefStudent] = useState("");
   const [refFriend, setRefFriend] = useState("");
   const [rCategory, setRCategory] = useState("goods");
+  const [rMinShares, setRMinShares] = useState(0);
 
   // 付与フォーム
   const [studentId, setStudentId] = useState("");
@@ -82,7 +83,7 @@ export default function TeacherEconomyPage() {
       supabase.from("students").select("id, name, grade, school_id").order("name"),
       supabase.from("schools").select("id, name, current_stock_price").order("name"),
       supabase.from("student_wallets").select("student_id, balance, locked_balance"),
-      supabase.from("reward_items").select("id, title, description, cost, stock, active, school_id, category").order("cost"),
+      supabase.from("reward_items").select("id, title, description, cost, stock, active, school_id, category, min_shares").order("cost"),
       supabase.from("reward_exchanges").select("id, student_name, reward_title, cost, created_at, status")
         .eq("status", "pending").order("created_at", { ascending: true }),
       supabase.from("reward_exchanges").select("id, student_name, reward_title, cost, created_at, status")
@@ -146,11 +147,12 @@ export default function TeacherEconomyPage() {
     setBusy(true);
     const { error } = await supabase.from("reward_items").insert({
       title: rTitle.trim(), description: rDesc.trim(), cost: rCost, active: true, category: rCategory,
+      min_shares: rMinShares > 0 ? rMinShares : 0,
     });
     setBusy(false);
     if (error) return showToast(error.message, "error");
     showToast("報酬を追加しました", "success");
-    setRTitle(""); setRDesc(""); setRCost(500);
+    setRTitle(""); setRDesc(""); setRCost(500); setRMinShares(0);
     load();
   }
 
@@ -634,7 +636,12 @@ export default function TeacherEconomyPage() {
             <option value="other">その他</option>
           </select>
           <input type="number" value={rCost} onChange={(e) => setRCost(Math.floor(Number(e.target.value) || 0))}
-            className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+            placeholder="必要AC" className="w-24 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          <label className="flex items-center gap-1 text-xs text-slate-500">株主限定
+            <input type="number" value={rMinShares} onChange={(e) => setRMinShares(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              title="この株数以上の株主だけが交換できる（0=誰でも）"
+              className="w-16 rounded-xl border border-slate-200 px-2 py-2 text-right text-sm" />株〜
+          </label>
           <button onClick={createReward} disabled={busy}
             className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-white hover:bg-amber-600">追加</button>
         </div>
@@ -645,7 +652,10 @@ export default function TeacherEconomyPage() {
             {rewards.map((r) => (
               <li key={r.id} className="flex items-center justify-between py-2.5">
                 <div className="min-w-0">
-                  <p className={`truncate text-sm font-semibold ${r.active ? "text-slate-800" : "text-slate-400 line-through"}`}>{r.title}</p>
+                  <p className={`truncate text-sm font-semibold ${r.active ? "text-slate-800" : "text-slate-400 line-through"}`}>
+                    {(r.min_shares ?? 0) > 0 && <span className="mr-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">株主{r.min_shares}株〜</span>}
+                    {r.title}
+                  </p>
                   <p className="text-[11px] text-slate-400">{r.cost.toLocaleString()} AC{r.description ? ` ・ ${r.description}` : ""}</p>
                 </div>
                 <button onClick={() => toggleReward(r)}

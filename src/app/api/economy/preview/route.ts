@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   if (!student) return NextResponse.json({ error: "生徒が見つかりません" }, { status: 404 });
   const schoolId = (student.school_id as string) ?? null;
 
-  let shopQ = svc.from("reward_items").select("id, title, description, cost, stock, category")
+  let shopQ = svc.from("reward_items").select("id, title, description, cost, stock, category, min_shares")
     .eq("active", true).order("cost", { ascending: true });
   shopQ = schoolId ? shopQ.or(`school_id.is.null,school_id.eq.${schoolId}`) : shopQ.is("school_id", null);
 

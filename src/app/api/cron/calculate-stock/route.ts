@@ -118,6 +118,29 @@ export async function POST(req: NextRequest) {
     rivals.push({ name: b.name, prev_price: b.price, new_price: newPrice, change_rate: swing });
   }
 
-  return NextResponse.json({ ok: true, dry, calculated_at: new Date().toISOString(), schools: results, rivals });
+  // 株主配当（AC配当）：保有株数 × 配当レート(ac_rules 'dividend') を INVEST_DIVIDEND で付与。
+  // source key `dividend:{student}:{date}` で同日再実行しても二重配当しない（冪等）。
+  let dividend = { paid: 0, ac: 0, rate: 0 };
+  const { data: divRule } = await svc.from("ac_rules")
+    .select("points, enabled").eq("event_key", "dividend").maybeSingle();
+  const rate = divRule?.enabled ? (divRule.points ?? 0) : 0;
+  if (rate > 0) {
+    const day = new Date().toISOString().slice(0, 10);
+    const { data: holders } = await svc.from("class_stock_holdings").select("student_id, shares").gt("shares", 0);
+    for (const hgd of holders ?? []) {
+      const amt = (hgd.shares ?? 0) * rate;
+      if (amt <= 0) continue;
+      if (!dry) {
+        const { data: awarded } = await svc.rpc("ac_award_once", {
+          p_student: hgd.student_id, p_amount: amt, p_type: "INVEST_DIVIDEND",
+          p_desc: `株主配当（${hgd.shares}株×${rate}）`, p_source_type: "dividend", p_source_id: `${hgd.student_id}:${day}`,
+        });
+        if ((Number(awarded) || 0) > 0) { dividend.paid++; dividend.ac += Number(awarded); }
+      } else { dividend.paid++; dividend.ac += amt; }
+    }
+    dividend.rate = rate;
+  }
+
+  return NextResponse.json({ ok: true, dry, calculated_at: new Date().toISOString(), schools: results, rivals, dividend });
 }
 

@@ -15,5 +15,7 @@ export async function GET(req: NextRequest) {
   const { data } = await svc.from("ac_rules")
     .select("event_key, label, points, threshold, enabled").eq("enabled", true).gt("points", 0);
 
-  return NextResponse.json({ rules: (data ?? []).sort((a, b) => b.points - a.points) });
+  // 配当は「行動で増やす」ものではない（保有への還元）ため、増やし方一覧からは除外
+  const rules = (data ?? []).filter((r) => r.event_key !== "dividend").sort((a, b) => b.points - a.points);
+  return NextResponse.json({ rules });
 }

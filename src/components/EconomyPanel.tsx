@@ -13,7 +13,7 @@ type Wallet = { balance: number; locked_balance: number };
 type Holding = { shares: number; avg_price: number };
 type HistRow = { price: number; calculated_at: string };
 type Chart = { current_price: number; school_name: string | null; history: HistRow[] };
-type Reward = { id: string; title: string; description: string; cost: number; stock: number | null; category: string | null };
+type Reward = { id: string; title: string; description: string; cost: number; stock: number | null; category: string | null; min_shares: number | null };
 
 const CATEGORY_LABEL: Record<string, string> = {
   goods: "グッズ", card: "紹介カード", pass: "通い放題", online: "オンライン授業", other: "その他",
@@ -224,10 +224,15 @@ export function EconomyPanel({ student }: { student: Student }) {
             {rewards.map((r) => {
               const affordable = wallet.balance >= r.cost;
               const soldOut = r.stock !== null && r.stock <= 0;
+              const needShares = r.min_shares ?? 0;
+              const lacksShares = needShares > 0 && holding.shares < needShares;
               return (
                 <div key={r.id} className="flex items-center justify-between rounded-2xl border border-amber-100 bg-white p-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
+                      {needShares > 0 && (
+                        <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">株主限定{needShares}株〜</span>
+                      )}
                       {r.category && (
                         <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                           {CATEGORY_LABEL[r.category] ?? r.category}
@@ -240,10 +245,10 @@ export function EconomyPanel({ student }: { student: Student }) {
                   </div>
                   <button
                     onClick={() => redeem(r)}
-                    disabled={busy || !affordable || soldOut}
+                    disabled={busy || !affordable || soldOut || lacksShares}
                     className="ml-3 shrink-0 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400"
                   >
-                    {soldOut ? "在庫切れ" : !affordable ? "AC不足" : "交換する"}
+                    {soldOut ? "在庫切れ" : lacksShares ? `${needShares}株必要` : !affordable ? "AC不足" : "交換する"}
                   </button>
                 </div>
               );

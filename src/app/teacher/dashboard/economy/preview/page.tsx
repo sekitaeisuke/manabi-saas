@@ -14,7 +14,7 @@ type Snapshot = {
   holding: { shares: number; avg_price: number };
   txns: { id: string; amount: number; type: string; description: string; created_at: string }[];
   exchanges: { id: string; reward_title: string | null; cost: number; status: string; created_at: string }[];
-  rewards: { id: string; title: string; description: string; cost: number; stock: number | null; category: string | null }[];
+  rewards: { id: string; title: string; description: string; cost: number; stock: number | null; category: string | null; min_shares: number | null }[];
   rules: { event_key: string; label: string; points: number }[];
   voices: { id: string; message: string; status: string; created_at: string; shares: number | null }[];
   history: { price: number; calculated_at: string }[];
@@ -123,6 +123,7 @@ export default function EconomyPreviewPage() {
                       {snap.rewards.map((r) => (
                         <div key={r.id} className="rounded-2xl border border-amber-100 bg-white p-3">
                           <div className="flex items-center gap-1.5">
+                            {(r.min_shares ?? 0) > 0 && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700">株主限定{r.min_shares}株〜</span>}
                             {r.category && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{CATEGORY_LABEL[r.category] ?? r.category}</span>}
                             <p className="truncate text-sm font-semibold text-slate-800">{r.title}</p>
                           </div>
