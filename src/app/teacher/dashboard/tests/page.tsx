@@ -15,7 +15,7 @@ import {
 // ─── 型 ──────────────────────────────────────────────
 type Difficulty = "basic" | "standard" | "advanced";
 type TestType = "diagnostic" | "lesson";
-type AiStep = "idle" | "chatgpt" | "claude";
+type AiStep = "idle" | "chatgpt" | "gemini" | "claude";
 
 type GeneratedQuestion = {
   id: string;
@@ -613,13 +613,13 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     );
   };
 
-  const stepDone = (step: "chatgpt" | "claude") => {
-    const order: AiStep[] = ["chatgpt", "claude"];
+  const stepDone = (step: "chatgpt" | "gemini" | "claude") => {
+    const order: AiStep[] = ["chatgpt", "gemini", "claude"];
     const cur = order.indexOf(aiStep);
     return cur >= order.indexOf(step);
   };
 
-  const generate = async (step: "chatgpt" | "claude") => {
+  const generate = async (step: "chatgpt" | "gemini" | "claude") => {
     if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
     if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
     setGenerating(true);
@@ -657,7 +657,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     setGenerating(false);
   };
 
-  // ①ChatGPTで作成 →②Claudeで完成 を1ボタンで一気通貫（手数削減）
+  // ①ChatGPTで作成 →②Geminiで推敲 →③Claudeで最終チェック を1ボタンで一気通貫（手数削減）
   const generateAll = async () => {
     if (!title) { showToast("テスト名を入力してください", "info"); return; }
     if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
@@ -665,22 +665,30 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     setGenerating(true); setErrorMsg(""); setAiStep("idle");
     const hdr = { "Content-Type": "application/json" };
     try {
-      // step1: ChatGPT
+      // step1: ChatGPT（作成）
       const r1 = await authFetch("/api/generate/chatgpt", { method: "POST", headers: hdr,
         body: JSON.stringify({ testType, title, subject, grade, selectedUnits, difficulties, count, instructions }) });
       const d1 = await r1.json().catch(() => null);
       if (!d1 || d1.error) { setErrorMsg(`[chatgpt] ${d1?.error ?? `サーバーエラー (HTTP ${r1.status})`}`); setGenerating(false); return; }
-      const q1 = (d1.questions as GeneratedQuestion[]) ?? [];
+      let q = (d1.questions as GeneratedQuestion[]) ?? [];
       if (d1.html) setGeneratedHtml(d1.html as string);
-      if (q1.length) setQuestions(q1);
+      if (q.length) setQuestions(q);
       setAiStep("chatgpt");
-      // step2: Claude（chatgptの結果 q1 をそのまま使う）
-      const r2 = await authFetch("/api/generate/claude", { method: "POST", headers: hdr,
-        body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q1 }) });
+      // step2: Gemini（推敲）— chatgptの結果 q を改善
+      const r2 = await authFetch("/api/generate/gemini", { method: "POST", headers: hdr,
+        body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q }) });
       const d2 = await r2.json().catch(() => null);
-      if (!d2 || d2.error) { setErrorMsg(`[claude] ${d2?.error ?? `サーバーエラー (HTTP ${r2.status})`}`); setGenerating(false); return; }
-      if (d2.html) setGeneratedHtml(d2.html as string);
-      if (d2.questions) setQuestions(d2.questions as GeneratedQuestion[]);
+      if (!d2 || d2.error) { setErrorMsg(`[gemini] ${d2?.error ?? `サーバーエラー (HTTP ${r2.status})`}`); setGenerating(false); return; }
+      if (Array.isArray(d2.questions) && d2.questions.length) q = d2.questions as GeneratedQuestion[];
+      setQuestions(q);
+      setAiStep("gemini");
+      // step3: Claude（最終チェック＋HTML化）— 推敲後の q を使う
+      const r3 = await authFetch("/api/generate/claude", { method: "POST", headers: hdr,
+        body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q }) });
+      const d3 = await r3.json().catch(() => null);
+      if (!d3 || d3.error) { setErrorMsg(`[claude] ${d3?.error ?? `サーバーエラー (HTTP ${r3.status})`}`); setGenerating(false); return; }
+      if (d3.html) setGeneratedHtml(d3.html as string);
+      if (d3.questions) setQuestions(d3.questions as GeneratedQuestion[]);
       setAiStep("claude");
       setPhase("preview");
     } catch (e) {
@@ -1106,24 +1114,31 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         {/* AI生成フロー */}
         <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
           <h2 className="mb-2 text-xl font-semibold">AIで作成</h2>
-          <p className="mb-5 text-sm text-slate-500">ボタン1つで問題を作成します（AIが下書き→仕上げまで自動）</p>
+          <p className="mb-5 text-sm text-slate-500">ボタン1つで3段のAIが自動実行（作成 → 推敲 → 最終チェック）</p>
           <button onClick={generateAll}
             disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
             className="w-full rounded-2xl bg-indigo-600 px-6 py-4 text-lg font-bold text-white transition hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
-            {generating ? (aiStep === "chatgpt" ? "AIが仕上げ中…" : "AIが作成中…") : "🤖 AIでテストを作成"}
+            {generating
+              ? (aiStep === "idle" ? "① 作成中…（ChatGPT）" : aiStep === "chatgpt" ? "② 推敲中…（Gemini）" : "③ 最終チェック中…（Claude）")
+              : "🤖 AIでテストを作成"}
           </button>
           <details className="mt-3">
             <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">1ステップずつ実行する（上級者向け）</summary>
             <div className="mt-2 space-y-3">
-              <AiStepButton step="chatgpt" label="ChatGPTで作成" desc="選択単元・難易度に合わせたHTMLテストを生成"
+              <AiStepButton step="chatgpt" label="① ChatGPTで作成" desc="選択単元・難易度に合わせた問題ドラフトを生成"
                 color="slate" done={stepDone("chatgpt")} num="1"
                 disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
                 loading={generating && aiStep === "idle"}
                 onClick={() => generate("chatgpt")} />
-              <AiStepButton step="claude" label="Claudeで完成" desc="表現・配点・HTMLの最終仕上げ"
-                color="purple" done={stepDone("claude")} num="2"
+              <AiStepButton step="gemini" label="② Geminiで推敲" desc="誤り・答えの整合・難易度を点検して改善"
+                color="blue" done={stepDone("gemini")} num="2"
                 disabled={generating || !stepDone("chatgpt")}
                 loading={generating && aiStep === "chatgpt"}
+                onClick={() => generate("gemini")} />
+              <AiStepButton step="claude" label="③ Claudeで最終チェック" desc="最終確認・配点調整・HTMLに仕上げ"
+                color="purple" done={stepDone("claude")} num="3"
+                disabled={generating || !stepDone("gemini")}
+                loading={generating && aiStep === "gemini"}
                 onClick={() => generate("claude")} />
             </div>
           </details>
@@ -1155,7 +1170,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             <li className="flex gap-2"><span className="text-slate-400">2.</span>テスト名・科目・学年を入力</li>
             <li className="flex gap-2"><span className="text-slate-400">3.</span>出題単元をチェック</li>
             <li className="flex gap-2"><span className="text-slate-400">4.</span>難易度を選択</li>
-            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す</li>
+            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す（作成→推敲→最終チェックの3段）</li>
             <li className="flex gap-2"><span className="text-slate-400">6.</span>HTMLプレビューで確認</li>
             <li className="flex gap-2"><span className="text-slate-400">7.</span>解答を入力して分析</li>
             <li className="flex gap-2"><span className="text-slate-400">8.</span>レポートを印刷・保存</li>
