@@ -7,6 +7,7 @@ import { Logo, LogoIcon } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { HREF_MODULE, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
 import { ECON } from "@/lib/economyFeatures";
+import { FEATURES } from "@/lib/features";
 
 type BadgeKey = "pending" | "unread" | "resched" | "economy";
 type NavLeaf = { href: string; label: string; iconKey: IconKey; badge?: BadgeKey; adminOnly?: boolean };
@@ -157,6 +158,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const leafBadge = (item: NavLeaf) => (item.badge ? badgeMap[item.badge] : 0);
   const visibleItems = (g: NavGroup) => g.items.filter((it) => {
     if (it.adminOnly && userRole !== "admin") return false;
+    if (it.href === "/teacher/dashboard/karte-daily" && !FEATURES.dailyKarte) return false;
     const mod = HREF_MODULE[it.href];
     if (mod && enabledModules && !enabledModules[mod]) return false;  // 無効モジュールは非表示
     return true;

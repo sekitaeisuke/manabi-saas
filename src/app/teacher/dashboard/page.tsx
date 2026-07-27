@@ -7,6 +7,7 @@ import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { Skeleton } from "@/components/Skeleton";
 import { ECON } from "@/lib/economyFeatures";
+import { FEATURES } from "@/lib/features";
 import type { StudentKarteJson } from "@/lib/supabase";
 
 type Counts = {
@@ -61,7 +62,7 @@ const QUICK_ACTIONS = [
   { title: "テスト作成", desc: "AIでボタン1つで問題作成・配布", href: "/teacher/dashboard/tests" },
   { title: "報告書を書く", desc: "手動作成・未送信の送信", href: "/teacher/dashboard/reports" },
   { title: "教材進捗を入力", desc: "何をどこまで・理解度", href: "/teacher/dashboard/progress" },
-  { title: "カルテ（日次）", desc: "現状＋今日やることの一覧・一括生成", href: "/teacher/dashboard/karte-daily" },
+  ...(FEATURES.dailyKarte ? [{ title: "カルテ（日次）", desc: "現状＋今日やることの一覧・一括生成", href: "/teacher/dashboard/karte-daily" }] : []),
   { title: "生徒・講師管理", desc: "生徒一覧から操作卓へ", href: "/teacher/dashboard/schools" },
   { title: "メッセージ", desc: "保護者・生徒との連絡", href: "/teacher/dashboard/messages" },
   { title: "多層診断", desc: "学力・学習習慣・学習の質", href: "/teacher/dashboard/diagnosis" },
@@ -329,7 +330,7 @@ export default function TeacherDashboardPage() {
                           進捗{stale == null ? "未入力" : `${stale}日空き`}
                         </span>
                       )}
-                      {!s.karte && (
+                      {FEATURES.dailyKarte && !s.karte && (
                         <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-500">カルテ未生成</span>
                       )}
                     </div>
@@ -350,10 +351,12 @@ export default function TeacherDashboardPage() {
                     <Link href={`/teacher/dashboard/students/${s.id}`} className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-900">操作卓</Link>
                     <Link href="/teacher/dashboard/progress" className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">進捗入力</Link>
                     <Link href="/teacher/dashboard/reports" className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">報告書</Link>
-                    <button onClick={() => regenerateKarte(s.id, s.name)} disabled={busyKarte === s.id}
-                      className="ml-auto rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40">
-                      {busyKarte === s.id ? "更新中…" : "カルテ再生成"}
-                    </button>
+                    {FEATURES.dailyKarte && (
+                      <button onClick={() => regenerateKarte(s.id, s.name)} disabled={busyKarte === s.id}
+                        className="ml-auto rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40">
+                        {busyKarte === s.id ? "更新中…" : "カルテ再生成"}
+                      </button>
+                    )}
                   </div>
                 </div>
               );

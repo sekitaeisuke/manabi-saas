@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
 import { EconomyPanel } from "@/components/EconomyPanel";
+import { FEATURES } from "@/lib/features";
 import type { Student, ShiftEvent, StudentKarte } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
@@ -364,7 +365,7 @@ export default function StudentDashboardPage() {
                 : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
             }`}
           >
-            カルテ
+            今日やること
             {todayTasks.length - todayDone > 0 && tab !== "todo" && (
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-bold text-white">
                 {todayTasks.length - todayDone}
@@ -454,7 +455,7 @@ export default function StudentDashboardPage() {
         {/* カルテタブ（現状・進め方・注意・保護者ニーズ＋毎日のTODO） */}
         {tab === "todo" && (
           <div className="space-y-5">
-            {myKarte?.karte_html && (
+            {FEATURES.dailyKarte && myKarte?.karte_html && (
               <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-sm">
                 <style>{`
                   #student-karte h2 { font-size:1rem; font-weight:700; margin:16px 0 6px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
