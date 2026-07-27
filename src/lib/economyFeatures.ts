@@ -8,4 +8,5 @@ export const ECON = {
   voice: false,        // 株主の声（意見ボックス）
   referral: false,     // 友達紹介（カード・講師確認）
   dividend: false,     // 配当の案内表示（実配当は ac_rules 'dividend' を無効化）
+  investGoals: true,   // 教室の投資ゴール（みんなの投資が目標に届いたら教室に○○導入）
 } as const;

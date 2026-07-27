@@ -22,6 +22,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 type Txn = { id: string; amount: number; type: string; description: string; created_at: string };
 type SchoolRow = { id: string; name: string; price: number; support: number };
 type MyReferral = { id: string; friend_name: string; status: string; created_at: string };
+type InvestGoal = { id: string; title: string; target_ac: number; note: string | null; status: string };
 type Benchmark = { name: string; price: number; prev_price: number | null; note: string | null };
 type EarnRule = { event_key: string; label: string; points: number };
 
@@ -73,10 +74,11 @@ export function EconomyPanel({ student }: { student: Student }) {
   const [myReferrals, setMyReferrals] = useState<MyReferral[]>([]);
   const [friendName, setFriendName] = useState("");
   const [streak, setStreak] = useState(0);
+  const [goals, setGoals] = useState<InvestGoal[]>([]);
 
   const load = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const [w, h, ci, tx, chartRes, rw, lb, rl, ref, streakRows] = await Promise.all([
+    const [w, h, ci, tx, chartRes, rw, lb, rl, ref, streakRows, gl] = await Promise.all([
       supabase.from("student_wallets").select("balance, locked_balance").eq("student_id", student.id).maybeSingle(),
       supabase.from("class_stock_holdings").select("shares, avg_price").eq("student_id", student.id).maybeSingle(),
       supabase.from("check_ins").select("id").eq("student_id", student.id).eq("checkin_on", today).maybeSingle(),
@@ -90,6 +92,10 @@ export function EconomyPanel({ student }: { student: Student }) {
         .eq("referrer_student_id", student.id).order("created_at", { ascending: false }).limit(10),
       supabase.from("check_ins").select("checkin_on").eq("student_id", student.id)
         .order("checkin_on", { ascending: false }).limit(60),
+      supabase.from("class_investment_goals").select("id, title, target_ac, note, status")
+        .eq("active", true)
+        .or(`school_id.is.null,school_id.eq.${student.school_id ?? "00000000-0000-0000-0000-000000000000"}`)
+        .order("sort_order"),
     ]);
     if (w.data) setWallet(w.data as Wallet);
     setHolding((h.data as Holding) ?? { shares: 0, avg_price: 0 });
@@ -104,6 +110,7 @@ export function EconomyPanel({ student }: { student: Student }) {
     if (rl?.rules) setEarnRules(rl.rules as EarnRule[]);
     setMyReferrals((ref.data as MyReferral[]) ?? []);
     setStreak(computeStreak(((streakRows.data as { checkin_on: string }[]) ?? []).map((r) => r.checkin_on)));
+    setGoals((gl.data as InvestGoal[]) ?? []);
     setLoading(false);
   }, [student.id]);
 
@@ -457,6 +464,36 @@ export function EconomyPanel({ student }: { student: Student }) {
             })}
           </div>
           <p className="mt-3 text-[11px] text-slate-400">🎯＝ライバル塾（目標・投資はできません）／緑＝あなたの教室</p>
+        </div>
+      )}
+
+      {/* 🎯 みんなの投資ゴール（投資が目標に届くと教室に導入！） */}
+      {ECON.investGoals && goals.length > 0 && (
+        <div className="rounded-3xl border border-indigo-100 bg-indigo-50/40 p-6 shadow-sm">
+          <p className="text-sm font-bold text-indigo-900">🎯 みんなの投資ゴール</p>
+          <p className="mb-3 text-xs text-indigo-700/80">みんなの投資（応援AC）が目標に届くと、教室に導入されます！ 売らずに応援しよう。</p>
+          <div className="space-y-3">
+            {goals.map((g) => {
+              const reached = g.status !== "open" || ownSupport >= g.target_ac;
+              const pct = Math.min(100, Math.round((ownSupport / g.target_ac) * 100));
+              return (
+                <div key={g.id}>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-700">{reached ? "🎉 " : "🎯 "}{g.title}</span>
+                    <span className={`font-bold ${reached ? "text-emerald-600" : "text-indigo-600"}`}>
+                      {reached ? "達成！" : `あと ${Math.max(0, g.target_ac - ownSupport).toLocaleString()} AC`}
+                    </span>
+                  </div>
+                  <div className="h-3 overflow-hidden rounded-full bg-indigo-100">
+                    <div className={`h-full rounded-full ${reached ? "bg-emerald-500" : "bg-indigo-500"}`} style={{ width: `${pct}%` }} />
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    {ownSupport.toLocaleString()} / {g.target_ac.toLocaleString()} AC{g.note ? ` ・ ${g.note}` : ""}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -20,6 +20,7 @@ type ReferralRow = {
 type ScanResult = { dry: boolean; total_count: number; total_ac: number; detail: Record<string, { count: number; ac: number }> };
 type Benchmark = { id: string; name: string; price: number; note: string | null; active: boolean; auto_move: boolean; volatility: number };
 type Voice = { id: string; student_name: string | null; shares: number | null; message: string; status: string; created_at: string };
+type InvestGoal = { id: string; school_id: string | null; title: string; target_ac: number; note: string | null; status: string; active: boolean };
 type CalcResult = {
   school_id: string; school_name: string;
   prev_price: number; new_price: number; change_rate: number;
@@ -54,6 +55,9 @@ export default function TeacherEconomyPage() {
   const [referrals, setReferrals] = useState<ReferralRow[]>([]);
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([]);
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [goals, setGoals] = useState<InvestGoal[]>([]);
+  const [gTitle, setGTitle] = useState("");
+  const [gTarget, setGTarget] = useState(5000);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"input" | "voice" | "config" | "status">("input");
@@ -81,7 +85,7 @@ export default function TeacherEconomyPage() {
   const [preview, setPreview] = useState<CalcResult[] | null>(null);
 
   const load = useCallback(async () => {
-    const [st, sc, wl, rw, ex, exA, ru, rf, bm, vo] = await Promise.all([
+    const [st, sc, wl, rw, ex, exA, ru, rf, bm, vo, gl] = await Promise.all([
       supabase.from("students").select("id, name, grade, school_id").order("name"),
       supabase.from("schools").select("id, name, current_stock_price").order("name"),
       supabase.from("student_wallets").select("student_id, balance, locked_balance"),
@@ -97,6 +101,7 @@ export default function TeacherEconomyPage() {
       supabase.from("stock_benchmarks").select("id, name, price, note, active, auto_move, volatility").order("sort_order"),
       supabase.from("shareholder_voices").select("id, student_name, shares, message, status, created_at")
         .order("created_at", { ascending: false }).limit(100),
+      supabase.from("class_investment_goals").select("id, school_id, title, target_ac, note, status, active").order("sort_order"),
     ]);
     setStudents((st.data as Student[]) ?? []);
     setSchools((sc.data as School[]) ?? []);
@@ -110,6 +115,7 @@ export default function TeacherEconomyPage() {
     setReferrals((rf.data as ReferralRow[]) ?? []);
     setBenchmarks((bm.data as Benchmark[]) ?? []);
     setVoices((vo.data as Voice[]) ?? []);
+    setGoals((gl.data as InvestGoal[]) ?? []);
     setLoading(false);
   }, []);
 
@@ -211,6 +217,24 @@ export default function TeacherEconomyPage() {
   async function markVoiceDone(id: string) {
     setVoices((prev) => prev.map((v) => (v.id === id ? { ...v, status: "done" } : v)));
     const { error } = await supabase.from("shareholder_voices").update({ status: "done" }).eq("id", id);
+    if (error) showToast(error.message, "error");
+  }
+
+  // 投資ゴール：追加
+  async function createGoal() {
+    if (!gTitle.trim() || gTarget <= 0) return showToast("目標名と正の目標ACが必要です", "error");
+    setBusy(true);
+    const { error } = await supabase.from("class_investment_goals")
+      .insert({ title: gTitle.trim(), target_ac: gTarget, sort_order: goals.length });
+    setBusy(false);
+    if (error) return showToast(error.message, "error");
+    showToast("投資ゴールを追加しました", "success");
+    setGTitle(""); setGTarget(5000);
+    load();
+  }
+  async function updateGoal(id: string, patch: Partial<InvestGoal>) {
+    setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, ...patch } : g)));
+    const { error } = await supabase.from("class_investment_goals").update(patch).eq("id", id);
     if (error) showToast(error.message, "error");
   }
 
@@ -675,6 +699,50 @@ export default function TeacherEconomyPage() {
                       className="shrink-0 rounded-xl border border-violet-200 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-50">対応済み</button>
                   )}
                 </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      )}
+
+      {/* 教室の投資ゴール */}
+      {ECON.investGoals && tab === "config" && (
+      <section className="rounded-3xl border border-indigo-100 bg-indigo-50/40 p-6 shadow-sm">
+        <h2 className="mb-1 text-sm font-bold text-indigo-900">🎯 教室の投資ゴール</h2>
+        <p className="mb-3 text-xs text-indigo-700/80">みんなの投資（応援AC＝投資中ACの合計）が目標に届いたら教室に導入。生徒の投資画面に進捗バーが出ます。</p>
+        <div className="mb-4 flex flex-wrap items-end gap-2">
+          <input value={gTitle} onChange={(e) => setGTitle(e.target.value)} placeholder="目標（例: ウォーターサーバー導入）"
+            className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          <input type="number" value={gTarget} onChange={(e) => setGTarget(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-right text-sm" />
+          <span className="text-xs text-slate-400">AC</span>
+          <button onClick={createGoal} disabled={busy}
+            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700">追加</button>
+        </div>
+        {goals.length === 0 ? (
+          <p className="text-sm text-slate-400">まだ目標がありません（class-invest-goals-setup.sql を実行してください）</p>
+        ) : (
+          <ul className="space-y-2">
+            {goals.map((g) => (
+              <li key={g.id} className="flex flex-wrap items-center gap-2 rounded-2xl bg-white px-3 py-2">
+                <input value={g.title} onChange={(e) => updateGoal(g.id, { title: e.target.value })}
+                  className="w-48 rounded-lg border border-slate-200 px-2 py-1 text-sm font-semibold" />
+                <span className="text-xs text-slate-400">目標</span>
+                <input type="number" value={g.target_ac}
+                  onChange={(e) => updateGoal(g.id, { target_ac: Math.max(1, Math.floor(Number(e.target.value) || 0)) })}
+                  className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
+                <span className="text-xs text-slate-400">AC</span>
+                <select value={g.status} onChange={(e) => updateGoal(g.id, { status: e.target.value })}
+                  className="rounded-lg border border-slate-200 px-2 py-1 text-xs">
+                  <option value="open">募集中</option>
+                  <option value="achieved">達成</option>
+                  <option value="fulfilled">導入済み</option>
+                </select>
+                <label className="ml-auto flex items-center gap-1 text-xs text-slate-600">
+                  <input type="checkbox" checked={g.active} onChange={(e) => updateGoal(g.id, { active: e.target.checked })}
+                    className="h-4 w-4 accent-indigo-600" />表示
+                </label>
               </li>
             ))}
           </ul>
