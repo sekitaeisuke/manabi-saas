@@ -55,7 +55,7 @@ export default function TeacherEconomyPage() {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"todo" | "config" | "status">("todo");
+  const [tab, setTab] = useState<"input" | "voice" | "config" | "status">("input");
 
   // 紹介フォーム
   const [refStudent, setRefStudent] = useState("");
@@ -286,8 +286,9 @@ export default function TeacherEconomyPage() {
 
   if (loading) return <div className="py-16 text-center text-sm text-slate-400">読み込み中…</div>;
 
-  const TABS: { key: "todo" | "config" | "status"; label: string }[] = [
-    { key: "todo", label: "📋 対応" },
+  const TABS: { key: "input" | "voice" | "config" | "status"; label: string }[] = [
+    { key: "input", label: "✍️ 手動入力" },
+    { key: "voice", label: "🗣 声・紹介" },
     { key: "config", label: "⚙ 設定" },
     { key: "status", label: "📊 状況" },
   ];
@@ -307,11 +308,11 @@ export default function TeacherEconomyPage() {
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3">
         <span className="mr-1 text-xs font-bold text-slate-400">要対応</span>
         {([
-          { label: "交換承認", n: pending.length },
-          { label: "株主の声", n: openVoices },
-          { label: "紹介申請", n: pendingRefs },
+          { label: "交換承認", n: pending.length, to: "input" as const },
+          { label: "株主の声", n: openVoices, to: "voice" as const },
+          { label: "紹介申請", n: pendingRefs, to: "voice" as const },
         ] as const).map((a) => (
-          <button key={a.label} onClick={() => setTab("todo")}
+          <button key={a.label} onClick={() => setTab(a.to)}
             className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
               a.n > 0 ? "bg-rose-50 text-rose-600 hover:bg-rose-100" : "bg-slate-50 text-slate-400"
             }`}>
@@ -326,7 +327,7 @@ export default function TeacherEconomyPage() {
       {/* タブ */}
       <div className="flex gap-2">
         {TABS.map((t) => {
-          const badge = t.key === "todo" ? pending.length + openVoices + pendingRefs : 0;
+          const badge = t.key === "input" ? pending.length : t.key === "voice" ? openVoices + pendingRefs : 0;
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-bold transition ${
@@ -502,7 +503,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* AC付与・貢献記録 */}
-      {tab === "todo" && (
+      {tab === "input" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-3 text-sm font-bold text-slate-800">AC を付与・貢献を記録</h2>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -557,7 +558,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* 交換申請の承認 */}
-      {tab === "todo" && (
+      {tab === "input" && (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 className="mb-3 text-sm font-bold text-slate-800">報酬交換の承認待ち（{pending.length}件）</h2>
         {pending.length === 0 ? (
@@ -600,7 +601,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* 友人紹介（講師確認型） */}
-      {tab === "todo" && (
+      {tab === "voice" && (
       <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-violet-900">友人紹介</h2>
         <p className="mb-3 text-xs text-violet-700/80">紹介を登録→入塾確定で紹介者に付与→友人が生徒登録されたら紐付けて被紹介者に付与。</p>
@@ -649,7 +650,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* 株主の声 */}
-      {tab === "todo" && (
+      {tab === "voice" && (
       <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-violet-900">🗳 株主の声</h2>
         <p className="mb-3 text-xs text-violet-700/80">自塾株を持つ生徒からの意見・要望（保有株数つき）。</p>
