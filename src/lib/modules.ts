@@ -57,6 +57,17 @@ export const HREF_MODULE: Record<string, ModuleKey> = Object.fromEntries(
   MODULES.flatMap((m) => m.paths.map((p) => [p, m.key] as const))
 ) as Record<string, ModuleKey>;
 
+// パス → そのページが属するモジュール（コアページは null）。
+// 子パス（/shifts/admin など）も親のモジュールとして扱う。
+export function moduleForPath(pathname: string): ModuleKey | null {
+  for (const m of MODULES) {
+    for (const p of m.paths) {
+      if (pathname === p || pathname.startsWith(p + "/")) return m.key;
+    }
+  }
+  return null;
+}
+
 export const COMPANY_SCOPE = "company";
 export const groupScope = (groupName: string | null | undefined) =>
   groupName ? `group:${groupName}` : null;

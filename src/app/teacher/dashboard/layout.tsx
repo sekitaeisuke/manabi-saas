@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Logo, LogoIcon } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
-import { HREF_MODULE, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
+import { HREF_MODULE, moduleForPath, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
 import { ECON } from "@/lib/economyFeatures";
 import { FEATURES } from "@/lib/features";
 
@@ -91,6 +91,17 @@ const GROUPS: NavGroup[] = [
   ]},
 ];
 
+// ── モバイル ボトムナビ（先頭4件を表示。モジュールOFFで欠けたら下の候補が繰り上がる） ──
+const BOTTOM_CANDIDATES: NavLeaf[] = [
+  { href: "/teacher/dashboard",           label: "ホーム",       iconKey: "home" },
+  { href: "/teacher/dashboard/calendar",  label: "カレンダー",   iconKey: "calendar", badge: "resched" },
+  { href: "/teacher/dashboard/tests",     label: "テスト",       iconKey: "doc",      badge: "pending" },
+  { href: "/teacher/dashboard/messages",  label: "メッセージ",   iconKey: "mail",     badge: "unread" },
+  { href: "/teacher/dashboard/reports",   label: "報告書",       iconKey: "doc" },
+  { href: "/teacher/dashboard/schools",   label: "生徒",         iconKey: "users" },
+];
+const BOTTOM_SLOTS = 4;
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState(true);
   const [userEmail, setUserEmail] = useState("");
@@ -147,6 +158,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => clearInterval(timer);
   }, []);
 
+  // 無効モジュールのページは URL 直打ち・ブックマークでも開かせない
+  useEffect(() => {
+    if (!enabledModules) return;
+    const mod = moduleForPath(pathname);
+    if (mod && !enabledModules[mod]) router.replace("/teacher/dashboard");
+  }, [enabledModules, pathname, router]);
+
   const logout = async () => {
     await supabase.auth.signOut();
     router.replace("/");
@@ -166,6 +184,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return true;
   });
   const groupBadge = (g: NavGroup) => visibleItems(g).reduce((sum, it) => sum + leafBadge(it), 0);
+  const bottomItems = BOTTOM_CANDIDATES.filter((it) => {
+    const mod = HREF_MODULE[it.href];
+    return !(mod && enabledModules && !enabledModules[mod]);
+  }).slice(0, BOTTOM_SLOTS);
 
   const isActive = (href: string) =>
     href === "/teacher/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -366,74 +388,30 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* ボトムナビ（モバイル専用） */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-16 border-t border-slate-200 bg-white lg:hidden">
-        <Link href="/teacher/dashboard"
-          onClick={() => setMobileOpen(false)}
-          className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
-            isActive("/teacher/dashboard") ? "text-indigo-600" : "text-slate-500"
-          }`}>
-          {isActive("/teacher/dashboard") && (
-            <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-indigo-600" />
-          )}
-          <Svg k="home" />
-          <span className="text-[10px] font-medium">ホーム</span>
-        </Link>
-
-        <Link href="/teacher/dashboard/calendar"
-          onClick={() => setMobileOpen(false)}
-          className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
-            isActive("/teacher/dashboard/calendar") ? "text-indigo-600" : "text-slate-500"
-          }`}>
-          {isActive("/teacher/dashboard/calendar") && (
-            <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-indigo-600" />
-          )}
-          <span className="relative">
-            <Svg k="calendar" />
-            {pendingReschedules > 0 && (
-              <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                {pendingReschedules}
+        {bottomItems.map((it) => {
+          const active = isActive(it.href);
+          const badge = leafBadge(it);
+          return (
+            <Link key={it.href} href={it.href}
+              onClick={() => setMobileOpen(false)}
+              className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
+                active ? "text-indigo-600" : "text-slate-500"
+              }`}>
+              {active && (
+                <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-indigo-600" />
+              )}
+              <span className="relative">
+                <Svg k={it.iconKey} />
+                {badge > 0 && (
+                  <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                    {badge}
+                  </span>
+                )}
               </span>
-            )}
-          </span>
-          <span className="text-[10px] font-medium">カレンダー</span>
-        </Link>
-
-        <Link href="/teacher/dashboard/tests"
-          onClick={() => setMobileOpen(false)}
-          className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
-            isActive("/teacher/dashboard/tests") ? "text-indigo-600" : "text-slate-500"
-          }`}>
-          {isActive("/teacher/dashboard/tests") && (
-            <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-indigo-600" />
-          )}
-          <span className="relative">
-            <Svg k="doc" />
-            {pendingCount > 0 && (
-              <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                {pendingCount}
-              </span>
-            )}
-          </span>
-          <span className="text-[10px] font-medium">テスト</span>
-        </Link>
-
-        <Link href="/teacher/dashboard/messages"
-          onClick={() => setMobileOpen(false)}
-          className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
-            isActive("/teacher/dashboard/messages") ? "text-indigo-600" : "text-slate-500"
-          }`}>
-          {isActive("/teacher/dashboard/messages") && (
-            <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-indigo-600" />
-          )}
-          <span className="relative">
-            <Svg k="mail" />
-            {unreadMessages > 0 && (
-              <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                {unreadMessages}
-              </span>
-            )}
-          </span>
-          <span className="text-[10px] font-medium">メッセージ</span>
-        </Link>
+              <span className="text-[10px] font-medium">{it.label}</span>
+            </Link>
+          );
+        })}
 
         <button onClick={() => setMobileOpen(true)}
           className="flex flex-1 flex-col items-center justify-center gap-0.5 text-slate-500 transition-colors hover:text-slate-700">
