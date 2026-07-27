@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Test, Student } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
+import { FEATURES } from "@/lib/features";
 import {
   CURRICULUM, GRADE_ORDER, SUBJECT_LIST,
   getAdjacentGrades, getUnitsForGrade,
@@ -772,6 +773,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       <div className="mx-auto max-w-2xl">
         <h2 className="mb-6 text-2xl font-bold text-slate-900">テスト種別を選択</h2>
         <div className="grid gap-4 sm:grid-cols-2">
+          {FEATURES.testDiagnosticType ? (
           <button
             onClick={() => setTestType("diagnostic")}
             className="rounded-3xl border-2 border-slate-200 bg-white p-8 text-left shadow-sm transition hover:border-indigo-400 hover:shadow-md"
@@ -782,6 +784,17 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               複数学年・複数単元を横断し、基礎〜応用の層ごとに出題。解答後に学力診断レポートを生成します。
             </p>
           </button>
+          ) : (
+          <Link href="/teacher/dashboard/diagnosis"
+            className="rounded-3xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 p-8 text-left shadow-sm transition hover:border-indigo-400"
+          >
+            <div className="mb-3 text-3xl">📊</div>
+            <h3 className="text-lg font-bold text-indigo-800">診断テストは「多層診断」へ →</h3>
+            <p className="mt-2 text-sm text-indigo-700/80">
+              学力診断（多層型）の作成・配布・分析は「多層診断」ページに集約しました。ここでは授業確認テストを作成します。
+            </p>
+          </Link>
+          )}
           <button
             onClick={() => setTestType("lesson")}
             className="rounded-3xl border-2 border-slate-200 bg-white p-8 text-left shadow-sm transition hover:border-green-400 hover:shadow-md"

@@ -198,6 +198,7 @@ export default function ProgressPage() {
         <h1 className="text-2xl font-bold text-slate-800">教材進捗</h1>
         <p className="mt-1 text-sm text-slate-500">
           使用テキストと進捗を記録します。記録には<strong>入力者（あなた）</strong>が残ります。
+          （一覧・一括用。ひとりの子の全体は「生徒一覧」→操作卓で）
         </p>
       </header>
 

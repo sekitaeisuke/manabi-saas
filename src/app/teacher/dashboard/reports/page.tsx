@@ -436,7 +436,7 @@ export default function ReportsPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-slate-950">報告書</h1>
-            <p className="mt-1 text-slate-600">テスト後、または手動で授業報告書を作成・送信できます</p>
+            <p className="mt-1 text-slate-600">一覧・一括用（作成／送信）。ひとりの子の全体像は「生徒一覧」→生徒名の操作卓で。</p>
           </div>
           <button
             onClick={() => setShowManualForm(true)}

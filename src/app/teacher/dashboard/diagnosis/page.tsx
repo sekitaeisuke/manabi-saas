@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import type { Student, TestSession } from "@/lib/supabase";
 import { GRADE_ORDER, getAdjacentGrades, getUnitsForGrade, SUBJECT_LIST } from "@/lib/curriculum";
 import { authFetch } from "@/lib/authFetch";
+import { FEATURES } from "@/lib/features";
 
 // ─── メインページ ─────────────────────────────────────
 export default function DiagnosisPage() {
@@ -102,7 +103,7 @@ export default function DiagnosisPage() {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold text-slate-950">多層診断システム</h1>
-            <p className="mt-1 text-slate-600">学力・学習量・学習の質を多角的に診断します</p>
+            <p className="mt-1 text-slate-600">学力・学習量・学習の質を多角的に診断します（診断テストの作成・配布・分析はここに集約）</p>
           </div>
           <div className="flex flex-wrap gap-3">
             <button onClick={() => setView("issue-test")}
@@ -113,7 +114,14 @@ export default function DiagnosisPage() {
               className="rounded-2xl border border-indigo-300 bg-indigo-50 px-5 py-3 font-semibold text-indigo-700 hover:bg-indigo-100">
               配布管理
             </button>
-            <NewStudentButton onCreated={(s) => { setStudents((prev) => [s, ...prev]); }} />
+            {FEATURES.diagnosisAddStudent ? (
+              <NewStudentButton onCreated={(s) => { setStudents((prev) => [s, ...prev]); }} />
+            ) : (
+              <Link href="/teacher/dashboard/schools"
+                className="rounded-2xl border border-slate-200 bg-white px-5 py-3 font-semibold text-slate-600 hover:bg-slate-50">
+                生徒の登録は「生徒一覧」へ
+              </Link>
+            )}
           </div>
         </div>
 
@@ -234,7 +242,7 @@ export default function DiagnosisPage() {
           </div>
         ) : students.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-            生徒が登録されていません。「生徒を追加」から登録してください。
+            生徒が登録されていません。「生徒一覧・登録」で登録してください。
           </div>
         ) : filteredStudents.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center">

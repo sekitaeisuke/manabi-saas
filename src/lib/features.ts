@@ -7,4 +7,8 @@ export const FEATURES = {
   separateSchedulePages: false,
   // 通知ログのナビ項目。false=日常不要なので「連絡」から隠す（失敗はダッシュボードのバナー→URLで確認可）。
   notificationLog: false,
+  // 多層診断ページの簡易「生徒を追加」。false=二重登録・表記ゆれ防止のため無効（登録は生徒一覧に一本化）。
+  diagnosisAddStudent: false,
+  // テスト作成の「診断分析多層型テスト」タイプ。false=診断テストの作成は「多層診断」に一本化し、テスト作成は授業確認テスト専用に。
+  testDiagnosticType: false,
 } as const;
