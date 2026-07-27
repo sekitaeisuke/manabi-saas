@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Student, School, Test, Teacher } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
+import { notify, links } from "@/lib/notify";
 
 type RescheduleReq = {
   id: string;
@@ -14,6 +15,14 @@ type RescheduleReq = {
   proposed_at: string;
   reason: string | null;
   parents?: { name: string; email: string } | null;
+};
+
+// 振替タブ用（全ステータス＝履歴含む）
+type ReschedAll = {
+  id: string; lesson_id: string; parent_id: string | null; student_id: string;
+  proposed_at: string; reason: string | null; status: string; teacher_response: string | null; created_at: string;
+  parents?: { name: string; email: string } | null;
+  lessons?: { subject: string | null; scheduled_at: string; status: string } | null;
 };
 
 const DAY_JS: Record<string, number> = { 日: 0, 月: 1, 火: 2, 水: 3, 木: 4, 金: 5, 土: 6 };
@@ -93,6 +102,16 @@ export default function CalendarPage() {
   const [reqResponse, setReqResponse] = useState("");
   const [reqActing, setReqActing] = useState(false);
 
+  // 振替パネル（履歴含む全ステータス）＋授業の新規追加
+  const [rescheduleAll, setRescheduleAll] = useState<ReschedAll[]>([]);
+  const [respDraft, setRespDraft] = useState<Record<string, string>>({});
+  const [reschedActingId, setReschedActingId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    student_id: "", teacher_id: "", subject: "", scheduled_at: "", duration_minutes: 60, location: "", notes: "",
+  });
+
   const year = current.getFullYear();
   const month = current.getMonth();
 
@@ -104,7 +123,7 @@ export default function CalendarPage() {
     const lessonStart = new Date(year, month, 1).toISOString();
     const lessonEnd = new Date(year, month + 1, 1).toISOString();
 
-    const [sRes, scRes, tRes, aRes, lsRes, tchRes, rrRes] = await Promise.allSettled([
+    const [sRes, scRes, tRes, aRes, lsRes, tchRes, rrRes, raRes] = await Promise.allSettled([
       supabase.from("students").select("*").order("name"),
       supabase.from("schools").select("*").order("name"),
       supabase.from("tests").select("*").order("grade").order("subject"),
@@ -123,6 +142,10 @@ export default function CalendarPage() {
         .from("reschedule_requests")
         .select("id, lesson_id, parent_id, student_id, proposed_at, reason, parents(name, email)")
         .eq("status", "pending"),
+      supabase
+        .from("reschedule_requests")
+        .select("id, lesson_id, parent_id, student_id, proposed_at, reason, status, teacher_response, created_at, parents(name, email), lessons(subject, scheduled_at, status)")
+        .order("created_at", { ascending: false }).limit(100),
     ]);
     const s  = sRes.status   === "fulfilled" ? sRes.value.data   : null;
     const sc = scRes.status  === "fulfilled" ? scRes.value.data  : null;
@@ -131,6 +154,14 @@ export default function CalendarPage() {
     const ls = lsRes.status  === "fulfilled" ? lsRes.value.data  : null;
     const tch = tchRes.status === "fulfilled" ? tchRes.value.data : null;
     const rr = rrRes.status  === "fulfilled" ? rrRes.value.data  : null;
+    const ra = raRes.status  === "fulfilled" ? raRes.value.data  : null;
+    const asObj = <T,>(v: T | T[] | null | undefined): T | null => Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+    setRescheduleAll(((ra ?? []) as Record<string, unknown>[]).map((x) => ({
+      id: x.id as string, lesson_id: x.lesson_id as string, parent_id: (x.parent_id ?? null) as string | null,
+      student_id: x.student_id as string, proposed_at: x.proposed_at as string, reason: (x.reason ?? null) as string | null,
+      status: x.status as string, teacher_response: (x.teacher_response ?? null) as string | null, created_at: x.created_at as string,
+      parents: asObj(x.parents as never), lessons: asObj(x.lessons as never),
+    })));
 
     setStudents(s ?? []);
     setSchools(sc ?? []);
@@ -386,6 +417,73 @@ export default function CalendarPage() {
     fetchData();
   };
 
+  // 授業の新規追加（授業予定ページから移植：INSERT）
+  const saveNewLesson = async () => {
+    if (!createForm.student_id) { showToast("生徒を選んでください", "error"); return; }
+    if (!createForm.scheduled_at) { showToast("日時は必須です", "error"); return; }
+    setCreateBusy(true);
+    const { error } = await supabase.from("lessons").insert({
+      student_id: createForm.student_id,
+      teacher_id: createForm.teacher_id || null,
+      subject: createForm.subject || null,
+      scheduled_at: new Date(createForm.scheduled_at).toISOString(),
+      duration_minutes: Number(createForm.duration_minutes) || 60,
+      location: createForm.location || null,
+      notes: createForm.notes || null,
+      status: "scheduled",
+    });
+    setCreateBusy(false);
+    if (error) { showToast("追加エラー: " + error.message, "error"); return; }
+    showToast("授業を追加しました", "success");
+    setShowCreate(false);
+    setCreateForm({ student_id: "", teacher_id: "", subject: "", scheduled_at: "", duration_minutes: 60, location: "", notes: "" });
+    fetchData();
+  };
+
+  // 振替パネルの承認/却下（振替ページから移植：parent_messages＋notify() で保護者通知）
+  const decideResched = async (r: ReschedAll, decision: "approved" | "rejected") => {
+    setReschedActingId(r.id);
+    const resp = (respDraft[r.id] ?? "").trim();
+    try {
+      await supabase.from("reschedule_requests").update({
+        status: decision, teacher_response: resp || null, responded_at: new Date().toISOString(),
+      }).eq("id", r.id);
+      if (decision === "approved") {
+        await supabase.from("lessons").update({ scheduled_at: r.proposed_at, status: "rescheduled" }).eq("id", r.lesson_id);
+      }
+      if (r.parent_id) {
+        const stu = students.find((s) => s.id === r.student_id);
+        const head = decision === "approved"
+          ? `振替申請を承認しました。\n新しい授業日時：${new Date(r.proposed_at).toLocaleString("ja-JP")}`
+          : "振替申請にお返事します。（元の日時のまま実施予定です）";
+        const body = resp ? `${head}\n\n【講師より】\n${resp}` : head;
+        const { data: { session } } = await supabase.auth.getSession();
+        let teacherId: string | null = null;
+        if (session?.user?.email) {
+          const { data: tc } = await supabase.from("teachers").select("id").eq("email", session.user.email).maybeSingle();
+          teacherId = tc?.id ?? null;
+        }
+        await supabase.from("parent_messages").insert({
+          thread_id: crypto.randomUUID(), parent_id: r.parent_id, teacher_id: teacherId, student_id: r.student_id,
+          direction: "teacher_to_parent", parent_name: r.parents?.name ?? null, student_name: stu?.name ?? null,
+          email: r.parents?.email ?? null,
+          subject: decision === "approved" ? "振替申請を承認しました" : "振替申請への返答",
+          message: body, status: "read", parent_read: false,
+        });
+        notify({
+          actor_kind: "parent", actor_id: r.parent_id, event_type: "reschedule_decision",
+          subject: decision === "approved" ? "振替を承認しました" : "振替へのお返事",
+          body_text: body, link: links.parentReschedule(),
+        });
+      }
+      showToast(decision === "approved" ? "承認しました" : "却下しました", "success");
+      setRespDraft((d) => ({ ...d, [r.id]: "" }));
+      fetchData();
+    } finally {
+      setReschedActingId(null);
+    }
+  };
+
   // 当月の生徒ごと来塾日数
   const attendanceCounts = filteredStudents.reduce<Record<string, number>>((acc, s) => {
     const count = cells.filter(
@@ -429,6 +527,12 @@ export default function CalendarPage() {
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+            <button
+              onClick={() => { setShowCreate(true); setCreateForm({ student_id: "", teacher_id: "", subject: "", scheduled_at: "", duration_minutes: 60, location: "", notes: "" }); }}
+              className="rounded-xl bg-indigo-600 px-3 py-2 text-sm font-bold text-white hover:bg-indigo-700 shadow-sm"
+            >
+              ＋授業を追加
+            </button>
             <Link
               href="/teacher/dashboard/schools"
               className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 shadow-sm"
@@ -473,6 +577,94 @@ export default function CalendarPage() {
             </span>
           )}
         </div>
+
+        {/* 🔄 振替リクエスト（授業予定＋振替をカレンダーに統合） */}
+        {rescheduleAll.length > 0 && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/50 p-4 shadow-sm">
+            <p className="mb-2 text-sm font-bold text-amber-900">
+              🔄 振替リクエスト
+              {(() => { const n = rescheduleAll.filter((r) => r.status === "pending").length; return n > 0 ? (
+                <span className="ml-2 rounded-full bg-rose-500 px-2 py-0.5 text-xs font-bold text-white">{n}件 未対応</span>
+              ) : <span className="ml-2 text-xs font-normal text-slate-400">未対応なし</span>; })()}
+            </p>
+            <div className="space-y-2">
+              {rescheduleAll.slice().sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending")).map((r) => {
+                const stu = students.find((s) => s.id === r.student_id);
+                const isPending = r.status === "pending";
+                const fmt = (iso?: string) => iso ? new Date(iso).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+                return (
+                  <div key={r.id} className="rounded-xl bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-800">{stu?.name ?? "—"}　{r.lessons?.subject ?? "授業"}</p>
+                        <p className="text-[11px] text-slate-500">{fmt(r.lessons?.scheduled_at)} → <b className="text-amber-700">{fmt(r.proposed_at)}</b></p>
+                        {r.reason && <p className="text-[11px] text-slate-400">理由: {r.reason}</p>}
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${isPending ? "bg-amber-100 text-amber-700" : r.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                        {isPending ? "未対応" : r.status === "approved" ? "承認済み" : "却下"}
+                      </span>
+                    </div>
+                    {isPending ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <input value={respDraft[r.id] ?? ""} onChange={(e) => setRespDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                          placeholder="保護者への一言（任意）" className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-xs" />
+                        <button onClick={() => decideResched(r, "approved")} disabled={reschedActingId === r.id}
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">承認</button>
+                        <button onClick={() => decideResched(r, "rejected")} disabled={reschedActingId === r.id}
+                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">却下</button>
+                      </div>
+                    ) : r.teacher_response ? (
+                      <p className="mt-1 text-[11px] text-slate-400">返答: {r.teacher_response}</p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 授業を追加モーダル */}
+        {showCreate && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowCreate(false)}>
+            <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <h3 className="mb-3 text-lg font-bold text-slate-900">授業を追加</h3>
+              <div className="space-y-3 text-sm">
+                <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-500">生徒</span>
+                  <select value={createForm.student_id} onChange={(e) => setCreateForm((f) => ({ ...f, student_id: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2">
+                    <option value="">選択…</option>
+                    {filteredStudents.map((s) => <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>)}
+                  </select>
+                </label>
+                <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-500">日時</span>
+                  <input type="datetime-local" value={createForm.scheduled_at} onChange={(e) => setCreateForm((f) => ({ ...f, scheduled_at: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2" />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-500">担当</span>
+                    <select value={createForm.teacher_id} onChange={(e) => setCreateForm((f) => ({ ...f, teacher_id: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2">
+                      <option value="">未定</option>
+                      {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-500">科目</span>
+                    <input value={createForm.subject} onChange={(e) => setCreateForm((f) => ({ ...f, subject: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2" />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-500">時間(分)</span>
+                    <input type="number" value={createForm.duration_minutes} onChange={(e) => setCreateForm((f) => ({ ...f, duration_minutes: Number(e.target.value) || 60 }))} className="w-full rounded-xl border border-slate-200 px-3 py-2" />
+                  </label>
+                  <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-500">場所</span>
+                    <input value={createForm.location} onChange={(e) => setCreateForm((f) => ({ ...f, location: e.target.value }))} className="w-full rounded-xl border border-slate-200 px-3 py-2" />
+                  </label>
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button onClick={() => setShowCreate(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-600">キャンセル</button>
+                <button onClick={saveNewLesson} disabled={createBusy} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">{createBusy ? "追加中…" : "追加"}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-16 text-center text-slate-400">

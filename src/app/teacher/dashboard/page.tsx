@@ -238,7 +238,7 @@ export default function TeacherDashboardPage() {
   const inbox = counts ? [
     { label: "保護者からの未読", count: counts.unreadParentMessages, href: "/teacher/dashboard/messages" },
     { label: "生徒からの未読", count: counts.unreadStudentMessages, href: "/teacher/dashboard/messages" },
-    { label: "申請中の振替", count: counts.pendingReschedules, href: "/teacher/dashboard/reschedules" },
+    { label: "申請中の振替", count: counts.pendingReschedules, href: FEATURES.separateSchedulePages ? "/teacher/dashboard/reschedules" : "/teacher/dashboard/calendar" },
     { label: "未分析の診断", count: counts.pendingDiagnoses, href: "/teacher/dashboard/diagnosis" },
     { label: "未送信の報告書", count: counts.draftReports, href: "/teacher/dashboard/reports" },
     { label: "気がかりな生徒", count: counts.concerns, href: "/teacher/dashboard/collaboration" },

@@ -3,4 +3,6 @@
 //   北極星＝3か月ビジョン と、そこから出る「今日やること(TODO)」は常時表示。
 export const FEATURES = {
   dailyKarte: false,
+  // 授業予定・振替の別メニュー。false=来塾カレンダーに統合したので隠す（カレンダーに授業追加＋振替パネルあり）。
+  separateSchedulePages: false,
 } as const;
