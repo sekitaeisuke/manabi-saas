@@ -11,4 +11,6 @@ export const FEATURES = {
   diagnosisAddStudent: false,
   // テスト作成の「診断分析多層型テスト」タイプ。false=診断テストの作成は「多層診断」に一本化し、テスト作成は授業確認テスト専用に。
   testDiagnosticType: false,
+  // 保護者の「振替リクエスト」独立ページ。false=授業カレンダーに統合したので隠す（カレンダーの授業詳細から申請＋履歴確認）。
+  separateParentReschedulePage: false,
 } as const;

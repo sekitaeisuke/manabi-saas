@@ -1,16 +1,28 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import type { ShiftEvent } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
+import { notify, links } from "@/lib/notify";
+import { Toast } from "@/components/Toast";
 
 type Lesson = {
   id: string; subject: string | null; scheduled_at: string;
   duration_minutes: number; location: string | null;
   status: string; notes: string | null; teacher_id: string | null;
 };
+type ReschedRequest = {
+  id: string; lesson_id: string; proposed_at: string; reason: string | null;
+  status: "pending" | "approved" | "rejected"; teacher_response: string | null;
+  created_at: string;
+  lessons?: { subject: string | null; scheduled_at: string } | null;
+};
+
+function toLocalInput(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 type Teacher = { id: string; name: string };
 type ShiftTeacher = {
   date: string; slot_start: string; slot_end: string;
@@ -47,8 +59,70 @@ export default function ParentCalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<ShiftEvent | null>(null);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
+  // 振替（カレンダーに統合：授業詳細から申請＋下部で履歴確認）
+  const [parentId, setParentId] = useState<string | null>(null);
+  const [reschedRequests, setReschedRequests] = useState<ReschedRequest[]>([]);
+  const [reschedOpen, setReschedOpen] = useState(false);
+  const [reschedForm, setReschedForm] = useState({ proposed_at: "", reason: "" });
+  const [reschedSubmitting, setReschedSubmitting] = useState(false);
+  const [reschedError, setReschedError] = useState("");
+  const [toast, setToast] = useState("");
+
   const year = current.getFullYear();
   const month = current.getMonth();
+
+  // 保護者ID＋振替申請履歴（この生徒ぶん）を取得
+  const loadResched = useCallback(async () => {
+    if (!selectedId) { setReschedRequests([]); return; }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.email) return;
+    const { data: p } = await supabase.from("parents").select("id").eq("email", session.user.email).maybeSingle();
+    if (!p) return;
+    setParentId(p.id);
+    const { data: rs } = await supabase
+      .from("reschedule_requests")
+      .select("id, lesson_id, proposed_at, reason, status, teacher_response, created_at, lessons(subject, scheduled_at)")
+      .eq("parent_id", p.id)
+      .eq("student_id", selectedId)
+      .order("created_at", { ascending: false });
+    setReschedRequests((rs as unknown as ReschedRequest[]) ?? []);
+  }, [selectedId]);
+
+  useEffect(() => { loadResched(); }, [loadResched]);
+
+  const submitResched = async () => {
+    if (!parentId || !selectedId || !selected) return;
+    if (!reschedForm.proposed_at) { setReschedError("希望日時を選んでください"); return; }
+    setReschedSubmitting(true);
+    setReschedError("");
+    const { error } = await supabase.from("reschedule_requests").insert({
+      lesson_id: selected.id,
+      parent_id: parentId,
+      student_id: selectedId,
+      proposed_at: new Date(reschedForm.proposed_at).toISOString(),
+      reason: reschedForm.reason || null,
+      status: "pending",
+    });
+    setReschedSubmitting(false);
+    if (error) { setReschedError(`送信に失敗: ${error.message}`); return; }
+
+    if (selected.teacher_id) {
+      await notify({
+        actor_kind: "teacher",
+        actor_id: selected.teacher_id,
+        event_type: "reschedule_request",
+        subject: "振替リクエストが届いています",
+        body_text: `${selected.subject ?? ""}（元の日時：${new Date(selected.scheduled_at).toLocaleString("ja-JP")}）\n希望：${new Date(reschedForm.proposed_at).toLocaleString("ja-JP")}\n理由：${reschedForm.reason || "(未記入)"}`,
+        link: links.teacherReschedule(),
+      });
+    }
+
+    setReschedForm({ proposed_at: "", reason: "" });
+    setReschedOpen(false);
+    setSelected(null);
+    setToast("振替申請を送信しました");
+    loadResched();
+  };
 
   // 生徒の学校IDを取得
   useEffect(() => {
@@ -158,6 +232,7 @@ export default function ParentCalendarPage() {
 
   return (
     <div className="px-4 py-8 text-slate-900 sm:px-6">
+      {toast && <Toast message={toast} onClose={() => setToast("")} />}
       <div className="mx-auto max-w-6xl">
         {/* ヘッダー */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -229,7 +304,7 @@ export default function ParentCalendarPage() {
                       ))}
                       {/* 授業 */}
                       {dayLessons.map((l) => (
-                        <button key={l.id} onClick={() => setSelected(l)}
+                        <button key={l.id} onClick={() => { setReschedOpen(false); setReschedForm({ proposed_at: "", reason: "" }); setReschedError(""); setSelected(l); }}
                           className={`w-full truncate rounded px-1 py-0.5 text-left text-[10px] font-semibold ${
                             l.status === "canceled" ? "bg-slate-100 text-slate-400 line-through"
                             : l.status === "completed" ? "bg-green-100 text-green-700"
@@ -251,6 +326,33 @@ export default function ParentCalendarPage() {
             </div>
           </div>
         )}
+
+        {/* 振替申請の状況（別ページを廃し、カレンダー下でそのまま確認できる） */}
+        {selectedId && reschedRequests.length > 0 && (
+          <section className="mt-6">
+            <h2 className="mb-3 text-sm font-semibold text-slate-700">振替申請の状況</h2>
+            <div className="space-y-2">
+              {reschedRequests.map((r) => (
+                <div key={r.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <ReschedBadge status={r.status} />
+                    <span className="text-xs text-slate-400">{new Date(r.created_at).toLocaleDateString("ja-JP")} 申請</span>
+                  </div>
+                  <p className="text-sm font-medium text-slate-900">
+                    {r.lessons?.subject ?? "—"} ・ 元：{r.lessons?.scheduled_at ? new Date(r.lessons.scheduled_at).toLocaleString("ja-JP", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—"}
+                    　→　希望：{new Date(r.proposed_at).toLocaleString("ja-JP", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" })}
+                  </p>
+                  {r.reason && <p className="mt-1 text-xs text-slate-500">理由：{r.reason}</p>}
+                  {r.teacher_response && (
+                    <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-700">
+                      <span className="font-semibold text-slate-500">講師より：</span>{r.teacher_response}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       {/* 授業詳細モーダル */}
@@ -270,14 +372,42 @@ export default function ParentCalendarPage() {
               <Row label="ステータス"><StatusBadge status={selected.status} /></Row>
               {selected.notes && <Row label="備考">{selected.notes}</Row>}
             </dl>
+            {/* 振替申請（この授業について、その場で申請できる） */}
+            {selected.status !== "canceled" && selected.status !== "completed" && reschedOpen && (
+              <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                <p className="mb-3 text-sm font-semibold text-slate-800">この授業の振替を申請</p>
+                <label className="block text-xs text-slate-600">
+                  希望日時
+                  <input type="datetime-local" value={reschedForm.proposed_at}
+                    min={toLocalInput(new Date())}
+                    onChange={(e) => setReschedForm({ ...reschedForm, proposed_at: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+                </label>
+                <label className="mt-3 block text-xs text-slate-600">
+                  理由（任意）
+                  <textarea value={reschedForm.reason} rows={2} placeholder="例：学校行事のため"
+                    onChange={(e) => setReschedForm({ ...reschedForm, reason: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" />
+                </label>
+                {reschedError && <p className="mt-2 text-sm text-red-600">{reschedError}</p>}
+                <div className="mt-3 flex justify-end gap-2">
+                  <button onClick={() => setReschedOpen(false)}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-white">やめる</button>
+                  <button onClick={submitResched} disabled={reschedSubmitting || !reschedForm.proposed_at}
+                    className="rounded-xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40">
+                    {reschedSubmitting ? "送信中..." : "申請する"}
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="mt-6 flex justify-between gap-3">
               <button onClick={() => setSelected(null)}
                 className="rounded-2xl border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">閉じる</button>
-              {selected.status !== "canceled" && selected.status !== "completed" && (
-                <Link href={`/parent/dashboard/reschedule?lesson=${selected.id}`}
+              {selected.status !== "canceled" && selected.status !== "completed" && !reschedOpen && (
+                <button onClick={() => { setReschedError(""); setReschedOpen(true); }}
                   className="rounded-2xl bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-700">
                   振替を申請する
-                </Link>
+                </button>
               )}
             </div>
           </div>
@@ -314,6 +444,16 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
       <dd className="flex-1 text-slate-900">{children}</dd>
     </div>
   );
+}
+
+function ReschedBadge({ status }: { status: "pending" | "approved" | "rejected" }) {
+  const map = {
+    pending:  { label: "申請中", cls: "bg-amber-100 text-amber-700" },
+    approved: { label: "承認",   cls: "bg-green-100 text-green-700" },
+    rejected: { label: "不可",   cls: "bg-red-100 text-red-700" },
+  };
+  const v = map[status];
+  return <span className={`rounded-full px-3 py-0.5 text-xs font-bold ${v.cls}`}>{v.label}</span>;
 }
 
 function StatusBadge({ status }: { status: string }) {

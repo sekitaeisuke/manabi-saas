@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense, useEffect, useState, useCallback } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter, redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
 import { notify, links } from "@/lib/notify";
 import { Toast } from "@/components/Toast";
+import { FEATURES } from "@/lib/features";
 
 type Lesson = {
   id: string;
@@ -234,6 +235,8 @@ function StatusBadge({ status }: { status: Request["status"] }) {
 }
 
 export default function ParentReschedulePage() {
+  // 振替リクエストは授業カレンダーに統合済み。直リンクもカレンダーへ送る（フラグを戻せば従来ページが復活）。
+  if (!FEATURES.separateParentReschedulePage) redirect("/parent/dashboard/calendar");
   return (
     <Suspense fallback={<div className="px-6 py-10 text-slate-400">読み込み中...</div>}>
       <ReschedulePageInner />
