@@ -6,6 +6,7 @@ import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { triggerConfetti } from "@/lib/confetti";
 import { maxBuyableShares, holdingValuation } from "@/lib/classStock";
+import { ECON } from "@/lib/economyFeatures";
 import { StockChart, type StockPoint } from "@/components/StockChart";
 import type { Student } from "@/lib/supabase";
 
@@ -326,6 +327,7 @@ export function EconomyPanel({ student }: { student: Student }) {
       </div>
 
       {/* 🤝 友達を紹介しよう（一番大きく稼げる！） */}
+      {ECON.referral && (
       <div className="overflow-hidden rounded-3xl border border-pink-200 bg-gradient-to-br from-pink-50 via-rose-50 to-amber-50 p-6 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -364,6 +366,7 @@ export function EconomyPanel({ student }: { student: Student }) {
           </ul>
         )}
       </div>
+      )}
 
       {/* 📈 AC の増やし方・減り方 */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -410,7 +413,7 @@ export function EconomyPanel({ student }: { student: Student }) {
       </div>
 
       {/* みんなの株価ランキング＆ライバル塾（目標） */}
-      {ranking.rows.length > 0 && (
+      {ECON.ranking && ranking.rows.length > 0 && (
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-3">
             <p className="text-sm font-bold text-slate-800">みんなの株価ランキング</p>
@@ -499,6 +502,7 @@ export function EconomyPanel({ student }: { student: Student }) {
         <p className="mt-2 text-[11px] text-slate-400">※ 破産防止のため、投資はウォレット全体の50%までに制限されています。</p>
 
         {/* 教室の応援AC（みんなの投資＝教室の充実） */}
+        {ECON.supportMeter && (
         <div className="mt-4 rounded-2xl bg-indigo-50 p-4">
           <div className="flex items-end justify-between">
             <p className="text-sm font-bold text-indigo-900">🏫 この教室の応援AC</p>
@@ -509,10 +513,11 @@ export function EconomyPanel({ student }: { student: Student }) {
             自分たちのがんばりが、自分たちの教室をよくしていきます。
           </p>
         </div>
+        )}
       </div>
 
       {/* 🗳 株主の声（自塾株を持っている人だけ） */}
-      {holding.shares > 0 && (
+      {ECON.voice && holding.shares > 0 && (
         <div className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
           <p className="text-sm font-bold text-violet-900">🗳 株主の声</p>
           <p className="mb-3 text-xs text-violet-700/80">あなたは自塾株の株主です（{holding.shares}株）。教室への意見・要望を先生に伝えられます。</p>

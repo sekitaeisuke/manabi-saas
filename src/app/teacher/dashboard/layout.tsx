@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Logo, LogoIcon } from "@/components/Logo";
 import { supabase } from "@/lib/supabase";
 import { HREF_MODULE, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
+import { ECON } from "@/lib/economyFeatures";
 
 type BadgeKey = "pending" | "unread" | "resched" | "economy";
 type NavLeaf = { href: string; label: string; iconKey: IconKey; badge?: BadgeKey; adminOnly?: boolean };
@@ -138,7 +139,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       setPendingCount(pending ?? 0);
       setUnreadMessages(unread ?? 0);
       setPendingReschedules(resched ?? 0);
-      setEconomyCount((exch ?? 0) + (voice ?? 0) + (refer ?? 0));
+      setEconomyCount((exch ?? 0) + (ECON.voice ? (voice ?? 0) : 0) + (ECON.referral ? (refer ?? 0) : 0));
     };
     fetchCounts();
     const timer = setInterval(fetchCounts, 60000);

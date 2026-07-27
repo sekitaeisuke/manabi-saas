@@ -5,6 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
+import { ECON } from "@/lib/economyFeatures";
 
 type Student = { id: string; name: string; grade: string; school_id: string | null };
 type School = { id: string; name: string; current_stock_price: number };
@@ -288,7 +289,7 @@ export default function TeacherEconomyPage() {
 
   const TABS: { key: "input" | "voice" | "config" | "status"; label: string }[] = [
     { key: "input", label: "✍️ 手動入力" },
-    { key: "voice", label: "🗣 声・紹介" },
+    ...((ECON.voice || ECON.referral) ? [{ key: "voice" as const, label: "🗣 声・紹介" }] : []),
     { key: "config", label: "⚙ 設定" },
     { key: "status", label: "📊 状況" },
   ];
@@ -309,9 +310,9 @@ export default function TeacherEconomyPage() {
         <span className="mr-1 text-xs font-bold text-slate-400">要対応</span>
         {([
           { label: "交換承認", n: pending.length, to: "input" as const },
-          { label: "株主の声", n: openVoices, to: "voice" as const },
-          { label: "紹介申請", n: pendingRefs, to: "voice" as const },
-        ] as const).map((a) => (
+          ...(ECON.voice ? [{ label: "株主の声", n: openVoices, to: "voice" as const }] : []),
+          ...(ECON.referral ? [{ label: "紹介申請", n: pendingRefs, to: "voice" as const }] : []),
+        ]).map((a) => (
           <button key={a.label} onClick={() => setTab(a.to)}
             className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
               a.n > 0 ? "bg-rose-50 text-rose-600 hover:bg-rose-100" : "bg-slate-50 text-slate-400"
@@ -327,7 +328,8 @@ export default function TeacherEconomyPage() {
       {/* タブ */}
       <div className="flex gap-2">
         {TABS.map((t) => {
-          const badge = t.key === "input" ? pending.length : t.key === "voice" ? openVoices + pendingRefs : 0;
+          const badge = t.key === "input" ? pending.length
+            : t.key === "voice" ? (ECON.voice ? openVoices : 0) + (ECON.referral ? pendingRefs : 0) : 0;
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-bold transition ${
@@ -396,7 +398,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* ライバル塾（目標株価） */}
-      {tab === "config" && (
+      {ECON.ranking && tab === "config" && (
       <section className="rounded-3xl border border-amber-100 bg-amber-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-amber-900">ライバル塾（目標株価）</h2>
         <p className="mb-3 text-xs text-amber-700/80">生徒の「経済」タブに🎯目標として表示（投資は自塾のみ）。<b>自動変動</b>ONにすると、週次計算のたびに「変動幅」の範囲でライバルも上下します。</p>
@@ -601,7 +603,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* 友人紹介（講師確認型） */}
-      {tab === "voice" && (
+      {ECON.referral && tab === "voice" && (
       <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-violet-900">友人紹介</h2>
         <p className="mb-3 text-xs text-violet-700/80">紹介を登録→入塾確定で紹介者に付与→友人が生徒登録されたら紐付けて被紹介者に付与。</p>
@@ -650,7 +652,7 @@ export default function TeacherEconomyPage() {
       )}
 
       {/* 株主の声 */}
-      {tab === "voice" && (
+      {ECON.voice && tab === "voice" && (
       <section className="rounded-3xl border border-violet-100 bg-violet-50/40 p-6 shadow-sm">
         <h2 className="mb-1 text-sm font-bold text-violet-900">🗳 株主の声</h2>
         <p className="mb-3 text-xs text-violet-700/80">自塾株を持つ生徒からの意見・要望（保有株数つき）。</p>

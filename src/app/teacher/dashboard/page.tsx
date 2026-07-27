@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { Skeleton } from "@/components/Skeleton";
+import { ECON } from "@/lib/economyFeatures";
 import type { StudentKarteJson } from "@/lib/supabase";
 
 type Counts = {
@@ -241,8 +242,8 @@ export default function TeacherDashboardPage() {
     { label: "未送信の報告書", count: counts.draftReports, href: "/teacher/dashboard/reports" },
     { label: "気がかりな生徒", count: counts.concerns, href: "/teacher/dashboard/collaboration" },
     { label: "報酬交換の承認", count: counts.economyApprovals, href: "/teacher/dashboard/economy" },
-    { label: "株主の声", count: counts.economyVoices, href: "/teacher/dashboard/economy" },
-    { label: "友達紹介の申請", count: counts.economyReferrals, href: "/teacher/dashboard/economy" },
+    ...(ECON.voice ? [{ label: "株主の声", count: counts.economyVoices, href: "/teacher/dashboard/economy" }] : []),
+    ...(ECON.referral ? [{ label: "友達紹介の申請", count: counts.economyReferrals, href: "/teacher/dashboard/economy" }] : []),
   ].filter((i) => i.count > 0) : [];
 
   return (
