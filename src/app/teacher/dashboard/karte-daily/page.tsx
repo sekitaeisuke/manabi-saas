@@ -4,8 +4,10 @@ import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 
 import { useState, useEffect, useCallback } from "react";
+import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { StudentKarte } from "@/lib/supabase";
+import { FEATURES } from "@/lib/features";
 
 type StudentLite = { id: string; name: string; grade: string };
 type DailyTaskRow = { id: string; task_date: string; subject: string | null; content: string; amount: string | null; done: boolean; sort_order: number };
@@ -33,6 +35,8 @@ function fmtWhen(iso: string) {
 }
 
 export default function KarteDailyPage() {
+  // 日次カルテは「3か月ビジョン」に一本化。ナビから隠すだけでなく直リンクも封じる。
+  if (!FEATURES.dailyKarte) redirect("/teacher/dashboard/karte");
   const [rows, setRows] = useState<StudentKarte[]>([]);
   const [students, setStudents] = useState<StudentLite[]>([]);
   const [loading, setLoading] = useState(true);

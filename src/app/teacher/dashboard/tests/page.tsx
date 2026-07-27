@@ -67,8 +67,14 @@ export default function TeacherTestsPage() {
       <main className="mx-auto max-w-6xl">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-slate-950">診断・確認テスト</h1>
-            <p className="mt-1 text-slate-600">AIがテストを自動生成・解答分析・レポート作成を行います。</p>
+            <h1 className="text-3xl font-bold text-slate-950">
+              {FEATURES.testDiagnosticType ? "診断・確認テスト" : "確認テスト作成・配布"}
+            </h1>
+            <p className="mt-1 text-slate-600">
+              {FEATURES.testDiagnosticType
+                ? "AIがテストを自動生成・解答分析・レポート作成を行います。"
+                : "授業確認テストをAIで自動生成・配布します（学力の多層診断は「多層診断」ページへ）。"}
+            </p>
           </div>
           <div className="flex gap-3">
             {view === "list" ? (

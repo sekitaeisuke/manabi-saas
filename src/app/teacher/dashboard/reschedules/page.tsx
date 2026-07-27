@@ -2,11 +2,13 @@
 import { showToast } from "@/lib/toast";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { Student } from "@/lib/supabase";
 import { notify, links } from "@/lib/notify";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Skeleton } from "@/components/Skeleton";
+import { FEATURES } from "@/lib/features";
 
 type Request = {
   id: string;
@@ -26,6 +28,8 @@ type Request = {
 type Tab = "pending" | "responded";
 
 export default function ReschedulesPage() {
+  // 振替リクエストは来塾カレンダーに統合済み。ナビから隠すだけでなく直リンクも封じる。
+  if (!FEATURES.separateSchedulePages) redirect("/teacher/dashboard/calendar");
   const [tab, setTab] = useState<Tab>("pending");
   const [requests, setRequests] = useState<Request[]>([]);
   const [students, setStudents] = useState<Student[]>([]);

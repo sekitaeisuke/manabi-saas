@@ -9,6 +9,7 @@ import { showToast } from "@/lib/toast";
 import { sanitizeHtml } from "@/lib/sanitize";
 import type { Student, StudentKarte } from "@/lib/supabase";
 import { Skeleton } from "@/components/Skeleton";
+import { FEATURES } from "@/lib/features";
 
 const LESSON_STATUS_JA: Record<string, string> = {
   scheduled: "予定",
@@ -253,9 +254,9 @@ export default function StudentDetailPage() {
             <p className="mt-1 text-sm text-slate-600">{student.grade} ・ ログインID：{student.login_id ?? "—"}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href={`/teacher/dashboard/lessons`}
+            <Link href={FEATURES.separateSchedulePages ? "/teacher/dashboard/lessons" : "/teacher/dashboard/calendar"}
               className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm hover:bg-slate-50">
-              授業予定へ
+              {FEATURES.separateSchedulePages ? "授業予定へ" : "来塾カレンダーへ"}
             </Link>
             <Link href={`/teacher/dashboard/messages`}
               className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">

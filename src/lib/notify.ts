@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { FEATURES } from "@/lib/features";
 
 export type NotifyActor = "parent" | "teacher" | "student";
 
@@ -38,6 +39,6 @@ export const links = {
   parentMessages:    () => `${origin()}/parent/dashboard/messages`,
   parentReschedule:  () => `${origin()}/parent/dashboard/reschedule`,
   teacherMessages:   () => `${origin()}/teacher/dashboard/messages`,
-  teacherReschedule: () => `${origin()}/teacher/dashboard/reschedules`,
+  teacherReschedule: () => `${origin()}${FEATURES.separateSchedulePages ? "/teacher/dashboard/reschedules" : "/teacher/dashboard/calendar"}`,
   studentDashboard:  () => `${origin()}/student/dashboard`,
 };

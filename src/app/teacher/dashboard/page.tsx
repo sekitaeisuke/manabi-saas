@@ -202,7 +202,7 @@ export default function TeacherDashboardPage() {
     for (const r of rescheds ?? []) {
       const p = Array.isArray(r.parents) ? r.parents[0] : r.parents;
       const l = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons;
-      items.push({ id: `s-${r.id}`, kind: "reschedule", title: `振替申請（${r.status === "pending" ? "申請中" : r.status === "approved" ? "承認" : "不可"}）`, body: `${p?.name ?? "—"} ・ ${l?.subject ?? "—"}`, created_at: r.created_at, href: "/teacher/dashboard/reschedules" });
+      items.push({ id: `s-${r.id}`, kind: "reschedule", title: `振替申請（${r.status === "pending" ? "申請中" : r.status === "approved" ? "承認" : "不可"}）`, body: `${p?.name ?? "—"} ・ ${l?.subject ?? "—"}`, created_at: r.created_at, href: FEATURES.separateSchedulePages ? "/teacher/dashboard/reschedules" : "/teacher/dashboard/calendar" });
     }
     for (const m of pmsgs ?? []) items.push({ id: `m-${m.id}`, kind: "parent_msg", title: `保護者メッセージ：${m.parent_name ?? "—"}`, body: m.subject ?? "(件名なし)", created_at: m.created_at, href: "/teacher/dashboard/messages" });
     items.sort((a, b) => b.created_at.localeCompare(a.created_at));

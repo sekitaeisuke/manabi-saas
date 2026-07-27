@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import type { Student, Teacher, School } from "@/lib/supabase";
 import { showToast } from "@/lib/toast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Skeleton } from "@/components/Skeleton";
+import { FEATURES } from "@/lib/features";
 
 type RescheduleReq = {
   id: string;
@@ -46,6 +48,8 @@ const EMPTY_FORM = {
 };
 
 export default function TeacherLessonsPage() {
+  // 「授業予定」は来塾カレンダーに統合済み。ナビから隠すだけでなく直リンクも封じる。
+  if (!FEATURES.separateSchedulePages) redirect("/teacher/dashboard/calendar");
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
