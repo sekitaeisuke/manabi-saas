@@ -35,18 +35,23 @@ export default function ParentReportsPage() {
   const [reports, setReports] = useState<Report[]>([]);
   const [selected, setSelected] = useState<Report | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showAll, setShowAll] = useState(false);
+
+  const INITIAL_COUNT = 8; // 直近8回分を初期表示（それ以前は「もっと見る」で展開）
 
   const load = useCallback(async () => {
     if (!selectedId) return;
     setLoading(true);
+    setShowAll(false);
     const { data: stu } = await supabase
-      .from("students").select("name, grade").eq("id", selectedId).maybeSingle();
+      .from("students").select("name").eq("id", selectedId).maybeSingle();
     if (!stu) { setLoading(false); return; }
+    // ※ test_grade では絞らない。生徒が進級すると旧学年で保存された過去の報告書が
+    //    すべて見えなくなるため（氏名＋sent で全学年の履歴を通して拾う。保護者RLSで自分の子に限定済み）。
     const { data } = await supabase
       .from("lesson_reports")
       .select("*")
       .eq("student_name", stu.name)
-      .eq("test_grade", stu.grade)
       .eq("status", "sent")
       .order("created_at", { ascending: false });
     setReports((data as Report[]) ?? []);
@@ -147,7 +152,10 @@ export default function ParentReportsPage() {
       <div className="mx-auto max-w-5xl">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-slate-950">報告書</h1>
-          <p className="mt-1 text-slate-600">講師から送信された授業報告書を確認できます。</p>
+          <p className="mt-1 text-slate-600">
+            講師から送信された授業報告書（授業確認テストを含む）を確認できます。
+            {reports.length > 0 && `（全 ${reports.length} 件）`}
+          </p>
         </div>
 
         {loading ? (
@@ -177,7 +185,7 @@ export default function ParentReportsPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {reports.map((r) => (
+            {(showAll ? reports : reports.slice(0, INITIAL_COUNT)).map((r) => (
               <div key={r.id}
                 className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md cursor-pointer"
                 onClick={() => setSelected(r)}>
@@ -212,6 +220,14 @@ export default function ParentReportsPage() {
                 </div>
               </div>
             ))}
+
+            {!showAll && reports.length > INITIAL_COUNT && (
+              <button
+                onClick={() => setShowAll(true)}
+                className="w-full rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-4 text-sm font-semibold text-slate-600 transition hover:border-blue-300 hover:text-blue-600">
+                もっと見る（残り {reports.length - INITIAL_COUNT} 件）
+              </button>
+            )}
           </div>
         )}
       </div>
