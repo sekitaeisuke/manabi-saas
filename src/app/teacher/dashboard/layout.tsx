@@ -160,6 +160,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (it.adminOnly && userRole !== "admin") return false;
     if (it.href === "/teacher/dashboard/karte-daily" && !FEATURES.dailyKarte) return false;
     if ((it.href === "/teacher/dashboard/lessons" || it.href === "/teacher/dashboard/reschedules") && !FEATURES.separateSchedulePages) return false;
+    if (it.href === "/teacher/dashboard/notifications" && !FEATURES.notificationLog) return false;
     const mod = HREF_MODULE[it.href];
     if (mod && enabledModules && !enabledModules[mod]) return false;  // 無効モジュールは非表示
     return true;

@@ -5,4 +5,6 @@ export const FEATURES = {
   dailyKarte: false,
   // 授業予定・振替の別メニュー。false=来塾カレンダーに統合したので隠す（カレンダーに授業追加＋振替パネルあり）。
   separateSchedulePages: false,
+  // 通知ログのナビ項目。false=日常不要なので「連絡」から隠す（失敗はダッシュボードのバナー→URLで確認可）。
+  notificationLog: false,
 } as const;
