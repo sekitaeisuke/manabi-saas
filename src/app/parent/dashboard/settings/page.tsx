@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
+import LineLinkCard from "@/components/LineLinkCard";
 
 type Prefs = {
   id?: string;
@@ -11,6 +12,7 @@ type Prefs = {
   line_enabled: boolean;
   email_override: string | null;
   push_endpoint: string | null;
+  line_user_id: string | null;
 };
 
 const DEFAULTS: Prefs = {
@@ -19,6 +21,7 @@ const DEFAULTS: Prefs = {
   line_enabled: false,
   email_override: null,
   push_endpoint: null,
+  line_user_id: null,
 };
 
 export default function ParentSettingsPage() {
@@ -191,15 +194,15 @@ export default function ParentSettingsPage() {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <Toggle
-                title="LINE で受け取る"
-                description="LINE 連携は今後の機能。トグルだけ先行で記録します。"
-                checked={prefs.line_enabled}
-                onChange={(v) => setPrefs({ ...prefs, line_enabled: v })}
-                badge="準備中"
+            {parentId && (
+              <LineLinkCard
+                actorKind="parent"
+                actorId={parentId}
+                lineUserId={prefs.line_user_id}
+                lineEnabled={prefs.line_enabled}
+                onChange={(v) => setPrefs({ ...prefs, line_user_id: v.line_user_id, line_enabled: v.line_enabled })}
               />
-            </div>
+            )}
 
             <div className="flex items-center gap-3">
               <button onClick={save} disabled={saving}

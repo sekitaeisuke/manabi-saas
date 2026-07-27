@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
 import { requireUser, isInternalCall } from "@/lib/apiAuth";
+import { linePush, lineToken } from "@/lib/line";
 
 type ActorKind = "parent" | "teacher" | "student";
 
@@ -187,30 +188,18 @@ export async function POST(req: NextRequest) {
       await log("line", "skipped", null, "line_user_id 未登録");
       results.line = { status: "skipped", error: "no line user id" };
     } else {
-      const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-      if (!lineToken) {
-        await log("line", "skipped", pref.line_user_id, "LINE_CHANNEL_ACCESS_TOKEN 未設定");
-        results.line = { status: "skipped", error: "LINE_CHANNEL_ACCESS_TOKEN 未設定" };
+      if (!lineToken()) {
+        await log("line", "skipped", pref.line_user_id, "LINE アクセストークン未設定");
+        results.line = { status: "skipped", error: "LINE アクセストークン未設定" };
       } else {
         const lineText = `${payload.subject}\n\n${payload.body_text}${payload.link ? `\n\n${payload.link}` : ""}`;
-        const lineRes = await fetch("https://api.line.me/v2/bot/message/push", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${lineToken}`,
-          },
-          body: JSON.stringify({
-            to: pref.line_user_id,
-            messages: [{ type: "text", text: lineText }],
-          }),
-        });
-        if (lineRes.ok) {
+        const r = await linePush(pref.line_user_id, lineText);
+        if (r.ok) {
           await log("line", "sent", pref.line_user_id, null);
           results.line = { status: "sent" };
         } else {
-          const errText = await lineRes.text().catch(() => "(読み取り不可)");
-          await log("line", "failed", pref.line_user_id, `LINE API ${lineRes.status}: ${errText}`);
-          results.line = { status: "failed", error: errText };
+          await log("line", "failed", pref.line_user_id, r.error);
+          results.line = { status: "failed", error: r.error };
         }
       }
     }
