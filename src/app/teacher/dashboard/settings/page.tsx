@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 import LineLinkCard from "@/components/LineLinkCard";
+import LineDiagnoseCard from "@/components/LineDiagnoseCard";
 
 type Prefs = {
   id?: string;
@@ -26,6 +27,7 @@ const DEFAULTS: Prefs = {
 
 export default function TeacherSettingsPage() {
   const [teacherId, setTeacherId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [defaultEmail, setDefaultEmail] = useState<string>("");
   const [prefs, setPrefs] = useState<Prefs>(DEFAULTS);
   const [loading, setLoading] = useState(true);
@@ -42,9 +44,10 @@ export default function TeacherSettingsPage() {
     if (!session?.user?.email) return;
     const email = session.user.email;
     setDefaultEmail(email);
-    const { data: t } = await supabase.from("teachers").select("id").eq("email", email).maybeSingle();
+    const { data: t } = await supabase.from("teachers").select("id, role").eq("email", email).maybeSingle();
     if (!t) { setLoading(false); return; }
     setTeacherId(t.id);
+    setIsAdmin(t.role === "admin");
 
     const { data: pr } = await supabase
       .from("notification_preferences")
@@ -200,6 +203,9 @@ export default function TeacherSettingsPage() {
                 onChange={(v) => setPrefs({ ...prefs, line_user_id: v.line_user_id, line_enabled: v.line_enabled })}
               />
             )}
+
+            {/* 保護者に案内を出す前の配線チェック（管理者のみ） */}
+            {isAdmin && <LineDiagnoseCard />}
 
             <div className="flex items-center gap-3">
               <button onClick={save} disabled={saving}
