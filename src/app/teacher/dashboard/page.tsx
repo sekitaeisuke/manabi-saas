@@ -8,6 +8,8 @@ import { showToast } from "@/lib/toast";
 import { Skeleton } from "@/components/Skeleton";
 import { ECON } from "@/lib/economyFeatures";
 import { FEATURES } from "@/lib/features";
+import { resolveEnabled, type ModuleSettingRow } from "@/lib/modules";
+import { StockChart, type StockPoint } from "@/components/StockChart";
 import {
   Badge, Callout, Card, CountBadge, EmptyState,
   LinkButton, PageHeader, SectionTitle, Spinner, cx,
@@ -72,6 +74,20 @@ type Counts = {
   economyApprovals: number; economyVoices: number; economyReferrals: number;
 };
 
+type StockHist = {
+  price: number; prev_price: number | null; calculated_at: string;
+  study_score: number | null; contrib_score: number | null;
+  growth_score: number | null; penalty_score: number | null;
+};
+type StockData = {
+  school_name: string | null;
+  current_price: number;
+  history: StockHist[];
+};
+// どの教室ぶんを読んだかを一緒に持つ。教室を切り替えた瞬間に
+// 前の教室の株価が一瞬見えるのを防ぐ（描画側でIDが一致するかを見る）。
+type StockState = { schoolId: string; data: StockData | null };
+
 const UNDERSTAND: Record<string, { label: string; tone: "positive" | "neutral" | "caution" }> = {
   good:   { label: "◎手応えあり", tone: "positive" },
   normal: { label: "○ふつう",     tone: "neutral" },
@@ -116,8 +132,11 @@ export default function TeacherDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busyFocus, setBusyFocus] = useState<string | null>(null);
+  // 塾内経済は既定OFFのモジュール。ONの塾でだけ株価を出す。
+  const [stockEnabled, setStockEnabled] = useState(false);
+  const [stockState, setStockState] = useState<StockState | null>(null);
 
-  /* ── 教室一覧＋最後に見ていた教室 ───────────────────────── */
+  /* ── 教室一覧＋最後に見ていた教室＋モジュール解決 ────────── */
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -136,8 +155,38 @@ export default function TeacherDashboardPage() {
         (me?.school_id && list.some((s) => s.id === me.school_id) && me.school_id) ||
         null;
       setSchoolId(initial);
+
+      // 塾内経済モジュールが自分のグループで有効か（ナビと同じ解決を使う）
+      let groupName: string | null = null;
+      if (me?.school_id) {
+        const { data: sc } = await supabase
+          .from("schools").select("group_name").eq("id", me.school_id).maybeSingle();
+        groupName = sc?.group_name ?? null;
+      }
+      const { data: ms } = await supabase.from("module_settings").select("scope, module_key, enabled");
+      setStockEnabled(resolveEnabled((ms as ModuleSettingRow[]) ?? [], groupName).class_stock);
     })();
   }, []);
+
+  /* ── 選んだ教室の株価推移 ─────────────────────────────── */
+  useEffect(() => {
+    if (!stockEnabled || !schoolId) return;
+    const sid = schoolId;
+    let cancelled = false;
+    (async () => {
+      let data: StockData | null = null;
+      try {
+        const res = await authFetch(`/api/stock/chart?school_id=${encodeURIComponent(sid)}&limit=26`);
+        const j = await res.json();
+        // class-stock-setup.sql 未実行など、取れなければ黙って出さない（ホームを止めない）
+        if (res.ok && !j.error) data = j as StockData;
+      } catch {
+        data = null;
+      }
+      if (!cancelled) setStockState({ schoolId: sid, data });
+    })();
+    return () => { cancelled = true; };
+  }, [stockEnabled, schoolId]);
 
   const selectSchool = (id: string) => {
     const next = schoolId === id ? null : id;   // もう一度押したら選択解除
@@ -370,6 +419,23 @@ export default function TeacherDashboardPage() {
     return m;
   }, [schools, students, resting]);
 
+  /* ── 株価チャート用の派生値 ───────────────────────────── */
+  // 読み込み済みのものが「今選んでいる教室」のものであるときだけ使う
+  const stockReady = !!schoolId && stockState?.schoolId === schoolId;
+  const stock = stockReady ? stockState!.data : null;
+  const stockPoints: StockPoint[] = useMemo(
+    () => (stock?.history ?? []).map((h) => ({
+      price: h.price,
+      label: new Date(h.calculated_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" }),
+    })),
+    [stock],
+  );
+  const stockLatest = stock?.history?.[stock.history.length - 1] ?? null;
+  const stockDelta =
+    stockLatest && stockLatest.prev_price != null
+      ? stockLatest.price - stockLatest.prev_price
+      : null;
+
   const shownStudents = schoolId ? students.filter((s) => s.schoolId === schoolId) : [];
   const shownResting = schoolId ? resting.filter((r) => r.schoolId === schoolId) : resting;
   const selectedSchool = schools.find((s) => s.id === schoolId) ?? null;
@@ -465,6 +531,92 @@ export default function TeacherDashboardPage() {
           </p>
         )}
       </section>
+
+      {/* ── ①.5 選んだ教室の株価推移（塾内経済がONの塾だけ） ── */}
+      {stockEnabled && schoolId && (
+        <section className="mb-8">
+          <SectionTitle
+            action={
+              <Link href="/teacher/dashboard/economy" className="text-sm font-semibold text-brand-600 hover:underline">
+                塾内経済を開く →
+              </Link>
+            }
+          >
+            {selectedSchool ? `${selectedSchool.name}・自塾株の推移` : "自塾株の推移"}
+          </SectionTitle>
+
+          {!stockReady ? (
+            <Skeleton className="h-56 w-full rounded-card" />
+          ) : !stock ? (
+            <Card>
+              <p className="text-sm text-ink-faint">
+                株価の記録がまだありません。週次の株価計算が動くと、ここに推移が出ます。
+              </p>
+            </Card>
+          ) : (
+            <Card padding="lg">
+              <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold text-ink-faint">現在の株価</p>
+                  <p className="mt-1 flex items-baseline gap-2">
+                    <span data-numeric className="text-4xl font-bold tracking-tight text-ink">
+                      {stock.current_price.toLocaleString()}
+                    </span>
+                    <span className="text-sm font-semibold text-ink-faint">AC</span>
+                    {stockDelta != null && stockDelta !== 0 && (
+                      <span
+                        data-numeric
+                        className={cx(
+                          "rounded-pill px-2 py-0.5 text-xs font-bold",
+                          stockDelta > 0
+                            ? "bg-positive-50 text-positive-700"
+                            : "bg-critical-50 text-critical-700",
+                        )}
+                      >
+                        {stockDelta > 0 ? "▲" : "▼"} {Math.abs(stockDelta).toLocaleString()}
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs text-ink-faint">
+                    生徒の学習・貢献・成長で毎週動きます（直近{stock.history.length}回）
+                  </p>
+                </div>
+
+                {/* 直近の内訳。何が効いて動いたのかが分かるように */}
+                {stockLatest && (
+                  <dl className="flex flex-wrap gap-1.5">
+                    {([
+                      ["学習", stockLatest.study_score, "positive"],
+                      ["貢献", stockLatest.contrib_score, "brand"],
+                      ["成長", stockLatest.growth_score, "positive"],
+                      ["減点", stockLatest.penalty_score, "critical"],
+                    ] as const).map(([label, v, tone]) =>
+                      v == null ? null : (
+                        <div key={label} className="rounded-field bg-canvas-sunken px-2.5 py-1.5 text-center">
+                          <dt className="text-[0.6875rem] font-semibold text-ink-faint">{label}</dt>
+                          <dd
+                            data-numeric
+                            className={cx(
+                              "text-sm font-bold",
+                              tone === "critical" && v > 0 ? "text-critical-700"
+                                : tone === "brand" ? "text-brand-700"
+                                : "text-ink",
+                            )}
+                          >
+                            {v.toLocaleString()}
+                          </dd>
+                        </div>
+                      ),
+                    )}
+                  </dl>
+                )}
+              </div>
+
+              <StockChart points={stockPoints} />
+            </Card>
+          )}
+        </section>
+      )}
 
       {/* ── ② 選んだ教室の今日の生徒 ──────────────────── */}
       <section className="mb-8">

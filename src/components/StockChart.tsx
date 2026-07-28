@@ -20,7 +20,7 @@ export function StockChart({
   if (points.length === 0) {
     return (
       <div
-        className="flex items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-400"
+        className="flex items-center justify-center rounded-card border border-line bg-canvas text-sm text-ink-faint"
         style={{ height: H }}
       >
         まだ株価の履歴がありません（毎週日曜に更新されます）
@@ -48,8 +48,11 @@ export function StockChart({
   const first = pts[0].price;
   const last = pts[pts.length - 1].price;
   const up = last >= first;
+  // globals.css の positive-600 / critical-600 と同値
   const stroke = up ? "#059669" : "#dc2626";
   const fillFrom = up ? "rgba(5,150,105,0.18)" : "rgba(220,38,38,0.16)";
+  const gridStroke = "#e6e9f2"; // --color-line
+  const axisText = "#8593ab";   // --color-ink-faint
 
   // Y 軸グリッド（3本）
   const gridVals = [hi, (hi + lo) / 2, lo].map((v) => Math.round(v));
@@ -67,8 +70,8 @@ export function StockChart({
         const gy = padY + (i * (H - padY * 2)) / 2;
         return (
           <g key={i}>
-            <line x1={padX} y1={gy} x2={W - 8} y2={gy} stroke="#e2e8f0" strokeWidth={1} strokeDasharray="3 3" />
-            <text x={padX - 6} y={gy + 3} textAnchor="end" fontSize={10} fill="#94a3b8">
+            <line x1={padX} y1={gy} x2={W - 8} y2={gy} stroke={gridStroke} strokeWidth={1} strokeDasharray="3 3" />
+            <text x={padX - 6} y={gy + 3} textAnchor="end" fontSize={10} fill={axisText}>
               {v.toLocaleString()}
             </text>
           </g>
@@ -82,8 +85,8 @@ export function StockChart({
       <circle cx={x(pts.length - 1)} cy={y(last)} r={4} fill={stroke} stroke="#fff" strokeWidth={2} />
 
       {/* X 軸の端ラベル（最初と最後） */}
-      <text x={padX} y={H - 4} textAnchor="start" fontSize={10} fill="#94a3b8">{points[0].label}</text>
-      <text x={W - 8} y={H - 4} textAnchor="end" fontSize={10} fill="#94a3b8">{points[points.length - 1].label}</text>
+      <text x={padX} y={H - 4} textAnchor="start" fontSize={10} fill={axisText}>{points[0].label}</text>
+      <text x={W - 8} y={H - 4} textAnchor="end" fontSize={10} fill={axisText}>{points[points.length - 1].label}</text>
     </svg>
   );
 }
