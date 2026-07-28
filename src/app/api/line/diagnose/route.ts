@@ -49,12 +49,19 @@ export async function GET(req: NextRequest) {
     detail: token ? "設定されています" : "未設定",
     fix: "Vercel → Settings → Environment Variables に追加して再デプロイ",
   });
+  // シークレットは値そのものを出さない。ただし「32桁の英数字か」だけは見せる。
+  // 別チャネルの値・改行混入・トークンとの取り違えが、これだけで大体わかる。
+  const secretLooksValid = /^[0-9a-f]{32}$/i.test(secret);
   checks.push({
     key: "secret",
     label: "チャネルシークレット（LINE_OFFICIAL_CHANNEL_SECRET）",
-    ok: !!secret,
-    detail: secret ? "設定されています" : "未設定",
-    fix: "未設定だと Webhook の署名検証が必ず失敗し、連携コードを送っても無反応になります",
+    ok: !!secret && secretLooksValid,
+    detail: !secret
+      ? "未設定"
+      : secretLooksValid
+        ? "設定されています（32桁）"
+        : `形式が違います（${secret.length}文字）。アクセストークンを貼っていないか確認`,
+    fix: "未設定・取り違えだと Webhook の署名検証が必ず失敗し、連携コードを送っても無反応になります",
   });
   checks.push({
     key: "addUrl",

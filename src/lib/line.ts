@@ -7,17 +7,23 @@
 
 import crypto from "node:crypto";
 
+// 環境変数は貼り付け時に改行・空白が混ざりやすい。混ざると署名検証が必ず外れて
+// 「既読になるのに無反応」になるので、読むときに必ず落とす。
+function env(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
 export function lineToken(): string {
-  return process.env.LINE_OFFICIAL_CHANNEL_ACCESS_TOKEN || process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
+  return env("LINE_OFFICIAL_CHANNEL_ACCESS_TOKEN") || env("LINE_CHANNEL_ACCESS_TOKEN");
 }
 
 export function lineSecret(): string {
-  return process.env.LINE_OFFICIAL_CHANNEL_SECRET || process.env.LINE_CHANNEL_SECRET || "";
+  return env("LINE_OFFICIAL_CHANNEL_SECRET") || env("LINE_CHANNEL_SECRET");
 }
 
 /** 友だち追加URL（QR・リンクの掲示用） */
 export function lineAddFriendUrl(): string {
-  return process.env.LINE_OFFICIAL_URL || "";
+  return env("LINE_OFFICIAL_URL");
 }
 
 /** x-line-signature の検証。secret 未設定なら常に false（＝受け付けない） */
