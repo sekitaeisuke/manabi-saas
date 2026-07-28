@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import type { Student } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
 import { FEATURES } from "@/lib/features";
+import { CountBadge, FullPageLoader, cx, inputClass } from "@/components/ui";
 
 type ParentRow = { id: string; name: string; email: string };
 
@@ -104,84 +105,84 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
     router.replace("/login/parent");
   };
 
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="flex items-center gap-3 text-slate-400">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-500" />
-          読み込み中...
-        </div>
-      </div>
-    );
-  }
+  if (checking) return <FullPageLoader />;
 
   const isActive = (href: string) =>
     href === "/parent/dashboard" ? pathname === href : pathname.startsWith(href);
 
   const sidebar = (
-    <aside className="flex h-full flex-col bg-white">
-      <div className="flex h-16 items-center border-b border-slate-100 px-5">
+    <aside className="flex h-full flex-col bg-surface">
+      <div className="flex h-16 items-center border-b border-line px-5">
         <Link href="/parent/dashboard"><Logo size="sm" /></Link>
       </div>
 
-      <div className="border-b border-slate-100 bg-blue-50/60 p-4">
-        <p className="mb-2 text-xs font-semibold text-blue-600">現在表示中のお子さま</p>
+      <div className="border-b border-line bg-canvas p-4">
+        <p className="mb-2 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
+          表示中のお子さま
+        </p>
         {students.length === 0 ? (
-          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <p className="rounded-field border border-caution-200 bg-caution-50 px-3 py-2 text-xs leading-5 text-caution-700">
             ひも付けされたお子さまがいません。塾にご連絡ください。
           </p>
         ) : students.length === 1 ? (
-          <div className="rounded-xl border border-blue-200 bg-white px-3 py-2.5 shadow-sm">
-            <p className="text-sm font-bold text-slate-900">{students[0].name}</p>
-            <p className="text-xs text-slate-500">{students[0].grade}</p>
+          <div className="flex items-center gap-3 rounded-field border border-line bg-surface px-3 py-2.5 shadow-card">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-pill bg-brand-gradient text-sm font-bold text-white">
+              {students[0].name.slice(0, 1)}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-bold text-ink">{students[0].name}</span>
+              <span className="block text-xs text-ink-faint">{students[0].grade}</span>
+            </span>
           </div>
         ) : (
-          <>
-            <p className="mb-1.5 text-xs text-slate-500">お子さまを切り替え：</p>
+          <label className="block">
+            <span className="mb-1.5 block text-xs text-ink-faint">お子さまを切り替え</span>
             <select
               value={selectedId ?? ""}
               onChange={(e) => selectStudent(e.target.value)}
-              className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className={cx(inputClass, "font-semibold")}
             >
               {students.map((s) => (
                 <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>
               ))}
             </select>
-          </>
+          </label>
         )}
       </div>
 
-      <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
-        <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">メニュー</p>
+      <nav aria-label="メインナビゲーション" className="flex-1 space-y-0.5 overflow-y-auto px-3 py-4">
+        <p className="mb-2 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
+          メニュー
+        </p>
         {NAV.map((item) => {
           const active = isActive(item.href);
           const showBadge = item.href === "/parent/dashboard/messages" && unreadCount > 0;
           return (
             <Link key={item.href} href={item.href}
               onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+              aria-current={active ? "page" : undefined}
+              className={cx(
+                "flex items-center gap-3 rounded-field px-3 py-2.5 text-sm transition duration-150",
                 active
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              }`}>
-              <span>{item.label}</span>
-              {showBadge && (
-                <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
-                  {unreadCount}
-                </span>
-              )}
+                  ? "bg-brand-50 font-semibold text-brand-700"
+                  : "font-medium text-ink-muted hover:bg-canvas-sunken hover:text-ink",
+              )}>
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {showBadge ? <CountBadge count={unreadCount} /> : active ? (
+                <span className="h-1.5 w-1.5 shrink-0 rounded-pill bg-brand-600" />
+              ) : null}
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t border-slate-100 p-4 space-y-2">
-        <div className="rounded-xl bg-slate-50 px-3 py-2.5">
-          <p className="truncate text-xs font-medium text-slate-700">{parent?.name}</p>
-          <p className="truncate text-xs text-slate-400">{parent?.email}</p>
+      <div className="space-y-2 border-t border-line p-4">
+        <div className="rounded-field bg-canvas-sunken px-3 py-2.5">
+          <p className="truncate text-xs font-semibold text-ink">{parent?.name}</p>
+          <p className="truncate text-xs text-ink-faint">{parent?.email}</p>
         </div>
         <button onClick={logout}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-100">
+          className="flex w-full items-center justify-center gap-2 rounded-field border border-line-strong bg-surface py-2.5 text-sm font-semibold text-ink-muted transition hover:border-critical-200 hover:bg-critical-50 hover:text-critical-600">
           ログアウト
         </button>
       </div>
@@ -189,30 +190,33 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <div className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-slate-200 shadow-sm lg:block">
+    <div className="flex min-h-screen bg-canvas">
+      <div className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line lg:block">
         {sidebar}
       </div>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <div className="absolute inset-y-0 left-0 w-60">
+          <div className="absolute inset-0 bg-ink/45 backdrop-blur-[2px]" onClick={() => setMobileOpen(false)} />
+          <div className="absolute inset-y-0 left-0 w-64 shadow-pop">
             {sidebar}
           </div>
         </div>
       )}
 
       <div className="flex-1 lg:pl-60">
-        <div className="sticky top-0 z-20 flex h-14 items-center border-b border-slate-200 bg-white px-4 lg:hidden">
+        <div className="sticky top-0 z-20 flex h-14 items-center border-b border-line bg-surface/85 px-4 backdrop-blur-md lg:hidden">
           <Link href="/parent/dashboard"><Logo size="sm" /></Link>
         </div>
 
-        <main className="min-h-screen pb-16 lg:pb-0">{children}</main>
+        <main className="min-h-screen pb-20 lg:pb-0">{children}</main>
       </div>
 
       {/* ボトムナビ（モバイル専用） */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-16 border-t border-slate-200 bg-white lg:hidden">
+      <nav
+        aria-label="下部ナビゲーション"
+        className="fixed bottom-0 left-0 right-0 z-30 flex h-16 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+      >
         {([
           {
             href: "/parent/dashboard",
@@ -259,28 +263,28 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
           return (
             <Link key={item.href} href={item.href}
               onClick={() => setMobileOpen(false)}
-              className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
-                active ? "text-blue-600" : "text-slate-500"
-              }`}>
-              {active && <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-blue-600" />}
+              aria-current={active ? "page" : undefined}
+              className={cx(
+                "relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors",
+                active ? "text-brand-600" : "text-ink-faint",
+              )}>
+              {active && <span aria-hidden className="absolute inset-x-4 top-0 h-0.5 rounded-pill bg-brand-600" />}
               <span className="relative">
                 {item.icon}
                 {item.badge > 0 && (
-                  <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                    {item.badge}
-                  </span>
+                  <CountBadge count={item.badge} className="absolute -right-2.5 -top-1.5 h-4 min-w-4 px-1 text-[0.5625rem]" />
                 )}
               </span>
-              <span className="text-[10px] font-medium">{item.label}</span>
+              <span className="text-[0.625rem] font-semibold">{item.label}</span>
             </Link>
           );
         })}
         <button onClick={() => setMobileOpen(true)}
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-slate-500 transition-colors hover:text-slate-700">
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-ink-faint transition-colors hover:text-ink">
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-          <span className="text-[10px] font-medium">メニュー</span>
+          <span className="text-[0.625rem] font-semibold">メニュー</span>
         </button>
       </nav>
     </div>

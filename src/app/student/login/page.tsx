@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
+import { Button, Field, inputClass, Spinner } from "@/components/ui";
 
 export default function StudentLoginPage() {
   const [loginId, setLoginId] = useState("");
@@ -28,59 +30,75 @@ export default function StudentLoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-canvas-glow px-5 py-12">
       <div className="w-full max-w-sm">
-        {/* ロゴ */}
-        <div className="mb-8 flex flex-col items-center gap-3">
+        <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <Logo size="md" />
-          <p className="text-sm text-slate-500">生徒ログイン</p>
+          <p className="text-sm font-medium text-ink-muted">生徒ログイン</p>
         </div>
 
-        <div className="rounded-3xl bg-white p-8 shadow-sm ring-1 ring-slate-200">
+        <div className="rounded-card border border-line bg-surface p-7 shadow-card">
           {error && (
-            <div className="mb-4 flex items-center gap-2 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-              <span>⚠</span><span>{error}</span>
-            </div>
+            <p
+              role="alert"
+              className="mb-5 flex items-start gap-2 rounded-field border border-critical-200 bg-critical-50 px-4 py-3 text-sm leading-6 text-critical-700"
+            >
+              <span aria-hidden>⚠</span>
+              <span>{error}</span>
+            </p>
           )}
 
           <div className="space-y-4">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">ログインID</label>
+            <Field label="ログインID">
               <input
                 type="text"
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
                 placeholder="先生から教えてもらったID"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
                 autoFocus
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                className={inputClass}
               />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">パスワード</label>
+            </Field>
+            <Field label="パスワード">
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="パスワード"
+                autoComplete="current-password"
                 onKeyDown={(e) => e.key === "Enter" && login()}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+                className={inputClass}
               />
-            </div>
+            </Field>
           </div>
 
-          <button
+          <Button
             onClick={login}
             disabled={!loginId || !password || loading}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3.5 font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-40"
+            size="lg"
+            className="mt-6 w-full"
           >
             {loading ? (
-              <><span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />ログイン中...</>
-            ) : "ログイン →"}
-          </button>
+              <>
+                <Spinner className="h-4 w-4 border-white/40 border-t-white" />
+                ログイン中...
+              </>
+            ) : (
+              "ログイン"
+            )}
+          </Button>
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-400">
+        <p className="mt-6 text-center text-xs leading-6 text-ink-faint">
           ログインIDとパスワードは担当の先生に聞いてください
+        </p>
+        <p className="mt-3 text-center text-sm">
+          <Link href="/" className="font-medium text-brand-600 hover:text-brand-700 hover:underline">
+            ← ログイン画面をえらび直す
+          </Link>
         </p>
       </div>
     </div>

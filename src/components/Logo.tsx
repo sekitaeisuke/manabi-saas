@@ -1,7 +1,17 @@
-export function Logo({ className, size = "md" }: { className?: string; size?: "sm" | "md" | "lg" }) {
+export function Logo({
+  className,
+  size = "md",
+  tone = "default",
+}: {
+  className?: string;
+  size?: "sm" | "md" | "lg";
+  /** light = 濃い背景の上に置くとき。マークは白抜き・文字は白 */
+  tone?: "default" | "light";
+}) {
   const scale = size === "sm" ? 0.7 : size === "lg" ? 1.35 : 1;
   const w = Math.round(300 * scale);
   const h = Math.round(72 * scale);
+  const light = tone === "light";
 
   return (
     <svg
@@ -26,9 +36,13 @@ export function Logo({ className, size = "md" }: { className?: string; size?: "s
       </defs>
 
       {/* ── Icon mark ── */}
-      <rect width="72" height="72" rx="20" fill="url(#lgo-bg)" />
+      {/* 濃い背景では、紙のグラデ角丸ではなく白の枠だけにして沈ませない */}
+      <rect width="72" height="72" rx="20" fill={light ? "rgba(255,255,255,0.16)" : "url(#lgo-bg)"} />
       {/* subtle inner border */}
-      <rect x="1" y="1" width="70" height="70" rx="19" stroke="white" strokeWidth="1" strokeOpacity="0.18" />
+      <rect
+        x="1" y="1" width="70" height="70" rx="19"
+        stroke="white" strokeWidth="1" strokeOpacity={light ? 0.38 : 0.18}
+      />
 
       {/* Connection arcs forming "つ" */}
       <line x1="23" y1="22" x2="49" y2="22"
@@ -46,22 +60,22 @@ export function Logo({ className, size = "md" }: { className?: string; size?: "s
       <circle cx="19" cy="53" r="10" fill="white" fillOpacity="0.14" />
       <circle cx="19" cy="53" r="7" fill="white" />
       {/* core dot on destination node */}
-      <circle cx="19" cy="53" r="2.5" fill="#4338ca" fillOpacity="0.55" />
+      <circle cx="19" cy="53" r="2.5" fill="#4338ca" fillOpacity={light ? 0.35 : 0.55} />
 
       {/* ── Logotype ── */}
       <text
         x="90" y="34"
-        fontFamily="'Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic','Meiryo',sans-serif"
+        fontFamily="var(--font-noto-sans-jp),'Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic','Meiryo',sans-serif"
         fontSize="18" fontWeight="700" letterSpacing="1"
-        fill="#334155"
+        fill={light ? "rgba(255,255,255,0.78)" : "#334155"}
       >
         つながる
       </text>
       <text
         x="90" y="62"
-        fontFamily="'Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic','Meiryo',sans-serif"
+        fontFamily="var(--font-noto-sans-jp),'Hiragino Kaku Gothic ProN','Hiragino Sans','Yu Gothic','Meiryo',sans-serif"
         fontSize="24" fontWeight="800" letterSpacing="3"
-        fill="url(#lgo-txt)"
+        fill={light ? "#ffffff" : "url(#lgo-txt)"}
       >
         まなび
       </text>

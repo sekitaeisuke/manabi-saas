@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { HREF_MODULE, moduleForPath, resolveEnabled, type ModuleKey, type ModuleSettingRow } from "@/lib/modules";
 import { ECON } from "@/lib/economyFeatures";
 import { FEATURES } from "@/lib/features";
+import { CountBadge, FullPageLoader, cx } from "@/components/ui";
 
 type BadgeKey = "pending" | "unread" | "resched" | "economy";
 type NavLeaf = { href: string; label: string; iconKey: IconKey; badge?: BadgeKey; adminOnly?: boolean };
@@ -193,16 +194,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     href === "/teacher/dashboard" ? pathname === href : pathname.startsWith(href);
   const groupActive = (g: NavGroup) => visibleItems(g).some((it) => isActive(it.href));
 
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="flex items-center gap-3 text-slate-400">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500" />
-          読み込み中...
-        </div>
-      </div>
-    );
-  }
+  if (checking) return <FullPageLoader />;
 
   // 1件の子メニュー行（フライアウト／モバイルドロワー共通）
   const renderLeaf = (item: NavLeaf, onClick?: () => void) => {
@@ -210,39 +202,47 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const badge = leafBadge(item);
     return (
       <Link key={item.href} href={item.href} onClick={onClick}
-        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-          active ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-        }`}>
-        <span className={active ? "text-indigo-600" : "text-slate-400"}><Svg k={item.iconKey} /></span>
-        {item.label}
-        {badge > 0 && (
-          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
-            {badge}
-          </span>
-        )}
-        {active && badge === 0 && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-indigo-600" />}
+        aria-current={active ? "page" : undefined}
+        className={cx(
+          "flex items-center gap-3 rounded-field px-3 py-2.5 text-sm font-medium transition duration-150",
+          active
+            ? "bg-brand-50 font-semibold text-brand-700"
+            : "text-ink-muted hover:bg-canvas-sunken hover:text-ink",
+        )}>
+        <span className={active ? "text-brand-600" : "text-ink-faint"}><Svg k={item.iconKey} /></span>
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {badge > 0 ? <CountBadge count={badge} /> : active ? (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-pill bg-brand-600" />
+        ) : null}
       </Link>
     );
   };
 
   // ── PC：アイコン細レール＋ホバーで右にフライアウト ──────────
   const renderRail = () => (
-    <aside className="flex h-full w-20 flex-col items-center bg-white">
+    <aside className="flex h-full w-20 flex-col items-center bg-surface">
       {/* ロゴ（アイコンのみ） */}
-      <div className="flex h-16 w-full items-center justify-center border-b border-slate-100">
-        <Link href="/teacher/dashboard" aria-label="ホーム">
+      <div className="flex h-16 w-full items-center justify-center border-b border-line">
+        <Link href="/teacher/dashboard" aria-label="ホーム" className="rounded-field transition hover:opacity-80">
           <LogoIcon size={34} />
         </Link>
       </div>
 
-      <nav className="flex w-full flex-1 flex-col items-center gap-1 px-2 py-4">
+      <nav aria-label="メインナビゲーション" className="flex w-full flex-1 flex-col items-center gap-1 px-2 py-4">
         {/* ダッシュボード（単独・直リンク） */}
         <Link href={DASHBOARD.href} title={DASHBOARD.label}
-          className={`flex w-full flex-col items-center gap-1 rounded-xl py-2 transition-colors ${
-            isActive(DASHBOARD.href) ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-          }`}>
+          aria-current={isActive(DASHBOARD.href) ? "page" : undefined}
+          className={cx(
+            "relative flex w-full flex-col items-center gap-1 rounded-field py-2.5 transition duration-150",
+            isActive(DASHBOARD.href)
+              ? "bg-brand-50 text-brand-700"
+              : "text-ink-muted hover:bg-canvas-sunken hover:text-ink",
+          )}>
+          {isActive(DASHBOARD.href) && (
+            <span aria-hidden className="absolute -left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-pill bg-brand-600" />
+          )}
           <Svg k={DASHBOARD.iconKey} />
-          <span className="text-[10px] font-medium">ホーム</span>
+          <span className="text-[0.625rem] font-semibold">ホーム</span>
         </Link>
 
         {GROUPS.map((g) => {
@@ -253,24 +253,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           return (
             <div key={g.key} className="group relative w-full">
               <button
-                className={`flex w-full flex-col items-center gap-1 rounded-xl py-2 transition-colors ${
-                  active ? "bg-indigo-50 text-indigo-700" : "text-slate-500 group-hover:bg-slate-50 group-hover:text-slate-900"
-                }`}>
+                aria-expanded={false}
+                className={cx(
+                  "relative flex w-full flex-col items-center gap-1 rounded-field py-2.5 transition duration-150",
+                  active
+                    ? "bg-brand-50 text-brand-700"
+                    : "text-ink-muted group-hover:bg-canvas-sunken group-hover:text-ink",
+                )}>
+                {active && (
+                  <span aria-hidden className="absolute -left-2 top-1/2 h-6 w-1 -translate-y-1/2 rounded-pill bg-brand-600" />
+                )}
                 <span className="relative">
                   <Svg k={g.iconKey} />
                   {badge > 0 && (
-                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                      {badge}
-                    </span>
+                    <CountBadge count={badge} className="absolute -right-2.5 -top-1.5 h-4 min-w-4 px-1 text-[0.5625rem]" />
                   )}
                 </span>
-                <span className="text-[10px] font-medium">{g.label}</span>
+                <span className="text-[0.625rem] font-semibold">{g.label}</span>
               </button>
 
-              {/* フライアウト（左端からはみ出して右に表示・ホバー中だけ） */}
-              <div className="invisible absolute left-full top-0 z-50 pl-2 opacity-0 transition-all duration-100 group-hover:visible group-hover:opacity-100">
-                <div className="w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
-                  <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400">{g.label}</p>
+              {/* フライアウト（右にはみ出して表示。ホバー中とキーボードフォーカス中） */}
+              <div className={cx(
+                "invisible absolute left-full top-0 z-50 pl-2 opacity-0",
+                "transition-all duration-150 ease-out-soft",
+                "group-hover:visible group-hover:translate-x-0 group-hover:opacity-100",
+                "group-focus-within:visible group-focus-within:translate-x-0 group-focus-within:opacity-100",
+                "-translate-x-1",
+              )}>
+                <div className="w-60 rounded-card border border-line bg-surface p-2 shadow-pop">
+                  <p className="px-3 pb-1.5 pt-1 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
+                    {g.label}
+                  </p>
                   <div className="space-y-0.5">
                     {items.map((it) => renderLeaf(it))}
                   </div>
@@ -282,31 +295,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </nav>
 
       {/* ユーザー・ログアウト */}
-      <div className="group relative flex w-full flex-col items-center gap-2 border-t border-slate-100 p-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700" title={userEmail}>
+      <div className="group relative flex w-full flex-col items-center gap-2 border-t border-line p-3">
+        <div
+          className="flex h-9 w-9 items-center justify-center rounded-pill bg-brand-gradient text-sm font-bold text-white"
+          title={userEmail}
+        >
           {userEmail.slice(0, 1).toUpperCase()}
         </div>
         {userRole === "admin" && (
           <Link href="/teacher/dashboard/modules" title="モジュール設定（機能のON/OFF）"
-            className={`flex h-9 w-9 items-center justify-center rounded-xl border transition ${
+            className={cx(
+              "flex h-9 w-9 items-center justify-center rounded-field border transition",
               isActive("/teacher/dashboard/modules")
-                ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-indigo-600"
-            }`}>
+                ? "border-brand-200 bg-brand-50 text-brand-700"
+                : "border-line-strong bg-surface text-ink-faint hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600",
+            )}>
             <Svg k="gear" className="h-4 w-4" />
           </Link>
         )}
-        <button onClick={logout} title="ログアウト"
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600 transition hover:bg-red-100">
+        <button onClick={logout} title="ログアウト" aria-label="ログアウト"
+          className="flex h-9 w-9 items-center justify-center rounded-field border border-line-strong bg-surface text-ink-faint transition hover:border-critical-200 hover:bg-critical-50 hover:text-critical-600">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
         </button>
         {/* ホバーでメール／役割 */}
-        <div className="invisible absolute bottom-2 left-full z-50 pl-2 opacity-0 transition-all duration-100 group-hover:visible group-hover:opacity-100">
-          <div className="w-56 rounded-2xl border border-slate-200 bg-white p-3 shadow-xl">
-            <p className="truncate text-xs font-medium text-slate-700">{userEmail}</p>
-            <p className="text-xs text-slate-400">
+        <div className="invisible absolute bottom-2 left-full z-50 pl-2 opacity-0 transition-all duration-150 ease-out-soft group-hover:visible group-hover:opacity-100">
+          <div className="w-60 rounded-card border border-line bg-surface p-3 shadow-pop">
+            <p className="truncate text-xs font-semibold text-ink">{userEmail}</p>
+            <p className="mt-0.5 text-xs text-ink-faint">
               {userRole === "admin" ? "管理者" : userRole === "part-time" ? "非常勤講師" : "講師"}
             </p>
           </div>
@@ -317,37 +334,48 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // ── モバイル：ドロワー（グループ見出し＋全項目） ──────────────
   const renderMobileMenu = () => (
-    <aside className="flex h-full w-72 flex-col bg-white">
-      <div className="flex h-16 items-center border-b border-slate-100 px-5">
+    <aside className="flex h-full w-72 flex-col bg-surface shadow-pop">
+      <div className="flex h-16 items-center justify-between border-b border-line px-5">
         <Link href="/teacher/dashboard" onClick={() => setMobileOpen(false)}><Logo size="sm" /></Link>
+        <button
+          onClick={() => setMobileOpen(false)}
+          aria-label="メニューを閉じる"
+          className="flex h-8 w-8 items-center justify-center rounded-field text-ink-faint transition hover:bg-canvas-sunken hover:text-ink"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <div className="mb-2">{renderLeaf(DASHBOARD, () => setMobileOpen(false))}</div>
+      <nav aria-label="メインナビゲーション" className="flex-1 overflow-y-auto px-3 py-4">
+        <div className="mb-3">{renderLeaf(DASHBOARD, () => setMobileOpen(false))}</div>
         {GROUPS.map((g) => {
           const items = visibleItems(g);
           if (items.length === 0) return null;
           return (
-            <div key={g.key} className="mb-3">
-              <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{g.label}</p>
+            <div key={g.key} className="mb-4">
+              <p className="mb-1.5 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
+                {g.label}
+              </p>
               <div className="space-y-0.5">{items.map((it) => renderLeaf(it, () => setMobileOpen(false)))}</div>
             </div>
           );
         })}
       </nav>
-      <div className="border-t border-slate-100 p-4 space-y-2">
-        <div className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
+      <div className="space-y-2 border-t border-line p-4">
+        <div className="flex items-center gap-3 rounded-field bg-canvas-sunken px-3 py-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-pill bg-brand-gradient text-xs font-bold text-white">
             {userEmail.slice(0, 1).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-slate-700">{userEmail}</p>
-            <p className="text-xs text-slate-400">
+            <p className="truncate text-xs font-semibold text-ink">{userEmail}</p>
+            <p className="text-xs text-ink-faint">
               {userRole === "admin" ? "管理者" : userRole === "part-time" ? "非常勤講師" : "講師"}
             </p>
           </div>
         </div>
         <button onClick={logout}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-100">
+          className="flex w-full items-center justify-center gap-2 rounded-field border border-line-strong bg-surface py-2.5 text-sm font-semibold text-ink-muted transition hover:border-critical-200 hover:bg-critical-50 hover:text-critical-600">
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
           </svg>
@@ -358,16 +386,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   );
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
+    <div className="flex min-h-screen bg-canvas">
       {/* PC アイコンレール */}
-      <div className="fixed inset-y-0 left-0 z-30 hidden w-20 border-r border-slate-200 shadow-sm lg:block">
+      <div className="fixed inset-y-0 left-0 z-30 hidden w-20 border-r border-line lg:block">
         {renderRail()}
       </div>
 
       {/* モバイル オーバーレイ */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
+          <div
+            className="absolute inset-0 bg-ink/45 backdrop-blur-[2px]"
+            onClick={() => setMobileOpen(false)}
+          />
           <div className="absolute inset-y-0 left-0 w-72">
             {renderMobileMenu()}
           </div>
@@ -377,48 +408,51 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* メインコンテンツ */}
       <div className="flex-1 lg:pl-20">
         {/* モバイル用トップバー */}
-        <div className="sticky top-0 z-20 flex h-14 items-center border-b border-slate-200 bg-white px-4 lg:hidden">
+        <div className="sticky top-0 z-20 flex h-14 items-center border-b border-line bg-surface/85 px-4 backdrop-blur-md lg:hidden">
           <Link href="/teacher/dashboard"><Logo size="sm" /></Link>
         </div>
 
-        <main className="min-h-screen pb-16 lg:pb-0">
+        <main className="min-h-screen pb-20 lg:pb-0">
           {children}
         </main>
       </div>
 
       {/* ボトムナビ（モバイル専用） */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 flex h-16 border-t border-slate-200 bg-white lg:hidden">
+      <nav
+        aria-label="下部ナビゲーション"
+        className="fixed bottom-0 left-0 right-0 z-30 flex h-16 border-t border-line bg-surface/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
+      >
         {bottomItems.map((it) => {
           const active = isActive(it.href);
           const badge = leafBadge(it);
           return (
             <Link key={it.href} href={it.href}
               onClick={() => setMobileOpen(false)}
-              className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
-                active ? "text-indigo-600" : "text-slate-500"
-              }`}>
+              aria-current={active ? "page" : undefined}
+              className={cx(
+                "relative flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors",
+                active ? "text-brand-600" : "text-ink-faint",
+              )}>
               {active && (
-                <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-indigo-600" />
+                <span aria-hidden className="absolute inset-x-4 top-0 h-0.5 rounded-pill bg-brand-600" />
               )}
               <span className="relative">
                 <Svg k={it.iconKey} />
                 {badge > 0 && (
-                  <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                    {badge}
-                  </span>
+                  <CountBadge count={badge} className="absolute -right-2.5 -top-1.5 h-4 min-w-4 px-1 text-[0.5625rem]" />
                 )}
               </span>
-              <span className="text-[10px] font-medium">{it.label}</span>
+              <span className="text-[0.625rem] font-semibold">{it.label}</span>
             </Link>
           );
         })}
 
         <button onClick={() => setMobileOpen(true)}
-          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-slate-500 transition-colors hover:text-slate-700">
+          className="flex flex-1 flex-col items-center justify-center gap-0.5 text-ink-faint transition-colors hover:text-ink">
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
-          <span className="text-[10px] font-medium">メニュー</span>
+          <span className="text-[0.625rem] font-semibold">メニュー</span>
         </button>
       </nav>
     </div>

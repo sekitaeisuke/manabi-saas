@@ -6,6 +6,9 @@ import { supabase } from "@/lib/supabase";
 import type { Student } from "@/lib/supabase";
 import { useSelectedStudentId } from "@/lib/useSelectedStudent";
 import { Skeleton } from "@/components/Skeleton";
+import {
+  Card, CardLink, EmptyState, LinkButton, PageHeader, SectionTitle, cx,
+} from "@/components/ui";
 
 type UpcomingLesson = {
   id: string;
@@ -171,58 +174,69 @@ export default function ParentOverviewPage() {
 
   if (!selectedId) {
     return (
-      <div className="px-6 py-10 text-slate-600">お子さまが登録されていません。</div>
+      <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+        <EmptyState
+          icon="👦"
+          title="お子さまが登録されていません"
+          description="アカウントにお子さまがひも付いていません。塾までご連絡ください。"
+        />
+      </div>
     );
   }
 
   return (
-    <div className="px-4 py-5 text-slate-900 sm:px-6 sm:py-10">
+    <div className="px-4 py-6 sm:px-6 sm:py-9">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">お子さまの学習状況</h1>
-          <p className="mt-2 text-slate-600">
-            {student ? `${student.name} さん（${student.grade}）の最新情報` : "..."}
-          </p>
-        </div>
+        <PageHeader
+          title="お子さまの学習状況"
+          description={student ? `${student.name} さん（${student.grade}）の最新情報` : "..."}
+        />
 
         {loading ? (
-          <div className="grid gap-6">
-            <div className="rounded-3xl border border-yellow-200 bg-yellow-50 p-6">
+          <div className="grid gap-5">
+            <Card padding="lg">
               <Skeleton className="mb-3 h-4 w-32" />
               <Skeleton className="h-6 w-full" />
               <Skeleton className="mt-2 h-5 w-3/4" />
+            </Card>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[1,2,3,4].map((i) => (
+                <Card key={i}><Skeleton className="mb-3 h-4 w-24" /><Skeleton className="h-8 w-16" /></Card>
+              ))}
             </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {[1,2,3].map((i) => <div key={i} className="rounded-3xl border border-slate-200 bg-white p-6"><Skeleton className="mb-3 h-4 w-24" /><Skeleton className="h-8 w-16" /></div>)}
-            </div>
-            <div className="rounded-3xl border border-slate-200 bg-white p-8"><Skeleton className="mb-4 h-6 w-40" />{[1,2].map((i)=><Skeleton key={i} className="mb-3 h-16 rounded-2xl w-full" />)}</div>
+            <Card padding="lg">
+              <Skeleton className="mb-4 h-6 w-40" />
+              {[1,2].map((i) => <Skeleton key={i} className="mb-3 h-16 w-full rounded-card" />)}
+            </Card>
           </div>
         ) : (
-          <div className="grid gap-6">
+          <div className="grid gap-5">
             {messageToChild && (
-              <section className="rounded-3xl border-2 border-yellow-300 bg-gradient-to-r from-yellow-50 to-amber-50 p-6 shadow-sm">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="text-2xl">⭐</span>
-                  <p className="font-bold text-yellow-900">先生からお子様へのメッセージ</p>
+              <section className="rounded-card border border-caution-200 bg-caution-50 p-6">
+                <div className="mb-2.5 flex items-center gap-2">
+                  <span className="text-xl" aria-hidden>⭐</span>
+                  <p className="font-bold text-caution-700">先生からお子さまへのメッセージ</p>
                 </div>
-                <p className="leading-relaxed text-slate-800">{messageToChild}</p>
+                <p className="leading-8 text-ink">{messageToChild}</p>
                 {latestReport && (
-                  <p className="mt-3 text-xs text-yellow-700">
-                    {latestReport.created_at.slice(0,10)} の授業報告書より
-                    <Link href="/parent/dashboard/reports" className="ml-2 underline hover:text-yellow-900">報告書を開く →</Link>
+                  <p className="mt-4 flex flex-wrap items-center gap-2 text-xs text-caution-700">
+                    <span>{latestReport.created_at.slice(0,10)} の授業報告書より</span>
+                    <Link href="/parent/dashboard/reports" className="font-semibold underline underline-offset-2 hover:no-underline">
+                      報告書を開く →
+                    </Link>
                   </p>
                 )}
               </section>
             )}
 
             {latestKarte && (
-              <section className="rounded-3xl border-2 border-violet-300 bg-gradient-to-r from-violet-50 to-purple-50 p-6 shadow-sm">
-                <div className="mb-3 flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📋</span>
+              <section className="rounded-card border border-brand-200 bg-brand-50 p-6">
+                <div className="mb-3 flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex items-start gap-2.5">
+                    <span className="text-xl" aria-hidden>📋</span>
                     <div>
-                      <p className="font-bold text-violet-900">3か月ビジョンが共有されました</p>
-                      <p className="text-xs text-violet-600 mt-0.5">
+                      <p className="font-bold text-brand-900">3か月ビジョンが共有されました</p>
+                      <p className="mt-0.5 text-xs text-brand-700">
                         {latestKarte.created_at.slice(0, 10)} ・ {latestKarte.grade} ・ {latestKarte.subject}
                         {latestKarte.test_percentage != null && (
                           <span className="ml-2 font-semibold">診断 {latestKarte.test_percentage}%</span>
@@ -230,36 +244,34 @@ export default function ParentOverviewPage() {
                       </p>
                     </div>
                   </div>
-                  <Link
-                    href="/parent/dashboard/karte"
-                    className="shrink-0 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700"
-                  >
-                    3か月ビジョンを開く →
-                  </Link>
+                  <LinkButton href="/parent/dashboard/karte" size="sm">
+                    3か月ビジョンを開く
+                  </LinkButton>
                 </div>
                 {latestKarte.teacher_notes && (
-                  <div className="rounded-2xl bg-white/70 px-4 py-3 text-sm text-slate-700 border border-violet-200">
-                    <p className="text-xs font-semibold text-violet-600 mb-1">講師より</p>
-                    <p className="leading-relaxed line-clamp-3 whitespace-pre-wrap">{latestKarte.teacher_notes}</p>
+                  <div className="rounded-field border border-brand-200 bg-surface px-4 py-3">
+                    <p className="mb-1 text-xs font-bold text-brand-700">講師より</p>
+                    <p className="line-clamp-3 whitespace-pre-wrap text-sm leading-7 text-ink-muted">
+                      {latestKarte.teacher_notes}
+                    </p>
                   </div>
                 )}
               </section>
             )}
 
             {weekTasks.length > 0 && (
-              <section className="rounded-3xl border border-emerald-200 bg-white p-4 shadow-sm sm:p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">🗓️</span>
-                    <div>
-                      <h2 className="font-bold text-slate-900">今週の取り組み</h2>
-                      <p className="text-xs text-slate-500">
-                        3か月ビジョンから作成した、お子さまの毎日のやること（{weekTasks.filter((t) => t.done).length}/{weekTasks.length} 完了）
-                      </p>
-                    </div>
+              <Card padding="sm" className="sm:p-6">
+                <div className="mb-4 flex items-start gap-2.5">
+                  <span className="text-xl" aria-hidden>🗓️</span>
+                  <div>
+                    <h2 className="font-bold text-ink">今週の取り組み</h2>
+                    <p className="text-xs text-ink-faint">
+                      3か月ビジョンから作成した、お子さまの毎日のやること（
+                      <span data-numeric>{weekTasks.filter((t) => t.done).length}/{weekTasks.length}</span> 完了）
+                    </p>
                   </div>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {Object.entries(
                     weekTasks.reduce<Record<string, WeekTask[]>>((acc, t) => {
                       (acc[t.task_date] ??= []).push(t); return acc;
@@ -269,16 +281,27 @@ export default function ParentOverviewPage() {
                     const wd = ["日", "月", "火", "水", "木", "金", "土"][new Date(y, m - 1, d).getDay()];
                     const isToday = date === ymd(new Date());
                     return (
-                      <div key={date} className={`rounded-2xl border px-4 py-3 ${isToday ? "border-emerald-300 bg-emerald-50/50" : "border-slate-100 bg-slate-50/60"}`}>
-                        <p className="mb-1.5 text-xs font-semibold text-slate-600">
-                          {m}月{d}日（{wd}）{isToday && <span className="ml-1 text-emerald-600">今日</span>}
+                      <div key={date} className={cx(
+                        "rounded-field border px-4 py-3",
+                        isToday ? "border-brand-200 bg-brand-50" : "border-line bg-canvas",
+                      )}>
+                        <p className="mb-1.5 text-xs font-bold text-ink-muted">
+                          <span data-numeric>{m}月{d}日</span>（{wd}）
+                          {isToday && <span className="ml-1.5 text-brand-600">今日</span>}
                         </p>
                         <ul className="space-y-1">
                           {items.map((t) => (
-                            <li key={t.id} className="flex items-center gap-2 text-sm">
-                              <span className={`text-base leading-none ${t.done ? "text-emerald-500" : "text-slate-300"}`}>{t.done ? "✓" : "○"}</span>
-                              <span className={t.done ? "text-slate-400 line-through" : "text-slate-700"}>{t.content}</span>
-                              {t.subject && <span className="text-xs text-slate-400">· {t.subject}</span>}
+                            <li key={t.id} className="flex items-start gap-2 text-sm">
+                              <span
+                                aria-hidden
+                                className={cx("mt-0.5 leading-none", t.done ? "text-positive-600" : "text-ink-faint/50")}
+                              >
+                                {t.done ? "✓" : "○"}
+                              </span>
+                              <span className={t.done ? "text-ink-faint line-through" : "text-ink-muted"}>
+                                {t.content}
+                              </span>
+                              {t.subject && <span className="text-xs text-ink-faint">· {t.subject}</span>}
                             </li>
                           ))}
                         </ul>
@@ -286,7 +309,7 @@ export default function ParentOverviewPage() {
                     );
                   })}
                 </div>
-              </section>
+              </Card>
             )}
 
             <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -317,59 +340,67 @@ export default function ParentOverviewPage() {
               />
             </section>
 
-            <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
-              <div className="mb-6 flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-slate-950">次回以降の授業</h2>
-                <Link href="/parent/dashboard/calendar" className="text-sm font-medium text-blue-600 hover:underline">
-                  カレンダーを見る →
-                </Link>
-              </div>
+            <section>
+              <SectionTitle
+                action={
+                  <Link href="/parent/dashboard/calendar" className="text-sm font-semibold text-brand-600 hover:underline">
+                    カレンダーを見る →
+                  </Link>
+                }
+              >
+                次回以降の授業
+              </SectionTitle>
               {upcoming.length === 0 ? (
-                <p className="text-sm text-slate-500">予定されている授業はありません。授業日時は講師にご確認ください。</p>
+                <Card>
+                  <p className="text-sm text-ink-faint">
+                    予定されている授業はありません。授業日時は講師にご確認ください。
+                  </p>
+                </Card>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {upcoming.map((l) => (
-                    <div key={l.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold text-slate-950">
-                            {new Date(l.scheduled_at).toLocaleString("ja-JP", {
-                              month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
-                            })}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-600">{l.subject ?? "—"}</p>
-                        </div>
-                        <Link
-                          href={`/parent/dashboard/reschedule?lesson=${l.id}`}
-                          className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                        >
-                          振替を申請
-                        </Link>
+                    <Card key={l.id} padding="sm" className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p data-numeric className="font-semibold text-ink">
+                          {new Date(l.scheduled_at).toLocaleString("ja-JP", {
+                            month: "short", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit",
+                          })}
+                        </p>
+                        <p className="mt-0.5 text-sm text-ink-muted">{l.subject ?? "—"}</p>
                       </div>
-                    </div>
+                      <LinkButton
+                        href={`/parent/dashboard/reschedule?lesson=${l.id}`}
+                        variant="secondary"
+                        size="sm"
+                      >
+                        振替を申請
+                      </LinkButton>
+                    </Card>
                   ))}
                 </div>
               )}
             </section>
 
             {announcements.length > 0 && (
-              <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-8">
-                <h2 className="mb-6 text-xl font-semibold text-slate-950">お知らせ</h2>
-                <div className="space-y-3">
+              <section>
+                <SectionTitle>お知らせ</SectionTitle>
+                <div className="space-y-2.5">
                   {announcements.map((a) => (
-                    <div key={a.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <p className="font-semibold text-slate-900">{a.title}</p>
-                        <span className="shrink-0 text-xs text-slate-400">{a.created_at.slice(0, 10)}</span>
+                    <Card key={a.id} padding="sm">
+                      <div className="mb-1 flex items-baseline justify-between gap-3">
+                        <p className="min-w-0 font-semibold text-ink">{a.title}</p>
+                        <time data-numeric className="shrink-0 text-xs text-ink-faint">
+                          {a.created_at.slice(0, 10)}
+                        </time>
                       </div>
-                      <p className="line-clamp-3 whitespace-pre-wrap text-sm text-slate-600">{a.content}</p>
-                    </div>
+                      <p className="line-clamp-3 whitespace-pre-wrap text-sm leading-7 text-ink-muted">{a.content}</p>
+                    </Card>
                   ))}
                 </div>
               </section>
             )}
 
-            <section className="grid gap-4 md:grid-cols-2">
+            <section className="grid gap-3 md:grid-cols-2">
               <QuickLink
                 href="/parent/dashboard/karte"
                 title="3か月ビジョン"
@@ -393,28 +424,47 @@ function SummaryCard({
 }: { title: string; value: string; sub?: string; href: string; tone?: "default" | "alert" | "karte" }) {
   const isEmpty = value === "なし";
   return (
-    <Link href={href}
-      className={`block rounded-3xl border bg-white p-5 shadow-sm transition hover:shadow-md ${
-        tone === "alert" ? "border-red-200" :
-        tone === "karte" ? "border-violet-200" :
-        "border-slate-200"
-      }`}>
-      <p className="text-xs font-semibold text-slate-500">{title}</p>
-      <p className={`mt-2 text-xl font-bold truncate ${
-        tone === "alert" ? "text-red-600" :
-        tone === "karte" ? "text-violet-700" :
-        isEmpty ? "text-slate-400" : "text-slate-950"
-      }`}>{value}</p>
-      {sub && <p className={`mt-1.5 truncate text-xs ${isEmpty ? "text-slate-400 italic" : "text-slate-500"}`}>{sub}</p>}
-    </Link>
+    <CardLink
+      href={href}
+      className={cx(
+        tone === "alert" && "border-critical-200",
+        tone === "karte" && "border-brand-200",
+      )}
+    >
+      <p className="text-xs font-semibold text-ink-faint">{title}</p>
+      <p
+        data-numeric
+        className={cx(
+          "mt-2 truncate text-xl font-bold",
+          tone === "alert" ? "text-critical-600"
+            : tone === "karte" ? "text-brand-700"
+            : isEmpty ? "text-ink-faint" : "text-ink",
+        )}
+      >
+        {value}
+      </p>
+      {sub && (
+        <p className={cx("mt-1.5 truncate text-xs", isEmpty ? "italic text-ink-faint" : "text-ink-faint")}>
+          {sub}
+        </p>
+      )}
+    </CardLink>
   );
 }
 
 function QuickLink({ href, title, description }: { href: string; title: string; description: string }) {
   return (
-    <Link href={href} className="block rounded-3xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md sm:p-6">
-      <p className="text-lg font-bold text-slate-950">{title}</p>
-      <p className="mt-2 text-sm text-slate-600">{description}</p>
-    </Link>
+    <CardLink href={href} className="group">
+      <div className="flex items-center justify-between gap-3">
+        <p className="font-bold text-ink">{title}</p>
+        <svg
+          className="h-4 w-4 shrink-0 text-ink-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-brand-600"
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
+      <p className="mt-1.5 text-sm leading-7 text-ink-muted">{description}</p>
+    </CardLink>
   );
 }

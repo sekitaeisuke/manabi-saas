@@ -1,26 +1,205 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ==========================================================================
+   つながるまなび — デザイントークン
+   ロゴの indigo(#4338ca) → violet(#7c3aed) を軸に、全画面で同じ語彙を使う。
+   ブランド色は「今いる場所」と「主ボタン」だけに使い、それ以外は ink/line/surface。
+   ========================================================================== */
+
+@theme {
+  /* ── ブランド（indigo 寄り。600 は Tailwind indigo-600 と同値なので既存画面と地続き） ── */
+  --color-brand-50: #eef0ff;
+  --color-brand-100: #e0e3ff;
+  --color-brand-200: #c7cbfe;
+  --color-brand-300: #a5a8fb;
+  --color-brand-400: #8681f7;
+  --color-brand-500: #6c5cf0;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+  --color-brand-800: #372fa8;
+  --color-brand-900: #302b85;
+  --color-brand-950: #1e1b4b;
+
+  /* ── アクセント（ロゴの終端。グラデーションと差し色にだけ） ── */
+  --color-accent-400: #a78bfa;
+  --color-accent-500: #8b5cf6;
+  --color-accent-600: #7c3aed;
+
+  /* ── 面と線 ── */
+  --color-canvas: #f6f7fb; /* ページ背景。ほんのり青みのグレー */
+  --color-canvas-sunken: #eef1f8; /* 一段沈める帯・テーブルヘッダ */
+  --color-surface: #ffffff; /* カード */
+  --color-line: #e6e9f2; /* 通常の境界線 */
+  --color-line-strong: #d3d8e6; /* 入力欄・区切りを強めたいとき */
+
+  /* ── 文字 ── */
+  --color-ink: #0f1729; /* 見出し・本文 */
+  --color-ink-muted: #4a5a72; /* 補足 */
+  --color-ink-faint: #8593ab; /* ラベル・日付 */
+
+  /* ── 状態色（既存の emerald/amber/red の代わりに、少し彩度を落として揃える） ── */
+  --color-positive-50: #ecfdf5;
+  --color-positive-100: #d1fae5;
+  --color-positive-200: #a7f3d0;
+  --color-positive-600: #059669;
+  --color-positive-700: #047857;
+  --color-caution-50: #fffbeb;
+  --color-caution-100: #fef3c7;
+  --color-caution-200: #fde68a;
+  --color-caution-600: #d97706;
+  --color-caution-700: #b45309;
+  --color-critical-50: #fef2f2;
+  --color-critical-100: #fee2e2;
+  --color-critical-200: #fecaca;
+  --color-critical-600: #dc2626;
+  --color-critical-700: #b91c1c;
+
+  /* ── 角丸 ── */
+  --radius-card: 1rem; /* 16px。カードはこれで統一 */
+  --radius-field: 0.75rem; /* 入力欄・小ボタン */
+  --radius-pill: 9999px;
+
+  /* ── 影（やわらかく、2枚重ね） ── */
+  --shadow-card: 0 1px 2px rgb(15 23 41 / 0.04), 0 4px 12px -4px rgb(15 23 41 / 0.06);
+  --shadow-card-hover: 0 2px 4px rgb(15 23 41 / 0.05), 0 14px 28px -10px rgb(15 23 41 / 0.12);
+  --shadow-pop: 0 2px 8px rgb(15 23 41 / 0.06), 0 12px 40px -10px rgb(15 23 41 / 0.2);
+  --shadow-brand: 0 1px 2px rgb(79 70 229 / 0.2), 0 8px 20px -8px rgb(79 70 229 / 0.45);
+
+  /* ── フォント ── */
+  --font-sans: var(--font-noto-sans-jp), var(--font-geist-sans), "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", "BIZ UDPGothic", "Yu Gothic UI", "Yu Gothic", Meiryo,
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: var(--font-geist-mono), "SFMono-Regular", Consolas, "Courier New", monospace;
+
+  /* ── モーション ── */
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* ==========================================================================
+   ベーススタイル
+   ========================================================================== */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  /* iOS で入力欄にフォーカスした時に勝手に拡大されるのを防ぐ */
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* palt = 日本語の約物（、。「」）の余白を詰める。和文が一気に締まる */
+  font-feature-settings: "palt" 1;
+  letter-spacing: 0.01em;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 見出しは行間を詰めて、字間はわずかに締める */
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.4;
+  letter-spacing: 0.005em;
+}
+
+/* 日本語は単語区切りが無いので、URL や英単語だけ折り返させる */
+body {
+  word-break: normal;
+  overflow-wrap: anywhere;
+  line-break: strict;
+}
+
+/* 数字は等幅にして、件数や金額が縦に揃うように */
+time,
+[data-numeric] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* フォームはフォントを継承（ブラウザ既定のゴシックに落ちるのを防ぐ） */
+input,
+textarea,
+select,
+button {
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+/* キーボード操作のときだけ、はっきりしたリングを出す */
+:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--color-brand-100);
+  color: var(--color-brand-900);
+}
+
+/* スクロールバーを細く、地味に */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-line-strong);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #b9c0d2;
+}
+
+/* 動きを減らす設定の人には、アニメーションを止める */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   ユーティリティ
+   ========================================================================== */
+
+/* ブランドのグラデーション（ロゴと同じ向き・同じ2色） */
+@utility bg-brand-gradient {
+  background-image: linear-gradient(135deg, var(--color-brand-700) 0%, var(--color-accent-600) 100%);
+}
+
+/* 見出しをグラデーションで抜く */
+@utility text-brand-gradient {
+  background-image: linear-gradient(100deg, var(--color-brand-700) 0%, var(--color-accent-600) 100%);
+  background-clip: text;
+  color: transparent;
+}
+
+/* ログイン画面などの、ごく淡い背景 */
+@utility bg-canvas-glow {
+  background-color: var(--color-canvas);
+  background-image:
+    radial-gradient(60rem 32rem at 12% -8%, rgb(99 102 241 / 0.1), transparent 60%),
+    radial-gradient(48rem 28rem at 100% 0%, rgb(139 92 246 / 0.08), transparent 55%);
+}
+
+/* 行が増えても縦に散らからない、細い区切り */
+@utility divide-line {
+  & > * + * {
+    border-top: 1px solid var(--color-line);
+  }
 }

@@ -9,6 +9,10 @@ import { Skeleton } from "@/components/Skeleton";
 import { ECON } from "@/lib/economyFeatures";
 import { FEATURES } from "@/lib/features";
 import type { StudentKarteJson } from "@/lib/supabase";
+import {
+  Badge, Callout, Card, CardLink, CountBadge, EmptyState,
+  LinkButton, PageHeader, SectionTitle, cx,
+} from "@/components/ui";
 
 type Counts = {
   pendingReschedules: number;
@@ -248,34 +252,43 @@ export default function TeacherDashboardPage() {
   ].filter((i) => i.count > 0) : [];
 
   return (
-    <div className="px-4 py-4 sm:px-8 sm:py-8">
-      <div className="mb-6">
-        <p className="text-sm text-slate-400">{today}</p>
-        <h1 className="mt-1 text-xl font-bold text-slate-900 sm:text-2xl">今日のホーム</h1>
-        <p className="mt-1 text-sm text-slate-500">今日授業する生徒と、さばくことをここから。</p>
-      </div>
+    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-9">
+      <PageHeader
+        eyebrow={today}
+        title="今日のホーム"
+        description="今日授業する生徒と、さばくことをここから。"
+      />
 
       {failedNotifications > 0 && (
-        <Link href="/teacher/dashboard/notifications?status=failed"
-          className="mb-6 block rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 transition hover:bg-red-100">
-          <p className="text-sm font-semibold">直近24時間に通知の送信失敗が {failedNotifications} 件あります → 通知ログで確認</p>
-        </Link>
+        <div className="mb-6">
+          <Callout
+            tone="critical"
+            title={`直近24時間に通知の送信失敗が ${failedNotifications} 件あります`}
+            action={
+              <LinkButton href="/teacher/dashboard/notifications?status=failed" variant="secondary" size="sm">
+                通知ログで確認
+              </LinkButton>
+            }
+          />
+        </div>
       )}
 
       {/* ── B: 今日さばくこと ── */}
-      <section className="mb-6">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">今日さばくこと</h2>
+      <section className="mb-8">
+        <SectionTitle>今日さばくこと</SectionTitle>
         {loading ? (
-          <div className="flex flex-wrap gap-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-9 w-32 rounded-full" />)}</div>
+          <div className="flex flex-wrap gap-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-9 w-32 rounded-pill" />)}</div>
         ) : inbox.length === 0 ? (
-          <p className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">今さばくものはありません 🎉</p>
+          <p className="rounded-card border border-positive-200 bg-positive-50 px-4 py-3 text-sm font-medium text-positive-700">
+            今さばくものはありません 🎉
+          </p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {inbox.map((i) => (
               <Link key={i.label} href={i.href}
-                className="flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100">
+                className="flex items-center gap-2 rounded-pill border border-critical-200 bg-critical-50 py-2 pl-4 pr-2 text-sm font-semibold text-critical-700 transition duration-150 hover:border-critical-600/40 hover:bg-critical-100">
                 {i.label}
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">{i.count}</span>
+                <CountBadge count={i.count} />
               </Link>
             ))}
           </div>
@@ -283,82 +296,105 @@ export default function TeacherDashboardPage() {
       </section>
 
       {/* ── A: 今日の授業（生徒 × カルテ） ── */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-sm font-bold text-slate-900">
-          今日の生徒{!loading && `（${todayStudents.length}人）`}
-        </h2>
+      <section className="mb-8">
+        <SectionTitle>今日の生徒{!loading && `（${todayStudents.length}人）`}</SectionTitle>
         {loading ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {[1,2,3].map((i) => (
-              <div key={i} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+              <Card key={i} className="space-y-3">
                 <Skeleton className="h-5 w-32" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" />
-              </div>
+              </Card>
             ))}
           </div>
         ) : todayStudents.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-12 text-center text-slate-500">
-            <p className="text-3xl mb-2">🗓️</p>
-            <p className="font-semibold text-slate-700">今日来る生徒がいません</p>
-            <p className="mt-1 text-sm text-slate-400">生徒管理で「出席曜日」を入れると、その曜日に自動でここへ並びます。</p>
-            <Link href="/teacher/dashboard/schools" className="mt-4 inline-block rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">生徒の出席曜日を入力する →</Link>
-          </div>
+          <EmptyState
+            icon="🗓️"
+            title="今日来る生徒がいません"
+            description="生徒管理で「出席曜日」を入れると、その曜日に自動でここへ並びます。"
+            action={
+              <LinkButton href="/teacher/dashboard/schools" size="md">
+                生徒の出席曜日を入力する
+              </LinkButton>
+            }
+          />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {todayStudents.map((s) => {
               const stale = daysSince(s.lastProgress);
               const isStale = stale == null || stale >= 7;
               return (
-                <div key={s.id} className="flex flex-col rounded-3xl border border-slate-200 bg-white shadow-sm">
-                  <Link href={`/teacher/dashboard/students/${s.id}`} className="block px-5 pt-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-bold text-slate-900">{s.name} <span className="text-xs font-normal text-slate-400">{s.grade}</span></p>
-                      <span className="shrink-0 text-xs text-slate-400">
+                <Card key={s.id} padding="none" className="flex flex-col overflow-hidden">
+                  <Link
+                    href={`/teacher/dashboard/students/${s.id}`}
+                    className="block flex-1 px-5 pb-4 pt-4 transition hover:bg-canvas/60"
+                  >
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="min-w-0 truncate font-bold text-ink">
+                        {s.name} <span className="text-xs font-medium text-ink-faint">{s.grade}</span>
+                      </p>
+                      <span data-numeric className="shrink-0 text-xs text-ink-faint">
                         {s.firstAt ? new Date(s.firstAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) : "出席予定"}
                         {s.subjects.length > 0 && ` ・ ${s.subjects.join("・")}`}
                       </span>
                     </div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                        s.tasksTotal === 0 ? "bg-slate-100 text-slate-500"
-                        : s.tasksDone === s.tasksTotal ? "bg-emerald-100 text-emerald-700" : "bg-emerald-50 text-emerald-700"
-                      }`}>
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                      <Badge
+                        tone={
+                          s.tasksTotal === 0 ? "neutral"
+                          : s.tasksDone === s.tasksTotal ? "positive" : "brand"
+                        }
+                      >
                         今日のTODO {s.tasksTotal === 0 ? "なし" : `${s.tasksDone}/${s.tasksTotal}`}
-                      </span>
+                      </Badge>
                       {isStale && (
-                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-700">
+                        <Badge tone="caution">
                           進捗{stale == null ? "未入力" : `${stale}日空き`}
-                        </span>
+                        </Badge>
                       )}
-                      {FEATURES.dailyKarte && !s.karte && (
-                        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-500">カルテ未生成</span>
-                      )}
+                      {FEATURES.dailyKarte && !s.karte && <Badge tone="neutral">カルテ未生成</Badge>}
                     </div>
 
-                    {s.karte?.cautions && (
-                      <p className="mt-2 line-clamp-2 text-xs text-slate-600"><span className="font-semibold text-amber-600">⚠️ </span>{s.karte.cautions}</p>
-                    )}
-                    {s.karte?.textbookPace && (
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-500"><span className="font-semibold text-indigo-500">📖 </span>{s.karte.textbookPace}</p>
-                    )}
-                    {s.karte?.parentNeeds && (
-                      <p className="mt-1 line-clamp-1 text-xs text-slate-500"><span className="font-semibold">👪 </span>{s.karte.parentNeeds}</p>
+                    {(s.karte?.cautions || s.karte?.textbookPace || s.karte?.parentNeeds) && (
+                      <dl className="mt-3 space-y-1.5 border-t border-line pt-3">
+                        {s.karte?.cautions && (
+                          <div className="flex gap-2">
+                            <dt className="shrink-0 text-xs" aria-label="配慮">⚠️</dt>
+                            <dd className="line-clamp-2 text-xs leading-5 text-ink-muted">{s.karte.cautions}</dd>
+                          </div>
+                        )}
+                        {s.karte?.textbookPace && (
+                          <div className="flex gap-2">
+                            <dt className="shrink-0 text-xs" aria-label="教材">📖</dt>
+                            <dd className="line-clamp-2 text-xs leading-5 text-ink-muted">{s.karte.textbookPace}</dd>
+                          </div>
+                        )}
+                        {s.karte?.parentNeeds && (
+                          <div className="flex gap-2">
+                            <dt className="shrink-0 text-xs" aria-label="保護者">👪</dt>
+                            <dd className="line-clamp-1 text-xs leading-5 text-ink-faint">{s.karte.parentNeeds}</dd>
+                          </div>
+                        )}
+                      </dl>
                     )}
                   </Link>
 
                   {/* 授業後の締め導線 */}
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 px-5 py-2.5">
-                    <Link href={`/teacher/dashboard/students/${s.id}`} className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-900">操作卓</Link>
-                    <Link href="/teacher/dashboard/progress" className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">進捗入力</Link>
-                    <Link href="/teacher/dashboard/reports" className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">報告書</Link>
+                  <div className="flex flex-wrap items-center gap-1.5 border-t border-line bg-canvas/60 px-5 py-2.5">
+                    <Link href={`/teacher/dashboard/students/${s.id}`}
+                      className="rounded-field bg-ink px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-ink/85">操作卓</Link>
+                    <Link href="/teacher/dashboard/progress"
+                      className="rounded-field border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-ink-muted transition hover:border-brand-300 hover:text-brand-700">進捗入力</Link>
+                    <Link href="/teacher/dashboard/reports"
+                      className="rounded-field border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-ink-muted transition hover:border-brand-300 hover:text-brand-700">報告書</Link>
                     {FEATURES.dailyKarte && (
                       <button onClick={() => regenerateKarte(s.id, s.name)} disabled={busyKarte === s.id}
-                        className="ml-auto rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700 hover:bg-violet-100 disabled:opacity-40">
+                        className="ml-auto rounded-field bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:opacity-40">
                         {busyKarte === s.id ? "更新中…" : "カルテ再生成"}
                       </button>
                     )}
                   </div>
-                </div>
+                </Card>
               );
             })}
           </div>
@@ -367,75 +403,89 @@ export default function TeacherDashboardPage() {
 
       {/* ── C: 今日の教室 ── */}
       {!loading && (events.length > 0 || todayStudents.some((s) => { const d = daysSince(s.lastProgress); return d == null || d >= 7; })) && (
-        <section className="mb-6 grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="mb-2 text-sm font-semibold text-slate-900">今日の行事・テスト</h3>
+        <section className="mb-8 grid gap-4 md:grid-cols-2">
+          <Card>
+            <h3 className="mb-2.5 text-sm font-bold text-ink">今日の行事・テスト</h3>
             {events.length === 0 ? (
-              <p className="text-xs text-slate-400">今日の行事はありません。</p>
+              <p className="text-xs text-ink-faint">今日の行事はありません。</p>
             ) : (
               <ul className="space-y-1.5">
                 {events.map((e) => (
-                  <li key={e.id} className="text-sm text-slate-700">{EVENT_ICON[e.event_type] ?? "•"} {e.title}</li>
+                  <li key={e.id} className="flex gap-2 text-sm text-ink-muted">
+                    <span aria-hidden>{EVENT_ICON[e.event_type] ?? "•"}</span>
+                    <span>{e.title}</span>
+                  </li>
                 ))}
               </ul>
             )}
-          </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-            <h3 className="mb-2 text-sm font-semibold text-amber-900">進捗が空いている子（今日の生徒）</h3>
+          </Card>
+          <Card className="border-caution-200 bg-caution-50">
+            <h3 className="mb-2.5 text-sm font-bold text-caution-700">進捗が空いている子（今日の生徒）</h3>
             {(() => {
               const staleList = todayStudents.filter((s) => { const d = daysSince(s.lastProgress); return d == null || d >= 7; });
               return staleList.length === 0 ? (
-                <p className="text-xs text-amber-700">なし。今日の生徒は進捗が新しいです。</p>
+                <p className="text-xs text-caution-700">なし。今日の生徒は進捗が新しいです。</p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
                   {staleList.map((s) => (
                     <Link key={s.id} href={`/teacher/dashboard/students/${s.id}`}
-                      className="rounded-full border border-amber-300 bg-white px-2.5 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-100">
+                      className="rounded-pill border border-caution-200 bg-surface px-3 py-1 text-xs font-semibold text-caution-700 transition hover:bg-caution-100">
                       {s.name}
                     </Link>
                   ))}
                 </div>
               );
             })()}
-          </div>
+          </Card>
         </section>
       )}
 
       {/* 直近のアクティビティ */}
-      <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-900">直近のアクティビティ</h2>
-        {loading ? (
-          <div className="space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-xl" />)}</div>
-        ) : activity.length === 0 ? (
-          <p className="text-sm text-slate-400">記録されたアクティビティはありません。</p>
-        ) : (
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {activity.map((a) => (
-              <li key={a.id}>
-                <Link href={a.href} className="block rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 transition hover:bg-white hover:border-slate-200">
-                  <div className="flex items-center gap-2">
-                    <KindDot kind={a.kind} />
-                    <p className="flex-1 truncate text-sm font-semibold text-slate-800">{a.title}</p>
-                    <span className="shrink-0 text-xs text-slate-400">{new Date(a.created_at).toLocaleString("ja-JP", { month: "short", day: "numeric" })}</span>
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">{a.body}</p>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+      <section className="mb-8">
+        <SectionTitle>直近のアクティビティ</SectionTitle>
+        <Card padding="sm" className="sm:p-5">
+          {loading ? (
+            <div className="space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-field" />)}</div>
+          ) : activity.length === 0 ? (
+            <p className="py-2 text-sm text-ink-faint">記録されたアクティビティはありません。</p>
+          ) : (
+            <ul className="grid gap-1.5 sm:grid-cols-2">
+              {activity.map((a) => (
+                <li key={a.id}>
+                  <Link href={a.href} className="block rounded-field px-3 py-2 transition hover:bg-canvas-sunken">
+                    <div className="flex items-center gap-2">
+                      <KindDot kind={a.kind} />
+                      <p className="flex-1 truncate text-sm font-semibold text-ink">{a.title}</p>
+                      <time data-numeric className="shrink-0 text-xs text-ink-faint">
+                        {new Date(a.created_at).toLocaleString("ja-JP", { month: "short", day: "numeric" })}
+                      </time>
+                    </div>
+                    <p className="mt-0.5 truncate pl-4 text-xs text-ink-faint">{a.body}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
       </section>
 
       {/* クイックアクション */}
       <section>
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-400">その他の操作</h2>
+        <SectionTitle>その他の操作</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {QUICK_ACTIONS.map((item) => (
-            <Link key={item.title} href={item.href}
-              className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md">
-              <p className="font-semibold text-slate-900">{item.title}</p>
-              <p className="mt-0.5 text-xs leading-5 text-slate-500">{item.desc}</p>
-            </Link>
+            <CardLink key={item.title} href={item.href} padding="sm" className="group">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-semibold text-ink">{item.title}</p>
+                <svg
+                  className="h-4 w-4 shrink-0 text-ink-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-brand-600"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </div>
+              <p className="mt-1 text-xs leading-5 text-ink-faint">{item.desc}</p>
+            </CardLink>
           ))}
         </div>
       </section>
@@ -444,6 +494,11 @@ export default function TeacherDashboardPage() {
 }
 
 function KindDot({ kind }: { kind: ActivityItem["kind"] }) {
-  const map = { report: "bg-rose-400", diagnosis: "bg-violet-400", reschedule: "bg-amber-400", parent_msg: "bg-indigo-400" };
-  return <span className={`h-2 w-2 shrink-0 rounded-full ${map[kind]}`} />;
+  const map: Record<ActivityItem["kind"], string> = {
+    report: "bg-critical-600/60",
+    diagnosis: "bg-accent-500",
+    reschedule: "bg-caution-600",
+    parent_msg: "bg-brand-500",
+  };
+  return <span aria-hidden className={cx("h-2 w-2 shrink-0 rounded-pill", map[kind])} />;
 }

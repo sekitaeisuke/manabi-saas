@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
 import { EconomyPanel } from "@/components/EconomyPanel";
 import { FEATURES } from "@/lib/features";
+import { EmptyState, cx } from "@/components/ui";
 import type { Student, ShiftEvent, StudentKarte } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
 
@@ -327,184 +328,149 @@ export default function StudentDashboardPage() {
     return `${m}月${d}日（${WEEKDAY[dt.getDay()]}）`;
   };
 
+  const unreadFromTeacher = messages.filter((m) => m.direction === "teacher_to_student" && !m.student_read).length;
+
+  // タブは1か所のデータから作る。色はブランド1色に統一（迷わせない）
+  const TABS: { key: Tab; label: string; badge?: number; onSelect?: () => void }[] = [
+    { key: "todo", label: "今日やること", badge: todayTasks.length - todayDone },
+    { key: "tests", label: "テスト", badge: pendingTests.length },
+    { key: "messages", label: "先生へのメッセージ", badge: unreadFromTeacher, onSelect: () => setActiveMessageThread(null) },
+    { key: "karte", label: "3か月ビジョン", badge: kartes.length, onSelect: () => setSelectedKarte(null) },
+    { key: "economy", label: "経済（AC・自塾株）" },
+    { key: "calendar", label: "カレンダー" },
+    { key: "settings", label: "通知設定" },
+  ];
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-blue-50">
-      <header className="sticky top-0 z-10 border-b border-white/60 bg-white/80 px-6 py-4 backdrop-blur-sm">
+    <div className="min-h-screen bg-canvas-glow">
+      <header className="sticky top-0 z-10 border-b border-line bg-surface/85 px-5 py-3.5 backdrop-blur-md">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
           <Logo size="sm" />
           <button
             onClick={logout}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+            className="rounded-field border border-line-strong bg-surface px-3 py-1.5 text-xs font-semibold text-ink-muted transition hover:border-critical-200 hover:bg-critical-50 hover:text-critical-600"
           >
             ログアウト
           </button>
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-6 py-8">
+      <main className="mx-auto max-w-2xl px-5 py-8">
         {/* あいさつ */}
-        <div className="mb-8">
-          <p className="text-sm text-slate-400">{today}</p>
+        <div className="mb-7">
+          <p className="text-sm text-ink-faint">{today}</p>
           {student && (
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink">
               {student.name}さん、こんにちは！
             </h1>
           )}
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-ink-muted">
             {student?.grade} ・ 今日も頑張りましょう。
           </p>
         </div>
 
         {/* タブ */}
-        <div className="mb-6 flex gap-2 flex-wrap">
-          <button
-            onClick={() => setTab("todo")}
-            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "todo"
-                ? "bg-emerald-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            今日やること
-            {todayTasks.length - todayDone > 0 && tab !== "todo" && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-bold text-white">
-                {todayTasks.length - todayDone}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setTab("tests")}
-            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "tests"
-                ? "bg-indigo-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            テスト
-            {pendingTests.length > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
-                {pendingTests.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => { setTab("messages"); setActiveMessageThread(null); }}
-            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "messages"
-                ? "bg-indigo-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            先生へのメッセージ
-            {(() => {
-              const c = messages.filter((m) => m.direction === "teacher_to_student" && !m.student_read).length;
-              return c > 0 ? (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
-                  {c}
-                </span>
-              ) : null;
-            })()}
-          </button>
-          <button
-            onClick={() => { setTab("karte"); setSelectedKarte(null); }}
-            className={`flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "karte"
-                ? "bg-violet-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            3か月ビジョン
-            {kartes.length > 0 && tab !== "karte" && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-violet-500 px-1.5 text-xs font-bold text-white">
-                {kartes.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setTab("economy")}
-            className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "economy"
-                ? "bg-amber-500 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            経済（AC・自塾株）
-          </button>
-          <button
-            onClick={() => setTab("calendar")}
-            className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "calendar"
-                ? "bg-indigo-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            カレンダー
-          </button>
-          <button
-            onClick={() => setTab("settings")}
-            className={`rounded-2xl px-5 py-2.5 text-sm font-semibold transition ${
-              tab === "settings"
-                ? "bg-indigo-600 text-white"
-                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-            }`}
-          >
-            通知設定
-          </button>
+        <div
+          role="tablist"
+          aria-label="表示の切り替え"
+          className="mb-6 -mx-5 flex gap-2 overflow-x-auto px-5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0"
+        >
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            // 未選択のタブにだけ件数を出す（選択中は中身を見れば分かる）
+            const badge = !active && t.badge ? t.badge : 0;
+            return (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={active}
+                onClick={() => { setTab(t.key); t.onSelect?.(); }}
+                className={cx(
+                  "flex shrink-0 items-center gap-2 rounded-pill px-4 py-2.5 text-sm font-semibold transition duration-150 active:scale-[0.98]",
+                  active
+                    ? "bg-brand-600 text-white shadow-brand"
+                    : "border border-line bg-surface text-ink-muted shadow-card hover:border-brand-200 hover:text-brand-700",
+                )}
+              >
+                {t.label}
+                {badge > 0 && (
+                  <span
+                    data-numeric
+                    className="flex h-5 min-w-5 items-center justify-center rounded-pill bg-critical-600 px-1.5 text-[0.6875rem] font-bold leading-none text-white"
+                  >
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* カルテタブ（現状・進め方・注意・保護者ニーズ＋毎日のTODO） */}
         {tab === "todo" && (
           <div className="space-y-5">
             {FEATURES.dailyKarte && myKarte?.karte_html && (
-              <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-sm">
+              <div className="rounded-card border border-line bg-surface p-6 shadow-card">
                 <style>{`
-                  #student-karte h2 { font-size:1rem; font-weight:700; margin:16px 0 6px; padding:6px 12px; background:#f5f3ff; border-left:4px solid #7c3aed; color:#3730a3; border-radius:0 6px 6px 0; }
+                  #student-karte h2 { font-size:1rem; font-weight:700; margin:16px 0 6px; padding:6px 12px; background:var(--color-brand-50); border-left:4px solid var(--color-accent-600); color:var(--color-brand-900); border-radius:0 6px 6px 0; }
                   #student-karte h2:first-child { margin-top:0; }
-                  #student-karte p { line-height:1.85; font-size:0.9rem; color:#374151; margin:4px 0; }
+                  #student-karte p { line-height:1.85; font-size:0.9rem; color:var(--color-ink-muted); margin:4px 0; }
                 `}</style>
                 <div id="student-karte" dangerouslySetInnerHTML={{ __html: sanitizeHtml(myKarte.karte_html) }} />
-                <p className="mt-2 text-right text-[11px] text-slate-400">更新 {new Date(myKarte.generated_at).toLocaleString("ja-JP")}</p>
+                <p className="mt-3 text-right text-[0.6875rem] text-ink-faint">
+                  更新 {new Date(myKarte.generated_at).toLocaleString("ja-JP")}
+                </p>
               </div>
             )}
             {dailyTasks.length === 0 ? (
-              <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-16 text-center text-slate-500">
-                <p className="text-5xl mb-3">📝</p>
-                <p className="font-semibold text-slate-700">まだTODOはありません</p>
-                <p className="mt-1 text-sm">先生が3か月ビジョンを共有すると、毎日のやることがここに表示されます。</p>
-              </div>
+              <EmptyState
+                icon="📝"
+                title="まだTODOはありません"
+                description="先生が3か月ビジョンを共有すると、毎日のやることがここに表示されます。"
+                className="py-16"
+              />
             ) : (
               <>
                 {/* 今日 */}
-                <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
+                <div className="rounded-card border border-line bg-surface p-6 shadow-card">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
-                      <h2 className="text-lg font-bold text-slate-900">今日のTODO</h2>
-                      <p className="text-xs text-slate-500">{dateLabel(todayKey)}</p>
+                      <h2 className="text-lg font-bold text-ink">今日のTODO</h2>
+                      <p className="text-xs text-ink-faint">{dateLabel(todayKey)}</p>
                     </div>
                     {todayTasks.length > 0 && (
-                      <span className={`rounded-full px-3 py-1 text-sm font-bold ${
-                        todayDone === todayTasks.length ? "bg-emerald-100 text-emerald-700" : "bg-emerald-50 text-emerald-700"
-                      }`}>
+                      <span data-numeric className={cx(
+                        "rounded-pill px-3 py-1 text-sm font-bold",
+                        todayDone === todayTasks.length
+                          ? "bg-positive-100 text-positive-700"
+                          : "bg-canvas-sunken text-ink-muted",
+                      )}>
                         {todayDone}/{todayTasks.length} 完了
                       </span>
                     )}
                   </div>
                   {todayTasks.length === 0 ? (
-                    <p className="py-6 text-center text-sm text-slate-400">今日のタスクはありません。ゆっくり休もう／苦手の復習をしよう。</p>
+                    <p className="py-6 text-center text-sm text-ink-faint">今日のタスクはありません。ゆっくり休もう／苦手の復習をしよう。</p>
                   ) : (
                     <ul className="space-y-2">
                       {todayTasks.map((t) => (
                         <li key={t.id}>
-                          <label className={`flex items-start gap-3 rounded-2xl border px-4 py-3 cursor-pointer transition ${
-                            t.done ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white hover:bg-slate-50"
-                          }`}>
+                          <label className={cx(
+                            "flex cursor-pointer items-start gap-3 rounded-field border px-4 py-3.5 transition duration-150",
+                            t.done
+                              ? "border-positive-200 bg-positive-50"
+                              : "border-line-strong bg-surface hover:border-brand-300 hover:bg-brand-50/40",
+                          )}>
                             <input type="checkbox" checked={t.done} onChange={() => toggleTask(t.id, !t.done)}
-                              className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600" />
-                            <span className="flex-1 min-w-0">
-                              <span className={`block text-sm font-medium ${t.done ? "text-slate-400 line-through" : "text-slate-900"}`}>{t.content}</span>
-                              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                                {t.subject && <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-medium text-indigo-600">{t.subject}</span>}
-                                {t.amount && <span className="text-slate-400">{t.amount}</span>}
+                              className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--color-positive-600)]" />
+                            <span className="min-w-0 flex-1">
+                              <span className={cx(
+                                "block text-sm font-medium leading-6",
+                                t.done ? "text-ink-faint line-through" : "text-ink",
+                              )}>{t.content}</span>
+                              <span className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+                                {t.subject && <span className="rounded-pill bg-brand-50 px-2 py-0.5 font-semibold text-brand-700">{t.subject}</span>}
+                                {t.amount && <span className="text-ink-faint">{t.amount}</span>}
                               </span>
                             </span>
                           </label>
@@ -516,18 +482,24 @@ export default function StudentDashboardPage() {
 
                 {/* これから1週間 */}
                 {Object.keys(upcomingByDate).length > 0 && (
-                  <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
-                    <h2 className="mb-4 text-lg font-bold text-slate-900">これから1週間</h2>
+                  <div className="rounded-card border border-line bg-surface p-6 shadow-card">
+                    <h2 className="mb-4 text-lg font-bold text-ink">これから1週間</h2>
                     <div className="space-y-4">
                       {Object.entries(upcomingByDate).map(([date, items]) => (
                         <div key={date}>
-                          <p className="mb-1.5 text-xs font-semibold text-slate-500">{dateLabel(date)}</p>
+                          <p className="mb-1.5 text-xs font-bold text-ink-muted">{dateLabel(date)}</p>
                           <ul className="space-y-1.5">
                             {items.map((t) => (
-                              <li key={t.id} className="flex items-center gap-2.5 rounded-xl border border-slate-100 bg-slate-50/60 px-3.5 py-2">
-                                <span className={`h-2 w-2 shrink-0 rounded-full ${t.done ? "bg-emerald-400" : "bg-slate-300"}`} />
-                                <span className={`flex-1 text-sm ${t.done ? "text-slate-400 line-through" : "text-slate-700"}`}>{t.content}</span>
-                                {t.subject && <span className="shrink-0 text-xs text-slate-400">{t.subject}</span>}
+                              <li key={t.id} className="flex items-center gap-2.5 rounded-field border border-line bg-canvas px-3.5 py-2.5">
+                                <span aria-hidden className={cx(
+                                  "h-2 w-2 shrink-0 rounded-pill",
+                                  t.done ? "bg-positive-600" : "bg-line-strong",
+                                )} />
+                                <span className={cx(
+                                  "flex-1 text-sm",
+                                  t.done ? "text-ink-faint line-through" : "text-ink-muted",
+                                )}>{t.content}</span>
+                                {t.subject && <span className="shrink-0 text-xs text-ink-faint">{t.subject}</span>}
                               </li>
                             ))}
                           </ul>
