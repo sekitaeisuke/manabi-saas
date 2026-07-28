@@ -88,6 +88,9 @@ type StockData = {
 // 前の教室の株価が一瞬見えるのを防ぐ（描画側でIDが一致するかを見る）。
 type StockState = { schoolId: string; data: StockData | null };
 
+/** 生徒1人のAC（student_wallets）と保有株（class_stock_holdings） */
+type Wallet = { balance: number; locked: number; shares: number };
+
 const UNDERSTAND: Record<string, { label: string; tone: "positive" | "neutral" | "caution" }> = {
   good:   { label: "◎手応えあり", tone: "positive" },
   normal: { label: "○ふつう",     tone: "neutral" },
@@ -135,6 +138,7 @@ export default function TeacherDashboardPage() {
   // 塾内経済は既定OFFのモジュール。ONの塾でだけ株価を出す。
   const [stockEnabled, setStockEnabled] = useState(false);
   const [stockState, setStockState] = useState<StockState | null>(null);
+  const [wallets, setWallets] = useState<Map<string, Wallet>>(new Map());
 
   /* ── 教室一覧＋最後に見ていた教室＋モジュール解決 ────────── */
   useEffect(() => {
@@ -187,6 +191,40 @@ export default function TeacherDashboardPage() {
     })();
     return () => { cancelled = true; };
   }, [stockEnabled, schoolId]);
+
+  /* ── 今日来る生徒のAC残高（塾内経済がONのときだけ） ────── */
+  const studentIdsKey = students.map((s) => s.id).join(",");
+  useEffect(() => {
+    if (!stockEnabled || studentIdsKey === "") return;
+    const ids = studentIdsKey.split(",");
+    let cancelled = false;
+    (async () => {
+      // student_wallets の RLS は auth_is_teacher() で講師に開いている。
+      // class-stock-setup.sql 未実行なら error になるので、その時は静かに諦める。
+      const [wRes, hRes] = await Promise.allSettled([
+        supabase.from("student_wallets").select("student_id, balance, locked_balance").in("student_id", ids),
+        supabase.from("class_stock_holdings").select("student_id, shares").in("student_id", ids),
+      ]);
+      if (cancelled) return;
+
+      const m = new Map<string, Wallet>();
+      if (wRes.status === "fulfilled" && !wRes.value.error) {
+        for (const w of (wRes.value.data ?? []) as
+          { student_id: string; balance: number; locked_balance: number }[]) {
+          m.set(w.student_id, { balance: w.balance ?? 0, locked: w.locked_balance ?? 0, shares: 0 });
+        }
+      }
+      if (hRes.status === "fulfilled" && !hRes.value.error) {
+        for (const h of (hRes.value.data ?? []) as { student_id: string; shares: number }[]) {
+          const e = m.get(h.student_id) ?? { balance: 0, locked: 0, shares: 0 };
+          e.shares = h.shares ?? 0;
+          m.set(h.student_id, e);
+        }
+      }
+      setWallets(m);
+    })();
+    return () => { cancelled = true; };
+  }, [stockEnabled, studentIdsKey]);
 
   const selectSchool = (id: string) => {
     const next = schoolId === id ? null : id;   // もう一度押したら選択解除
@@ -647,6 +685,7 @@ export default function TeacherDashboardPage() {
               <StudentRow
                 key={s.id}
                 s={s}
+                wallet={stockEnabled ? wallets.get(s.id) ?? null : null}
                 open={openId === s.id}
                 onToggle={() => setOpenId(openId === s.id ? null : s.id)}
                 busy={busyFocus === s.id}
@@ -734,9 +773,12 @@ export default function TeacherDashboardPage() {
    開くと 使用教材 / 今日詰めること / 操作。
    ────────────────────────────────────────────────────────── */
 function StudentRow({
-  s, open, onToggle, busy, onRegenerate,
+  s, wallet, open, onToggle, busy, onRegenerate,
 }: {
-  s: TodayStudent; open: boolean; onToggle: () => void;
+  s: TodayStudent;
+  /** 塾内経済OFF、または残高が取れないときは null */
+  wallet: Wallet | null;
+  open: boolean; onToggle: () => void;
   busy: boolean; onRegenerate: () => void;
 }) {
   const stale = daysSince(s.lastProgress);
@@ -768,6 +810,27 @@ function StudentRow({
           <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="font-bold text-ink">{s.name}</span>
             <span className="text-xs text-ink-faint">{s.grade}</span>
+            {/* 所有AC。塾内経済ONで残高が取れたときだけ */}
+            {wallet && (
+              <span
+                className="inline-flex items-baseline gap-1 rounded-pill bg-brand-50 px-2 py-0.5"
+                title={
+                  `使えるAC ${wallet.balance.toLocaleString()}` +
+                  (wallet.locked > 0 ? ` / 投資中 ${wallet.locked.toLocaleString()}` : "") +
+                  (wallet.shares > 0 ? ` / 保有株 ${wallet.shares.toLocaleString()}株` : "")
+                }
+              >
+                <span data-numeric className="text-xs font-bold text-brand-700">
+                  {wallet.balance.toLocaleString()}
+                </span>
+                <span className="text-[0.625rem] font-semibold text-brand-600">AC</span>
+                {wallet.locked > 0 && (
+                  <span data-numeric className="text-[0.625rem] text-brand-600">
+                    +{wallet.locked.toLocaleString()}投資中
+                  </span>
+                )}
+              </span>
+            )}
             {s.subjects.length > 0 && (
               <span className="text-xs text-ink-faint">・{s.subjects.join("・")}</span>
             )}
@@ -799,6 +862,28 @@ function StudentRow({
 
       {open && (
         <div className="border-t border-line bg-canvas/50 px-4 py-4 sm:px-5">
+          {/* 塾内経済（AC・自塾株）の内訳 */}
+          {wallet && (
+            <div className="mb-4">
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-ink-faint">塾内経済</p>
+              <dl className="flex flex-wrap gap-2">
+                {([
+                  ["使えるAC", wallet.balance, "AC"],
+                  ["投資中AC", wallet.locked, "AC"],
+                  ["保有株", wallet.shares, "株"],
+                ] as const).map(([label, v, unit]) => (
+                  <div key={label} className="rounded-field border border-line bg-surface px-3 py-2">
+                    <dt className="text-[0.6875rem] font-semibold text-ink-faint">{label}</dt>
+                    <dd className="mt-0.5">
+                      <span data-numeric className="text-base font-bold text-ink">{v.toLocaleString()}</span>
+                      <span className="ml-1 text-[0.625rem] font-semibold text-ink-faint">{unit}</span>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
           {/* 使用中の教材（textbook_progress から機械的に） */}
           <div className="mb-4">
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-ink-faint">いま使っている教材</p>
