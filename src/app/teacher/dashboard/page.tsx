@@ -6,12 +6,10 @@ import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { Skeleton } from "@/components/Skeleton";
-import { ECON } from "@/lib/economyFeatures";
-import { FEATURES } from "@/lib/features";
 import { resolveEnabled, type ModuleSettingRow } from "@/lib/modules";
 import { StockChart, type StockPoint } from "@/components/StockChart";
 import {
-  Badge, Callout, Card, CountBadge, EmptyState,
+  Badge, Callout, Card, EmptyState,
   LinkButton, PageHeader, SectionTitle, Spinner, cx,
 } from "@/components/ui";
 
@@ -66,12 +64,6 @@ type RestingStudent = {
   lastSeen: string | null;         // 最後に記録が付いた日
   missedCount: number;             // 来るはずだったのに記録が無い回数
   canceledCount: number;           // 授業が「中止」になった回数
-};
-
-type Counts = {
-  pendingReschedules: number; unreadParentMessages: number; unreadStudentMessages: number;
-  pendingDiagnoses: number; draftReports: number; concerns: number;
-  economyApprovals: number; economyVoices: number; economyReferrals: number;
 };
 
 type StockHist = {
@@ -130,7 +122,6 @@ export default function TeacherDashboardPage() {
   const [schoolId, setSchoolId] = useState<string | null>(null);
   const [students, setStudents] = useState<TodayStudent[]>([]);
   const [resting, setResting] = useState<RestingStudent[]>([]);
-  const [counts, setCounts] = useState<Counts | null>(null);
   const [failedNotifications, setFailedNotifications] = useState(0);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -376,34 +367,7 @@ export default function TeacherDashboardPage() {
     rest.sort((a, b) => (b.missedCount + b.canceledCount) - (a.missedCount + a.canceledCount));
     setResting(rest);
 
-    /* C. さばくこと */
-    const [
-      { count: pendingReschedules }, { count: unreadParent }, { count: unreadStudent },
-      { count: pendingDiagnoses }, { count: draftReports }, { count: concerns },
-      { count: ecoApprovals }, { count: ecoVoices }, { count: ecoReferrals },
-    ] = await Promise.all([
-      supabase.from("reschedule_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
-      supabase.from("parent_messages").select("*", { count: "exact", head: true }).eq("status", "unread").eq("direction", "parent_to_teacher"),
-      supabase.from("student_messages").select("*", { count: "exact", head: true }).eq("status", "unread").eq("direction", "student_to_teacher"),
-      supabase.from("questionnaire_responses").select("*", { count: "exact", head: true }).eq("status", "pending"),
-      supabase.from("lesson_reports").select("*", { count: "exact", head: true }).eq("status", "draft"),
-      supabase.from("collaboration_tasks").select("*", { count: "exact", head: true }).eq("status", "open"),
-      supabase.from("reward_exchanges").select("*", { count: "exact", head: true }).eq("status", "pending"),
-      supabase.from("shareholder_voices").select("*", { count: "exact", head: true }).neq("status", "done"),
-      supabase.from("referral_rewards").select("*", { count: "exact", head: true }).eq("status", "pending"),
-    ]);
-    setCounts({
-      pendingReschedules: pendingReschedules ?? 0,
-      unreadParentMessages: unreadParent ?? 0,
-      unreadStudentMessages: unreadStudent ?? 0,
-      pendingDiagnoses: pendingDiagnoses ?? 0,
-      draftReports: draftReports ?? 0,
-      concerns: concerns ?? 0,
-      economyApprovals: ecoApprovals ?? 0,
-      economyVoices: ecoVoices ?? 0,
-      economyReferrals: ecoReferrals ?? 0,
-    });
-
+    /* C. 通知の失敗だけは拾う（気づけないと保護者に届いていない） */
     const past24h = new Date(Date.now() - 86_400_000).toISOString();
     const { count: failedCount } = await supabase.from("notification_log")
       .select("*", { count: "exact", head: true }).eq("status", "failed").gte("created_at", past24h);
@@ -478,18 +442,6 @@ export default function TeacherDashboardPage() {
   const shownResting = schoolId ? resting.filter((r) => r.schoolId === schoolId) : resting;
   const selectedSchool = schools.find((s) => s.id === schoolId) ?? null;
   const unassigned = students.filter((s) => !s.schoolId).length;
-
-  const inbox = counts ? [
-    { label: "保護者からの未読", count: counts.unreadParentMessages, href: "/teacher/dashboard/messages" },
-    { label: "生徒からの未読", count: counts.unreadStudentMessages, href: "/teacher/dashboard/messages" },
-    { label: "申請中の振替", count: counts.pendingReschedules, href: FEATURES.separateSchedulePages ? "/teacher/dashboard/reschedules" : "/teacher/dashboard/calendar" },
-    { label: "未分析の診断", count: counts.pendingDiagnoses, href: "/teacher/dashboard/diagnosis" },
-    { label: "未送信の報告書", count: counts.draftReports, href: "/teacher/dashboard/reports" },
-    { label: "気がかりな生徒", count: counts.concerns, href: "/teacher/dashboard/collaboration" },
-    { label: "報酬交換の承認", count: counts.economyApprovals, href: "/teacher/dashboard/economy" },
-    ...(ECON.voice ? [{ label: "株主の声", count: counts.economyVoices, href: "/teacher/dashboard/economy" }] : []),
-    ...(ECON.referral ? [{ label: "友達紹介の申請", count: counts.economyReferrals, href: "/teacher/dashboard/economy" }] : []),
-  ].filter((i) => i.count > 0) : [];
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-9">
@@ -741,29 +693,9 @@ export default function TeacherDashboardPage() {
         )}
       </section>
 
-      {/* ── さばくこと ────────────────────────────────── */}
-      <section>
-        <SectionTitle>今日さばくこと</SectionTitle>
-        {loading ? (
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-32 rounded-pill" />)}
-          </div>
-        ) : inbox.length === 0 ? (
-          <p className="rounded-card border border-positive-200 bg-positive-50 px-4 py-3 text-sm font-medium text-positive-700">
-            今さばくものはありません 🎉
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {inbox.map((i) => (
-              <Link key={i.label} href={i.href}
-                className="flex items-center gap-2 rounded-pill border border-critical-200 bg-critical-50 py-2 pl-4 pr-2 text-sm font-semibold text-critical-700 transition duration-150 hover:border-critical-600/40 hover:bg-critical-100">
-                {i.label}
-                <CountBadge count={i.count} />
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
+      {/* 「今日さばくこと」（赤いチップの帯・気がかりな生徒を含む）は
+          デザインが気に入らないため、いったん外してある。
+          未読・振替・診断などの件数は左レールのバッジで見えている。 */}
     </div>
   );
 }
