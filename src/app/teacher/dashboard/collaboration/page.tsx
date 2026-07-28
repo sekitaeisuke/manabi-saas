@@ -1,20 +1,30 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import type { Student, Teacher } from "@/lib/supabase";
+import {
+  Badge, Button, Card, EmptyState, LinkButton, PageHeader, SectionTitle,
+  Spinner, cx, inputClass,
+} from "@/components/ui";
+
+/* ──────────────────────────────────────────────────────────
+   講師連携
+     上：生徒について … 生徒ごとに話が積み上がる。開くとその子の事実が横にある。
+     下：教室運営     … 議題。決まったら閉じる。
+
+   タスク管理ではなく「語り合う場所」にしたいので、担当者・期限は前面に出さず
+   詳細の中に畳んである（機能としては残す。完了の権限ルールも従来どおり）。
+   ────────────────────────────────────────────────────────── */
 
 type SourceType = "manual" | "report" | "diagnosis" | "karte";
 
 const AUTO_LABEL: Record<string, string> = {
-  report: "🔔 自動・報告書",
-  diagnosis: "🔔 自動・診断",
-  karte: "🔔 カルテ緊急",
+  report: "報告書から", diagnosis: "診断から", karte: "カルテから",
 };
 
 type Category = "student_guidance" | "classroom_management" | "school_rules";
-type ViewMode = "list" | "calendar";
 
 type Task = {
   id: string;
@@ -38,11 +48,6 @@ type Task = {
   assigned_at: string | null;
 };
 
-// ロール上下: 管理者 > 講師 > 非常勤
-const ROLE_RANK: Record<string, number> = { admin: 3, teacher: 2, "part-time": 1 };
-const ROLE_LABEL: Record<string, string> = { admin: "管理者", teacher: "講師", "part-time": "非常勤" };
-const rankOf = (role: string | null | undefined) => ROLE_RANK[role ?? ""] ?? 1;
-
 type Message = {
   id: string;
   task_id: string;
@@ -51,20 +56,20 @@ type Message = {
   created_at: string;
 };
 
-const CATEGORY_LABELS: Record<Category | "all", string> = {
-  all: "すべて",
-  student_guidance: "生徒指導",
-  classroom_management: "教室運営",
-  school_rules: "塾ルール",
+/** 会話の隣に置く「その子の事実」。ここがあるから議論が具体になる。 */
+type StudentFacts = {
+  progress: { textbook: string; where: string | null; understanding: string | null; date: string } | null;
+  report: { subject: string | null; percentage: number | null; date: string } | null;
+  diagnosis: { bottleneck: string | null; intervention: string | null; date: string } | null;
+  parent: { message: string; date: string } | null;
 };
 
-const CATEGORY_COLORS: Record<Category, string> = {
-  student_guidance: "bg-blue-100 text-blue-700",
-  classroom_management: "bg-amber-100 text-amber-700",
-  school_rules: "bg-purple-100 text-purple-700",
-};
+// ロール上下: 管理者 > 講師 > 非常勤
+const ROLE_RANK: Record<string, number> = { admin: 3, teacher: 2, "part-time": 1 };
+const ROLE_LABEL: Record<string, string> = { admin: "管理者", teacher: "講師", "part-time": "非常勤" };
+const rankOf = (role: string | null | undefined) => ROLE_RANK[role ?? ""] ?? 1;
 
-const WEEKDAY = ["日", "月", "火", "水", "木", "金", "土"];
+const UNDERSTAND: Record<string, string> = { good: "◎手応えあり", normal: "○ふつう", weak: "△不安" };
 
 const EMPTY_FORM = {
   category: "student_guidance" as Category,
@@ -77,32 +82,31 @@ const EMPTY_FORM = {
   assignee_id: "",
 };
 
-function dateKey(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function relTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60_000);
+  if (min < 1) return "たった今";
+  if (min < 60) return `${min}分前`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}時間前`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}日前`;
+  return new Date(iso).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
 }
 
-function dueDateLabel(due: string | null): { text: string; cls: string } | null {
-  if (!due) return null;
-  const today = dateKey(new Date());
-  if (due < today) return { text: `期限切れ ${due}`, cls: "text-red-600 bg-red-50" };
-  if (due === today) return { text: "今日が期限", cls: "text-orange-600 bg-orange-50" };
-  return { text: `期限 ${due}`, cls: "text-slate-600 bg-slate-100" };
-}
-
-export default function TeacherCollaborationPage() {
+export default function CollaborationPage() {
   const [myTeacherId, setMyTeacherId] = useState<string | null>(null);
-  const [myRole, setMyRole] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<string>("part-time");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [lastMsg, setLastMsg] = useState<Map<string, Message>>(new Map());
+  const [msgCount, setMsgCount] = useState<Map<string, number>>(new Map());
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState<Category | "all">("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [calendarMonth, setCalendarMonth] = useState(() => {
-    const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
+  const [facts, setFacts] = useState<StudentFacts | null>(null);
+  const [showDetails, setShowDetails] = useState(false); // 担当・期限の畳み
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -110,9 +114,9 @@ export default function TeacherCollaborationPage() {
   const [newMessage, setNewMessage] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  /* ── 自分・名簿 ─────────────────────────────────── */
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -133,12 +137,34 @@ export default function TeacherCollaborationPage() {
     })();
   }, []);
 
+  /* ── 話題と、その最後の一言 ───────────────────────── */
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase
       .from("collaboration_tasks").select("*").eq("status", "open")
       .order("created_at", { ascending: false });
-    setTasks((data as Task[]) ?? []);
+    const rows = (data as Task[]) ?? [];
+    setTasks(rows);
+
+    // 一覧に「最後の一言」を出すため、まとめて引いてクライアントで畳む
+    if (rows.length > 0) {
+      const { data: ms } = await supabase
+        .from("collaboration_task_messages")
+        .select("id, task_id, teacher_id, body, created_at")
+        .in("task_id", rows.map((r) => r.id))
+        .order("created_at", { ascending: false });
+      const last = new Map<string, Message>();
+      const count = new Map<string, number>();
+      for (const m of (ms as Message[]) ?? []) {
+        if (!last.has(m.task_id)) last.set(m.task_id, m);
+        count.set(m.task_id, (count.get(m.task_id) ?? 0) + 1);
+      }
+      setLastMsg(last);
+      setMsgCount(count);
+    } else {
+      setLastMsg(new Map());
+      setMsgCount(new Map());
+    }
     setLoading(false);
   }, []);
 
@@ -152,15 +178,47 @@ export default function TeacherCollaborationPage() {
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
   useEffect(() => { if (myTeacherId) fetchReadIds(); }, [myTeacherId, fetchReadIds]);
 
-  // ページを開いたら報告書・学力診断から「気がかりな生徒」を自動掲載して再取得
+  // 開いたら報告書・診断から「気がかりな生徒」を自動掲載して再取得
   useEffect(() => {
     (async () => {
-      setSyncing(true);
       try { await authFetch("/api/collaboration/sync", { method: "POST" }); } catch { /* 同期失敗は無視 */ }
-      setSyncing(false);
       fetchTasks();
     })();
   }, [fetchTasks]);
+
+  /* ── その子の事実（会話の隣に置く） ───────────────── */
+  const fetchFacts = useCallback(async (studentId: string, studentName: string) => {
+    setFacts(null);
+    const [p, r, d, m] = await Promise.allSettled([
+      supabase.from("textbook_progress")
+        .select("textbook, progress_where, understanding, lesson_date")
+        .eq("student_id", studentId).order("lesson_date", { ascending: false }).limit(1),
+      supabase.from("lesson_reports")
+        .select("test_subject, percentage, created_at")
+        .eq("student_id", studentId).order("created_at", { ascending: false }).limit(1),
+      supabase.from("questionnaire_responses")
+        .select("bottleneck_label, intervention, created_at")
+        .eq("student_name", studentName).order("created_at", { ascending: false }).limit(1),
+      supabase.from("parent_messages")
+        .select("message, created_at")
+        .eq("student_id", studentId).eq("direction", "parent_to_teacher")
+        .order("created_at", { ascending: false }).limit(1),
+    ]);
+    const row = (x: PromiseSettledResult<{ data: unknown[] | null; error: unknown } | null>) =>
+      x.status === "fulfilled" && x.value && !x.value.error ? (x.value.data ?? [])[0] : null;
+
+    const pr = row(p) as { textbook: string; progress_where: string | null; understanding: string | null; lesson_date: string } | undefined;
+    const rr = row(r) as { test_subject: string | null; percentage: number | null; created_at: string } | undefined;
+    const dr = row(d) as { bottleneck_label: string | null; intervention: string | null; created_at: string } | undefined;
+    const mr = row(m) as { message: string; created_at: string } | undefined;
+
+    setFacts({
+      progress: pr ? { textbook: pr.textbook, where: pr.progress_where, understanding: pr.understanding, date: pr.lesson_date } : null,
+      report: rr ? { subject: rr.test_subject, percentage: rr.percentage, date: rr.created_at.slice(0, 10) } : null,
+      diagnosis: dr ? { bottleneck: dr.bottleneck_label, intervention: dr.intervention, date: dr.created_at.slice(0, 10) } : null,
+      parent: mr ? { message: mr.message, date: mr.created_at.slice(0, 10) } : null,
+    });
+  }, []);
 
   const fetchMessages = useCallback(async (taskId: string) => {
     const { data } = await supabase.from("collaboration_task_messages")
@@ -170,24 +228,33 @@ export default function TeacherCollaborationPage() {
 
   const selectTask = useCallback(async (taskId: string) => {
     setSelectedTaskId(taskId);
+    setShowDetails(false);
     await fetchMessages(taskId);
+    const t = tasks.find((x) => x.id === taskId);
+    if (t?.student_id) {
+      const s = students.find((x) => x.id === t.student_id);
+      fetchFacts(t.student_id, s?.name ?? "");
+    } else {
+      setFacts(null);
+    }
     if (myTeacherId) {
       await supabase.from("collaboration_task_reads").upsert(
         { task_id: taskId, teacher_id: myTeacherId },
         { onConflict: "task_id,teacher_id" }
       );
-      setReadIds(prev => new Set([...prev, taskId]));
+      setReadIds((prev) => new Set([...prev, taskId]));
     }
-  }, [myTeacherId, fetchMessages]);
+  }, [myTeacherId, fetchMessages, fetchFacts, tasks, students]);
 
-  const closeDetail = () => { setSelectedTaskId(null); setMessages([]); setNewMessage(""); };
+  const closeDetail = () => {
+    setSelectedTaskId(null); setMessages([]); setNewMessage(""); setFacts(null);
+  };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+  /* ── 書き込み系（従来の権限ルールをそのまま保持） ──── */
   const saveTask = async () => {
-    if (!form.title.trim()) { setFormError("タイトルは必須です"); return; }
+    if (!form.title.trim()) { setFormError("ひとことを入力してください"); return; }
     if (!myTeacherId) return;
     setSaving(true); setFormError("");
     const { error } = await supabase.from("collaboration_tasks").insert({
@@ -209,29 +276,18 @@ export default function TeacherCollaborationPage() {
     setCreating(false); setForm(EMPTY_FORM); fetchTasks();
   };
 
-  // ── 担当者を決める（上位ロールが自分と同じ〜下位ロールから選ぶ） ──
   const assignTask = async (taskId: string, assigneeId: string) => {
     if (!myTeacherId) return;
     const patch = assigneeId
       ? { assignee_id: assigneeId, assigned_by: myTeacherId, assigned_at: new Date().toISOString() }
       : { assignee_id: null, assigned_by: null, assigned_at: null };
     await supabase.from("collaboration_tasks").update(patch).eq("id", taskId);
-    setTasks(prev => prev.map(t => (t.id === taskId ? { ...t, ...patch } : t)));
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
   };
 
-  const completeTask = async (taskId: string) => {
+  const finishTask = async (taskId: string, auto: boolean) => {
     if (!myTeacherId) return;
-    if (!confirm("このタスクを完了にして削除しますか？")) return;
-    await supabase.from("collaboration_tasks")
-      .update({ status: "completed", completed_by: myTeacherId, completed_at: new Date().toISOString() })
-      .eq("id", taskId);
-    if (selectedTaskId === taskId) closeDetail();
-    fetchTasks();
-  };
-
-  // 自動掲載タスクを「解決済」にする（行は残るので同じ報告書では再掲されない）
-  const resolveAuto = async (taskId: string) => {
-    if (!myTeacherId) return;
+    if (!auto && !confirm("この話を終わりにしますか？（一覧から消えます）")) return;
     await supabase.from("collaboration_tasks")
       .update({ status: "completed", completed_by: myTeacherId, completed_at: new Date().toISOString() })
       .eq("id", taskId);
@@ -248,379 +304,322 @@ export default function TeacherCollaborationPage() {
     setNewMessage(""); await fetchMessages(selectedTaskId); setSendingMsg(false);
   };
 
-  const teacherName = (id: string | null) => id ? teachers.find(t => t.id === id)?.name ?? "—" : "—";
-  const studentName = (id: string | null) => id ? students.find(s => s.id === id)?.name ?? "—" : "—";
+  const teacherName = (id: string | null) => (id ? teachers.find((t) => t.id === id)?.name ?? "—" : "—");
+  const studentOf = (id: string | null) => (id ? students.find((s) => s.id === id) ?? null : null);
+  const assignCandidates = teachers.filter((t) => rankOf(t.role) <= rankOf(myRole));
 
-  // 担当者に選べる候補＝自分と同じ〜下位ロール（＝自分のランク以下）
-  const assignCandidates = teachers.filter(t => rankOf(t.role) <= rankOf(myRole));
-
-  // このタスクの担当者を変更できるか
-  //   未割当 … 誰でも担当を決められる（未対応の抱え込みを防ぐ）
-  //   割当済 … 現担当者と同じ〜上位ロールだけが付け替えできる（下位が横取りしない）
   const canAssign = (task: Task) => {
     if (!task.assignee_id) return true;
-    const assignee = teachers.find(t => t.id === task.assignee_id);
-    return rankOf(myRole) >= rankOf(assignee?.role);
+    return rankOf(myRole) >= rankOf(teachers.find((t) => t.id === task.assignee_id)?.role);
   };
-
-  // 完了できるか＝担当者本人 or 担当者より上位ロール。未割当は完了不可（先に担当者を決める）
+  // 完了できるか＝担当者本人 or 担当者より上位ロール。未割当は完了不可。
   const canComplete = (task: Task) => {
     if (!task.assignee_id) return false;
     if (task.assignee_id === myTeacherId) return true;
-    const assignee = teachers.find(t => t.id === task.assignee_id);
-    return rankOf(myRole) > rankOf(assignee?.role);
+    return rankOf(myRole) > rankOf(teachers.find((t) => t.id === task.assignee_id)?.role);
   };
 
-  // 担当者セレクト（カード・モーダル共通）
-  const renderAssignee = (task: Task) => {
-    const editable = canAssign(task);
+  const isAuto = (t: Task) =>
+    t.source_type === "report" || t.source_type === "diagnosis" || t.source_type === "karte";
+  const isUnread = (t: Task) => !readIds.has(t.id) && t.created_by !== myTeacherId;
+
+  /* ── 上：生徒ごとにまとめる ───────────────────────── */
+  const studentGroups = useMemo(() => {
+    const g = new Map<string, { key: string; name: string; grade: string; tasks: Task[] }>();
+    for (const t of tasks) {
+      if (t.category !== "student_guidance") continue;
+      const key = t.is_all_students ? "__all__" : t.student_id ?? "__none__";
+      if (!g.has(key)) {
+        const s = studentOf(t.student_id);
+        g.set(key, {
+          key,
+          name: t.is_all_students ? "生徒全体" : s?.name ?? "（生徒未指定）",
+          grade: t.is_all_students ? "" : s?.grade ?? "",
+          tasks: [],
+        });
+      }
+      g.get(key)!.tasks.push(t);
+    }
+    // 動きが新しい順。未読を含むグループを上に。
+    return [...g.values()].sort((a, b) => {
+      const au = a.tasks.some(isUnread) ? 1 : 0;
+      const bu = b.tasks.some(isUnread) ? 1 : 0;
+      if (au !== bu) return bu - au;
+      const at = Math.max(...a.tasks.map((t) => new Date(lastMsg.get(t.id)?.created_at ?? t.created_at).getTime()));
+      const bt = Math.max(...b.tasks.map((t) => new Date(lastMsg.get(t.id)?.created_at ?? t.created_at).getTime()));
+      return bt - at;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, students, readIds, lastMsg, myTeacherId]);
+
+  const roomTasks = useMemo(
+    () => tasks.filter((t) => t.category === "classroom_management" || t.category === "school_rules"),
+    [tasks],
+  );
+
+  const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
+  const selectedStudent = selectedTask ? studentOf(selectedTask.student_id) : null;
+
+  const openCompose = (category: Category, studentId?: string) => {
+    setForm({ ...EMPTY_FORM, category, student_id: studentId ?? "" });
+    setFormError("");
+    setCreating(true);
+  };
+
+  /* ── 1件の話題の行 ──────────────────────────────── */
+  const ThreadRow = ({ t, showStudent = false }: { t: Task; showStudent?: boolean }) => {
+    const last = lastMsg.get(t.id);
+    const n = msgCount.get(t.id) ?? 0;
+    const unread = isUnread(t);
     return (
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs font-semibold text-slate-500">担当</span>
-        {editable ? (
-          <select
-            value={task.assignee_id ?? ""}
-            onChange={(e) => assignTask(task.id, e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            className={`max-w-[10rem] rounded-lg border px-2 py-1 text-xs font-semibold ${task.assignee_id ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-amber-300 bg-amber-50 text-amber-700"}`}
-          >
-            <option value="">— 未割当 —</option>
-            {task.assignee_id === myTeacherId ? null : (
-              <option value={myTeacherId ?? ""}>自分（{teacherName(myTeacherId)}）</option>
-            )}
-            {assignCandidates.map(t => (
-              <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
-            ))}
-          </select>
-        ) : (
-          <span className={`rounded-lg px-2 py-1 text-xs font-semibold ${task.assignee_id ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-700"}`}>
-            {task.assignee_id ? teacherName(task.assignee_id) : "未割当"}
-          </span>
+      <button
+        onClick={() => selectTask(t.id)}
+        className={cx(
+          "flex w-full items-start gap-3 rounded-field px-3 py-3 text-left transition duration-150",
+          unread ? "bg-brand-50/60 hover:bg-brand-50" : "hover:bg-canvas-sunken",
         )}
-      </div>
-    );
-  };
-
-  const isAutoTask = (t: Task) => t.source_type === "report" || t.source_type === "diagnosis" || t.source_type === "karte";
-  const filteredTasks = categoryFilter === "all" ? tasks : tasks.filter(t => t.category === categoryFilter);
-  const autoTasks = filteredTasks.filter(isAutoTask);
-  const manualTasks = filteredTasks.filter(t => !isAutoTask(t));
-  const selectedTask = tasks.find(t => t.id === selectedTaskId) ?? null;
-
-  // カレンダー用
-  const calYear = calendarMonth.getFullYear();
-  const calMonth = calendarMonth.getMonth();
-  const calCells = (() => {
-    const first = new Date(calYear, calMonth, 1);
-    const days = new Date(calYear, calMonth + 1, 0).getDate();
-    const arr: (Date | null)[] = [];
-    for (let i = 0; i < first.getDay(); i++) arr.push(null);
-    for (let d = 1; d <= days; d++) arr.push(new Date(calYear, calMonth, d));
-    while (arr.length % 7 !== 0) arr.push(null);
-    return arr;
-  })();
-
-  const tasksByDue = new Map<string, Task[]>();
-  const tasksByScheduled = new Map<string, Task[]>();
-  for (const t of tasks) {
-    if (t.due_date) {
-      if (!tasksByDue.has(t.due_date)) tasksByDue.set(t.due_date, []);
-      tasksByDue.get(t.due_date)!.push(t);
-    }
-    if (t.scheduled_date) {
-      if (!tasksByScheduled.has(t.scheduled_date)) tasksByScheduled.set(t.scheduled_date, []);
-      tasksByScheduled.get(t.scheduled_date)!.push(t);
-    }
-  }
-
-  const todayKey = dateKey(new Date());
-
-  // ── タスクカード（一覧・省略せず読める） ──
-  const TaskCard = ({ task }: { task: Task }) => {
-    const isUnread = !readIds.has(task.id) && task.created_by !== myTeacherId;
-    const due = dueDateLabel(task.due_date);
-    const auto = isAutoTask(task);
-    return (
-      <div className={`rounded-2xl border p-4 shadow-sm transition ${auto ? "border-rose-200 bg-rose-50/50" : "border-slate-200 bg-white"}`}>
-        <button onClick={() => selectTask(task.id)} className="w-full text-left">
-          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${CATEGORY_COLORS[task.category]}`}>
-              {CATEGORY_LABELS[task.category]}
-            </span>
-            {auto && (
-              <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
-                {AUTO_LABEL[task.source_type ?? ""] ?? "🔔 自動"}
+      >
+        <span
+          aria-hidden
+          className={cx("mt-2 h-1.5 w-1.5 shrink-0 rounded-pill", unread ? "bg-brand-600" : "bg-transparent")}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-x-2">
+            {showStudent && (
+              <span className="text-xs font-bold text-ink-faint">
+                {t.is_all_students ? "生徒全体" : studentOf(t.student_id)?.name ?? "—"}
               </span>
             )}
-            {task.category === "student_guidance" && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                {task.is_all_students ? "生徒全体" : studentName(task.student_id)}
-              </span>
-            )}
-            {isUnread && <span className="ml-auto flex items-center gap-1 text-xs font-bold text-red-500"><span className="h-2 w-2 rounded-full bg-red-500" />未読</span>}
-          </div>
-          <p className="font-bold text-slate-900 leading-snug">{task.title}</p>
-          {auto && task.auto_reason && (
-            <p className="mt-1 text-sm font-medium text-rose-600">{task.auto_reason}</p>
-          )}
-          {task.description && (
-            <p className="mt-1 line-clamp-2 text-sm text-slate-600 whitespace-pre-wrap">{task.description}</p>
-          )}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            {due && <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${due.cls}`}>{due.text}</span>}
-            <span className="text-xs text-slate-400">
-              {auto ? "自動掲載" : teacherName(task.created_by)} · {new Date(task.created_at).toLocaleString("ja-JP", { month: "short", day: "numeric" })}
-            </span>
-          </div>
-        </button>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
-          {renderAssignee(task)}
-          <div className="flex items-center gap-2">
-            <button onClick={() => selectTask(task.id)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-              開く・返信
-            </button>
-            {canComplete(task) ? (
-              <button onClick={() => (auto ? resolveAuto(task.id) : completeTask(task.id))}
-                className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-700">
-                {auto ? "✓ 対応した（解決）" : "✓ 完了"}
-              </button>
-            ) : (
-              <button disabled
-                title={task.assignee_id ? "担当者または上位ロールのみ完了できます" : "先に担当者を決めてください"}
-                className="cursor-not-allowed rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-400">
-                {task.assignee_id ? "✓ 完了" : "担当者未設定"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+            <span className={cx("text-sm", unread ? "font-bold text-ink" : "font-semibold text-ink")}>{t.title}</span>
+            {isAuto(t) && <Badge tone="caution">{AUTO_LABEL[t.source_type ?? ""] ?? "自動"}</Badge>}
+          </span>
+
+          {/* 最後の一言。これが「いま何が語られているか」 */}
+          <span className="mt-1 block truncate text-sm leading-6 text-ink-muted">
+            {last ? last.body : t.auto_reason ? t.auto_reason : t.description || "—"}
+          </span>
+
+          <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-faint">
+            <span>{last ? teacherName(last.teacher_id) : isAuto(t) ? "自動" : teacherName(t.created_by)}</span>
+            <span>·</span>
+            <time>{relTime(last?.created_at ?? t.created_at)}</time>
+            {n > 0 && <><span>·</span><span data-numeric>{n}件の声</span></>}
+            {n === 0 && <><span>·</span><span className="font-medium text-brand-600">まだ誰も答えていない</span></>}
+          </span>
+        </span>
+      </button>
     );
   };
 
   return (
-    <div className="min-h-screen px-6 py-8 text-slate-900">
-      <div className="mx-auto w-full max-w-5xl">
+    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-8 sm:py-9">
+      <PageHeader
+        title="講師連携"
+        description="気になること、うまくいったこと。ここで話しましょう。"
+      />
 
-        {/* ヘッダー */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">講師連携</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              気がかりな生徒（報告書・学力診断から自動掲載）と、講師間で共有するタスク。
-              {syncing && <span className="ml-2 text-xs font-semibold text-rose-500">自動掲載を確認中…</span>}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex rounded-xl border border-slate-200 bg-white overflow-hidden">
-              <button onClick={() => setViewMode("list")}
-                className={`px-4 py-2 text-sm font-semibold transition ${viewMode === "list" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-                リスト
-              </button>
-              <button onClick={() => setViewMode("calendar")}
-                className={`px-4 py-2 text-sm font-semibold transition ${viewMode === "calendar" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-                カレンダー
-              </button>
-            </div>
-            <button onClick={() => { setForm(EMPTY_FORM); setFormError(""); setCreating(true); }}
-              className="rounded-2xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
-              ＋ タスクを作成
-            </button>
-          </div>
-        </div>
+      {/* ══ 上：生徒について ══════════════════════════ */}
+      <section className="mb-10">
+        <SectionTitle
+          action={
+            <Button size="sm" variant="secondary" onClick={() => openCompose("student_guidance")}>
+              生徒のことを話す
+            </Button>
+          }
+        >
+          生徒について
+        </SectionTitle>
 
-        {/* カテゴリータブ */}
-        <div className="mb-5 flex gap-2 flex-wrap">
-          {(["all", "student_guidance", "classroom_management", "school_rules"] as const).map((cat) => (
-            <button key={cat} onClick={() => setCategoryFilter(cat)}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${categoryFilter === cat ? "bg-indigo-600 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-              {CATEGORY_LABELS[cat]}
-              {cat !== "all" && (
-                <span className="ml-1.5 text-xs opacity-70">({tasks.filter(t => t.category === cat).length})</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* ── リストビュー（読みやすいカード） ── */}
-        {viewMode === "list" && (
-          loading ? (
-            <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-400">読み込み中...</div>
-          ) : filteredTasks.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-              <p className="text-3xl mb-2">✅</p>
-              <p className="font-semibold text-slate-700">対応が必要なタスクはありません</p>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              {autoTasks.length > 0 && (
-                <section>
-                  <h2 className="mb-2 flex items-center gap-2 text-sm font-bold text-rose-700">
-                    🔔 気がかり（自動掲載）<span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs">{autoTasks.length}</span>
-                  </h2>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {autoTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-                  </div>
-                </section>
-              )}
-              {manualTasks.length > 0 && (
-                <section>
-                  <h2 className="mb-2 flex items-center gap-2 text-sm font-bold text-slate-700">
-                    タスク<span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">{manualTasks.length}</span>
-                  </h2>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {manualTasks.map((task) => <TaskCard key={task.id} task={task} />)}
-                  </div>
-                </section>
-              )}
-            </div>
-          )
-        )}
-
-        {/* ── カレンダービュー ── */}
-        {viewMode === "calendar" && (
-          <div>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <button onClick={() => setCalendarMonth(new Date(calYear, calMonth - 1, 1))}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50">←</button>
-              <span className="min-w-[8rem] text-center font-semibold text-slate-800">{calYear}年{calMonth + 1}月</span>
-              <button onClick={() => setCalendarMonth(new Date(calYear, calMonth + 1, 1))}
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50">→</button>
-              <button onClick={() => setCalendarMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}
-                className="ml-2 rounded-xl bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">今月</button>
-              <div className="ml-4 flex items-center gap-3 text-xs text-slate-500">
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-red-400" />納期</span>
-                <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-full bg-blue-400" />予定日</span>
-              </div>
-            </div>
-
-            <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
-              <div className="grid grid-cols-7 text-center text-xs font-semibold text-slate-500 mb-1">
-                {WEEKDAY.map((w, i) => (
-                  <div key={w} className={`py-2 ${i === 0 ? "text-red-500" : i === 6 ? "text-blue-500" : ""}`}>{w}</div>
-                ))}
-              </div>
-              <div className="grid grid-cols-7 gap-1">
-                {calCells.map((d, idx) => {
-                  if (!d) return <div key={idx} className="min-h-24 rounded-lg bg-slate-50/50" />;
-                  const k = dateKey(d);
-                  const dueTasks = (tasksByDue.get(k) ?? []).filter(t => categoryFilter === "all" || t.category === categoryFilter);
-                  const schedTasks = (tasksByScheduled.get(k) ?? []).filter(t => categoryFilter === "all" || t.category === categoryFilter);
-                  const isToday = k === todayKey;
-                  return (
-                    <div key={k} className={`min-h-24 rounded-lg border p-1.5 text-left ${isToday ? "border-indigo-400 bg-indigo-50/40" : "border-slate-100"}`}>
-                      <p className={`text-xs font-semibold mb-1 ${isToday ? "text-indigo-600" : "text-slate-600"}`}>{d.getDate()}</p>
-                      <div className="space-y-0.5">
-                        {dueTasks.map(t => (
-                          <button key={`due-${t.id}`} onClick={() => selectTask(t.id)}
-                            className="w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] font-semibold bg-red-100 text-red-700 hover:bg-red-200">
-                            📅 {t.title}
-                          </button>
-                        ))}
-                        {schedTasks.map(t => (
-                          <button key={`sched-${t.id}`} onClick={() => selectTask(t.id)}
-                            className="w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200">
-                            🗓 {t.title}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+        {loading ? (
+          <Card><div className="flex justify-center py-8"><Spinner className="h-5 w-5" /></div></Card>
+        ) : studentGroups.length === 0 ? (
+          <EmptyState
+            icon="🧑‍🎓"
+            title="まだ誰の話も出ていません"
+            description="気になった子のことを、ひとことでいいので書いてみてください。ほかの先生が続けてくれます。"
+            action={<Button onClick={() => openCompose("student_guidance")}>生徒のことを話す</Button>}
+          />
+        ) : (
+          <div className="space-y-2.5">
+            {studentGroups.map((g) => (
+              <Card key={g.key} padding="none" className="overflow-hidden">
+                <div className="flex items-center justify-between gap-3 border-b border-line bg-canvas/60 px-4 py-2.5">
+                  <p className="flex items-baseline gap-2">
+                    <span className="font-bold text-ink">{g.name}</span>
+                    {g.grade && <span className="text-xs text-ink-faint">{g.grade}</span>}
+                  </p>
+                  {g.key !== "__all__" && g.key !== "__none__" && (
+                    <button
+                      onClick={() => openCompose("student_guidance", g.key)}
+                      className="text-xs font-semibold text-brand-600 transition hover:underline"
+                    >
+                      この子について書く
+                    </button>
+                  )}
+                </div>
+                <div className="divide-line p-1.5">
+                  {g.tasks.map((t) => <ThreadRow key={t.id} t={t} />)}
+                </div>
+              </Card>
+            ))}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* ── 詳細＋スレッド モーダル（広く読める） ── */}
+      {/* ══ 下：教室運営 ══════════════════════════════ */}
+      <section>
+        <SectionTitle
+          action={
+            <Button size="sm" variant="secondary" onClick={() => openCompose("classroom_management")}>
+              議題を立てる
+            </Button>
+          }
+        >
+          教室運営
+        </SectionTitle>
+
+        {loading ? (
+          <Card><div className="flex justify-center py-8"><Spinner className="h-5 w-5" /></div></Card>
+        ) : roomTasks.length === 0 ? (
+          <EmptyState
+            icon="🏫"
+            title="いま議論中の議題はありません"
+            description="備品・掲示・保護者対応・ルールなど、みんなで決めたいことを書いてください。"
+            action={<Button onClick={() => openCompose("classroom_management")}>議題を立てる</Button>}
+          />
+        ) : (
+          <Card padding="none" className="overflow-hidden">
+            <div className="divide-line p-1.5">
+              {roomTasks.map((t) => <ThreadRow key={t.id} t={t} />)}
+            </div>
+          </Card>
+        )}
+      </section>
+
+      {/* ══ 詳細（会話） ══════════════════════════════ */}
       {selectedTask && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={closeDetail}>
-          <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            {/* ヘッダー */}
-            <div className="shrink-0 border-b border-slate-100 p-5">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
+          onClick={closeDetail}>
+          <div
+            className="flex h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-card bg-surface shadow-pop sm:h-[85vh] sm:rounded-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 見出し */}
+            <div className="shrink-0 border-b border-line px-5 py-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${CATEGORY_COLORS[selectedTask.category]}`}>
-                      {CATEGORY_LABELS[selectedTask.category]}
-                    </span>
-                    {isAutoTask(selectedTask) && (
-                      <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-700">
-                        {AUTO_LABEL[selectedTask.source_type ?? ""] ?? "🔔 自動"}
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {selectedTask.category === "student_guidance" && (
+                      <span className="text-sm font-bold text-brand-700">
+                        {selectedTask.is_all_students ? "生徒全体" : selectedStudent?.name ?? "—"}
+                        {selectedStudent?.grade && <span className="ml-1 text-xs font-medium text-ink-faint">{selectedStudent.grade}</span>}
                       </span>
                     )}
-                    {selectedTask.category === "student_guidance" && (
-                      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
-                        {selectedTask.is_all_students ? "生徒全体" : studentName(selectedTask.student_id)}
-                      </span>
+                    {isAuto(selectedTask) && (
+                      <Badge tone="caution">{AUTO_LABEL[selectedTask.source_type ?? ""] ?? "自動"}</Badge>
                     )}
                   </div>
-                  <h2 className="text-lg font-bold text-slate-950">{selectedTask.title}</h2>
+                  <h2 className="mt-0.5 text-lg font-bold leading-7 text-ink">{selectedTask.title}</h2>
                   {selectedTask.auto_reason && (
-                    <p className="mt-0.5 text-sm font-semibold text-rose-600">{selectedTask.auto_reason}</p>
+                    <p className="mt-1 text-sm leading-6 text-caution-700">{selectedTask.auto_reason}</p>
                   )}
                   {selectedTask.description && (
-                    <p className="mt-1.5 text-sm text-slate-600 whitespace-pre-wrap">{selectedTask.description}</p>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                    {selectedTask.due_date && (
-                      <span className={`rounded-full px-2.5 py-0.5 font-semibold ${dueDateLabel(selectedTask.due_date)?.cls}`}>📅 納期 {selectedTask.due_date}</span>
-                    )}
-                    {selectedTask.scheduled_date && (
-                      <span className="rounded-full bg-blue-50 px-2.5 py-0.5 font-semibold text-blue-700">🗓 予定日 {selectedTask.scheduled_date}</span>
-                    )}
-                  </div>
-                  <p className="mt-1.5 text-xs text-slate-400">
-                    作成: {isAutoTask(selectedTask) ? "自動掲載" : teacherName(selectedTask.created_by)} · {new Date(selectedTask.created_at).toLocaleString("ja-JP")}
-                  </p>
-                </div>
-                <button onClick={closeDetail} className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-sm text-slate-500 hover:bg-slate-50">✕</button>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  {renderAssignee(selectedTask)}
-                  {selectedTask.assigned_by && selectedTask.assignee_id && (
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      {teacherName(selectedTask.assigned_by)} が割当
-                      {selectedTask.assigned_at && ` · ${new Date(selectedTask.assigned_at).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
-                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-ink-muted">{selectedTask.description}</p>
                   )}
                 </div>
-                {canComplete(selectedTask) ? (
-                  <button onClick={() => (isAutoTask(selectedTask) ? resolveAuto(selectedTask.id) : completeTask(selectedTask.id))}
-                    className="rounded-xl bg-green-600 px-4 py-2 text-xs font-bold text-white hover:bg-green-700">
-                    {isAutoTask(selectedTask) ? "✓ 対応した（解決済）" : "✓ 完了・削除"}
-                  </button>
-                ) : (
-                  <button disabled
-                    title={selectedTask.assignee_id ? "担当者または上位ロールのみ完了できます" : "先に担当者を決めてください"}
-                    className="cursor-not-allowed rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-400">
-                    {selectedTask.assignee_id ? "✓ 完了" : "担当者を決めてください"}
-                  </button>
-                )}
+                <button onClick={closeDetail} aria-label="閉じる"
+                  className="shrink-0 rounded-field px-2 py-1 text-ink-faint transition hover:bg-canvas-sunken hover:text-ink">✕</button>
               </div>
             </div>
 
-            {/* スレッド */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {/* その子の事実。会話の材料が同じ画面にある */}
+            {selectedTask.category === "student_guidance" && !selectedTask.is_all_students && (
+              <div className="shrink-0 border-b border-line bg-canvas px-5 py-3">
+                <p className="mb-2 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
+                  いまの{selectedStudent?.name ?? "この子"}
+                </p>
+                {!facts ? (
+                  <p className="text-xs text-ink-faint">読み込み中…</p>
+                ) : !facts.progress && !facts.report && !facts.diagnosis && !facts.parent ? (
+                  <p className="text-xs text-ink-faint">記録がまだありません。</p>
+                ) : (
+                  <dl className="space-y-1">
+                    {facts.progress && (
+                      <div className="flex gap-2 text-xs leading-5">
+                        <dt aria-label="教材">📘</dt>
+                        <dd className="text-ink-muted">
+                          {facts.progress.textbook}
+                          {facts.progress.where && ` ${facts.progress.where}`}
+                          {facts.progress.understanding && ` · ${UNDERSTAND[facts.progress.understanding] ?? ""}`}
+                          <span className="ml-1 text-ink-faint">{facts.progress.date}</span>
+                        </dd>
+                      </div>
+                    )}
+                    {facts.report && (
+                      <div className="flex gap-2 text-xs leading-5">
+                        <dt aria-label="報告書">📝</dt>
+                        <dd className="text-ink-muted">
+                          {facts.report.subject ?? "—"} 正答率 {facts.report.percentage ?? "—"}
+                          <span className="ml-1 text-ink-faint">{facts.report.date}</span>
+                        </dd>
+                      </div>
+                    )}
+                    {facts.diagnosis && (
+                      <div className="flex gap-2 text-xs leading-5">
+                        <dt aria-label="診断">📊</dt>
+                        <dd className="text-ink-muted">
+                          {facts.diagnosis.bottleneck ?? "—"}
+                          {facts.diagnosis.intervention && ` / ${facts.diagnosis.intervention}`}
+                          <span className="ml-1 text-ink-faint">{facts.diagnosis.date}</span>
+                        </dd>
+                      </div>
+                    )}
+                    {facts.parent && (
+                      <div className="flex gap-2 text-xs leading-5">
+                        <dt aria-label="保護者">👪</dt>
+                        <dd className="line-clamp-2 text-ink-muted">
+                          {facts.parent.message}
+                          <span className="ml-1 text-ink-faint">{facts.parent.date}</span>
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+                {selectedTask.student_id && (
+                  <div className="mt-2">
+                    <LinkButton href={`/teacher/dashboard/students/${selectedTask.student_id}`} variant="ghost" size="sm">
+                      この子の全部を見る →
+                    </LinkButton>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 会話 */}
+            <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
               {messages.length === 0 ? (
-                <p className="py-8 text-center text-sm text-slate-400">まだメッセージはありません。下から連携を始めましょう。</p>
+                <div className="py-10 text-center">
+                  <p className="text-sm font-medium text-ink">まだ誰も話していません。</p>
+                  <p className="mt-1 text-sm leading-6 text-ink-faint">
+                    授業で見えたこと、たった一行でかまいません。
+                  </p>
+                </div>
               ) : messages.map((msg) => {
                 const isMe = msg.teacher_id === myTeacherId;
                 return (
-                  <div key={msg.id} className={`flex gap-2 ${isMe ? "justify-end" : "justify-start"}`}>
-                    {!isMe && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
-                        {teacherName(msg.teacher_id).slice(0, 1)}
-                      </div>
-                    )}
-                    <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${isMe ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-900"}`}>
-                      {!isMe && <p className="mb-0.5 text-xs font-semibold opacity-60">{teacherName(msg.teacher_id)}</p>}
-                      <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
-                      <p className={`mt-1 text-right text-[10px] ${isMe ? "text-white/60" : "text-slate-400"}`}>
-                        {new Date(msg.created_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+                  <div key={msg.id} className="flex gap-3">
+                    <div className={cx(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-pill text-xs font-bold",
+                      isMe ? "bg-brand-gradient text-white" : "bg-canvas-sunken text-ink-muted",
+                    )}>
+                      {teacherName(msg.teacher_id).slice(0, 1)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-baseline gap-2">
+                        <span className="text-sm font-bold text-ink">{teacherName(msg.teacher_id)}</span>
+                        <time className="text-xs text-ink-faint">{relTime(msg.created_at)}</time>
                       </p>
+                      <p className="mt-0.5 whitespace-pre-wrap text-sm leading-7 text-ink-muted">{msg.body}</p>
                     </div>
                   </div>
                 );
@@ -629,121 +628,136 @@ export default function TeacherCollaborationPage() {
             </div>
 
             {/* 入力 */}
-            <div className="shrink-0 border-t border-slate-100 p-3 flex gap-2">
-              <textarea value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                rows={2} placeholder="メッセージを入力（Enter送信・Shift+Enterで改行）"
-                className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-              <button onClick={sendMessage} disabled={sendingMsg || !newMessage.trim()}
-                className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
-                送信
-              </button>
+            <div className="shrink-0 border-t border-line px-5 py-3">
+              <div className="flex gap-2">
+                <textarea
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  rows={2}
+                  placeholder="思ったことを書く（Enterで送信・Shift+Enterで改行）"
+                  className={cx(inputClass, "flex-1 resize-none")}
+                />
+                <Button onClick={sendMessage} disabled={sendingMsg || !newMessage.trim()} className="self-end">
+                  送信
+                </Button>
+              </div>
+
+              {/* 担当・期限・終了は前に出さない。必要な人だけ開く */}
+              <div className="mt-2">
+                <button
+                  onClick={() => setShowDetails((v) => !v)}
+                  className="text-xs font-medium text-ink-faint transition hover:text-ink"
+                >
+                  {showDetails ? "▲ 担当・期限をとじる" : "▼ 担当・期限・この話を終わりにする"}
+                </button>
+
+                {showDetails && (
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-field bg-canvas px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-ink-faint">担当</span>
+                      {canAssign(selectedTask) ? (
+                        <select
+                          value={selectedTask.assignee_id ?? ""}
+                          onChange={(e) => assignTask(selectedTask.id, e.target.value)}
+                          className="rounded-field border border-line-strong bg-surface px-2 py-1 text-xs"
+                        >
+                          <option value="">— 未割当 —</option>
+                          {assignCandidates.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs font-semibold text-ink">{teacherName(selectedTask.assignee_id)}</span>
+                      )}
+                      {selectedTask.due_date && (
+                        <span data-numeric className="text-xs text-ink-faint">期限 {selectedTask.due_date}</span>
+                      )}
+                    </div>
+
+                    {canComplete(selectedTask) ? (
+                      <Button size="sm" variant="secondary" onClick={() => finishTask(selectedTask.id, isAuto(selectedTask))}>
+                        {isAuto(selectedTask) ? "対応した" : "この話を終わりにする"}
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-ink-faint">
+                        {selectedTask.assignee_id ? "担当者か上位の先生が終了できます" : "先に担当を決めてください"}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* タスク作成モーダル */}
+      {/* ══ 書く ══════════════════════════════════════ */}
       {creating && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setCreating(false)}>
-          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-5 text-lg font-bold text-slate-950">タスクを作成</h3>
-            <div className="grid gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4 backdrop-blur-[2px]"
+          onClick={() => setCreating(false)}>
+          <div className="w-full max-w-lg rounded-card bg-surface p-6 shadow-pop" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-ink">
+              {form.category === "student_guidance" ? "生徒のことを話す" : "議題を立てる"}
+            </h3>
+            <p className="mt-1 text-sm text-ink-muted">
+              {form.category === "student_guidance"
+                ? "完璧に書かなくて大丈夫です。気づいたことを一行で。"
+                : "みんなで決めたいことを書いてください。"}
+            </p>
 
-              {/* カテゴリー */}
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">カテゴリー</p>
-                <div className="flex gap-2">
-                  {(["student_guidance", "classroom_management", "school_rules"] as Category[]).map((cat) => (
-                    <button key={cat}
-                      onClick={() => setForm({ ...form, category: cat, student_id: "", is_all_students: false, scheduled_date: "" })}
-                      className={`flex-1 rounded-xl border py-2.5 text-xs font-semibold transition ${form.category === cat ? "border-indigo-400 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                      {CATEGORY_LABELS[cat]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 生徒指導：対象 */}
+            <div className="mt-5 space-y-4">
               {form.category === "student_guidance" && (
                 <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">対象</p>
-                  <div className="flex gap-2 mb-2">
+                  <p className="mb-1.5 text-sm font-semibold text-ink">誰のこと？</p>
+                  <div className="mb-2 flex gap-2">
                     <button onClick={() => setForm({ ...form, is_all_students: false })}
-                      className={`flex-1 rounded-xl border py-2 text-xs font-semibold transition ${!form.is_all_students ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                      個別生徒
+                      className={cx("flex-1 rounded-field border py-2 text-xs font-semibold transition",
+                        !form.is_all_students ? "border-brand-400 bg-brand-50 text-brand-700" : "border-line-strong text-ink-muted hover:bg-canvas-sunken")}>
+                      ひとりの生徒
                     </button>
                     <button onClick={() => setForm({ ...form, is_all_students: true, student_id: "" })}
-                      className={`flex-1 rounded-xl border py-2 text-xs font-semibold transition ${form.is_all_students ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                      className={cx("flex-1 rounded-field border py-2 text-xs font-semibold transition",
+                        form.is_all_students ? "border-brand-400 bg-brand-50 text-brand-700" : "border-line-strong text-ink-muted hover:bg-canvas-sunken")}>
                       生徒全体
                     </button>
                   </div>
                   {!form.is_all_students && (
                     <select value={form.student_id} onChange={(e) => setForm({ ...form, student_id: e.target.value })}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                      <option value="">— 生徒を選択 —</option>
+                      className={inputClass}>
+                      <option value="">— 生徒を選ぶ —</option>
                       {students.map((s) => <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>)}
                     </select>
                   )}
                 </div>
               )}
 
-              {/* タイトル */}
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                タイトル
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-ink">ひとこと</span>
                 <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  placeholder="例：田中くんの宿題未提出が続いている"
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-900" />
+                  placeholder={form.category === "student_guidance"
+                    ? "例：宿題が続けて出ていない"
+                    : "例：自習室の私語、どこまで許すか"}
+                  className={inputClass} autoFocus />
               </label>
 
-              {/* 詳細 */}
-              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                詳細（任意）
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-ink">
+                  もう少し詳しく <span className="font-normal text-ink-faint">（任意）</span>
+                </span>
                 <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  rows={2} placeholder="具体的な状況や対応方針など"
-                  className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-900" />
+                  rows={3} placeholder="見えたこと・気になったこと"
+                  className={cx(inputClass, "resize-none")} />
               </label>
 
-              {/* 担当者（自分と同じ〜下位ロールから選ぶ・後から変更可） */}
-              <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">担当者（任意・後から決められます）</p>
-                <select value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                  <option value="">— 未割当（後で担当を決める）—</option>
-                  {assignCandidates.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 日付 */}
-              <div className="grid grid-cols-2 gap-3">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  納期（任意）
-                  <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-900" />
-                </label>
-                {form.category === "student_guidance" && (
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    予定日（任意）
-                    <input type="date" value={form.scheduled_date} onChange={(e) => setForm({ ...form, scheduled_date: e.target.value })}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal text-slate-900" />
-                  </label>
-                )}
-              </div>
-
-              {formError && <p className="text-sm text-red-600">{formError}</p>}
+              {formError && <p className="text-sm font-medium text-critical-600">{formError}</p>}
             </div>
 
-            <div className="mt-5 flex justify-end gap-3">
-              <button onClick={() => setCreating(false)}
-                className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                キャンセル
-              </button>
-              <button onClick={saveTask} disabled={saving}
-                className="rounded-2xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
-                {saving ? "作成中..." : "作成する"}
-              </button>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setCreating(false)}>やめる</Button>
+              <Button onClick={saveTask} disabled={saving}>
+                {saving ? <><Spinner className="h-4 w-4 border-white/40 border-t-white" />投稿中…</> : "投稿する"}
+              </Button>
             </div>
           </div>
         </div>
