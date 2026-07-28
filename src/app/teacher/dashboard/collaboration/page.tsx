@@ -114,6 +114,8 @@ export default function CollaborationPage() {
   const [newMessage, setNewMessage] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState<Set<string>>(new Set());   // 削除のために選んだ話題
+  const [deleting, setDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   /* ── 自分・名簿 ─────────────────────────────────── */
@@ -323,6 +325,49 @@ export default function CollaborationPage() {
     t.source_type === "report" || t.source_type === "diagnosis" || t.source_type === "karte";
   const isUnread = (t: Task) => !readIds.has(t.id) && t.created_by !== myTeacherId;
 
+  /* ── 削除 ──────────────────────────────────────────
+     「終わりにする」(completed) とは意味が違う。
+       終わりにする … 話がついた
+       削除         … そもそも要らなかった（自動掲載のノイズ・誤投稿）
+     どちらも行は消さず status を変えるだけなので、あとから戻せる。
+
+     人が書いたものを他人が消せると議論の場として成立しないので、
+     手動投稿は「書いた本人か管理者」だけが消せる。自動掲載は誰でも消せる。
+     ────────────────────────────────────────────── */
+  const canDelete = (t: Task) => {
+    if (isAuto(t)) return true;
+    return t.created_by === myTeacherId || myRole === "admin";
+  };
+
+  const togglePick = (id: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const deletePicked = async () => {
+    if (!myTeacherId || picked.size === 0) return;
+    const targets = tasks.filter((t) => picked.has(t.id) && canDelete(t));
+    if (targets.length === 0) return;
+    const mine = targets.filter((t) => !isAuto(t)).length;
+    const msg =
+      `${targets.length}件を削除します。` +
+      (mine > 0 ? `\nうち${mine}件は先生が書いた投稿です。` : "") +
+      `\n\n一覧からは消えますが記録は残るので、あとから戻せます。`;
+    if (!confirm(msg)) return;
+
+    setDeleting(true);
+    await supabase.from("collaboration_tasks")
+      .update({ status: "deleted", completed_by: myTeacherId, completed_at: new Date().toISOString() })
+      .in("id", targets.map((t) => t.id));
+    setPicked(new Set());
+    setDeleting(false);
+    if (selectedTaskId && targets.some((t) => t.id === selectedTaskId)) closeDetail();
+    fetchTasks();
+  };
+
   /* ── 上：生徒ごとにまとめる ───────────────────────── */
   const studentGroups = useMemo(() => {
     const g = new Map<string, { key: string; name: string; grade: string; tasks: Task[] }>();
@@ -371,13 +416,34 @@ export default function CollaborationPage() {
     const last = lastMsg.get(t.id);
     const n = msgCount.get(t.id) ?? 0;
     const unread = isUnread(t);
+    const deletable = canDelete(t);
     return (
+      <div
+        className={cx(
+          "flex items-start gap-2 rounded-field transition duration-150",
+          picked.has(t.id) ? "bg-critical-50" : unread ? "bg-brand-50/60 hover:bg-brand-50" : "hover:bg-canvas-sunken",
+        )}
+      >
+        {/* 削除のための選択。押しても会話は開かない */}
+        <label
+          className={cx(
+            "flex shrink-0 cursor-pointer items-center self-stretch py-3 pl-3",
+            !deletable && "cursor-not-allowed opacity-30",
+          )}
+          title={deletable ? "選んで削除できます" : "書いた本人か管理者だけが削除できます"}
+        >
+          <input
+            type="checkbox"
+            checked={picked.has(t.id)}
+            disabled={!deletable}
+            onChange={() => togglePick(t.id)}
+            className="h-4 w-4 rounded accent-[var(--color-critical-600)]"
+          />
+        </label>
+
       <button
         onClick={() => selectTask(t.id)}
-        className={cx(
-          "flex w-full items-start gap-3 rounded-field px-3 py-3 text-left transition duration-150",
-          unread ? "bg-brand-50/60 hover:bg-brand-50" : "hover:bg-canvas-sunken",
-        )}
+        className="flex min-w-0 flex-1 items-start gap-3 rounded-field py-3 pr-3 text-left"
       >
         <span
           aria-hidden
@@ -408,6 +474,7 @@ export default function CollaborationPage() {
           </span>
         </span>
       </button>
+      </div>
     );
   };
 
@@ -416,7 +483,43 @@ export default function CollaborationPage() {
       <PageHeader
         title="講師連携"
         description="気になること、うまくいったこと。ここで話しましょう。"
+        actions={
+          tasks.length > 0 && picked.size === 0 ? (
+            <button
+              onClick={() => setPicked(new Set(tasks.filter(canDelete).map((t) => t.id)))}
+              className="text-xs font-medium text-ink-faint transition hover:text-ink"
+            >
+              まとめて削除する
+            </button>
+          ) : null
+        }
       />
+
+      {/* 選択中だけ出る操作バー。ふだんは画面に出さない */}
+      {picked.size > 0 && (
+        <div className="sticky top-2 z-20 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-card border border-critical-200 bg-critical-50 px-4 py-3 shadow-card">
+          <p className="text-sm font-semibold text-critical-700">
+            <span data-numeric>{picked.size}</span> 件を選択中
+            <span className="ml-2 font-normal text-critical-600">
+              削除しても記録は残ります（一覧から消えるだけ）
+            </span>
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPicked(new Set(tasks.filter(canDelete).map((t) => t.id)))}
+              className="text-xs font-semibold text-critical-700 transition hover:underline"
+            >
+              すべて選択
+            </button>
+            <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
+              やめる
+            </Button>
+            <Button size="sm" variant="danger" onClick={deletePicked} disabled={deleting}>
+              {deleting ? <><Spinner className="h-3 w-3" />削除中…</> : `${picked.size}件を削除`}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* ══ 上：生徒について ══════════════════════════ */}
       <section className="mb-10">
