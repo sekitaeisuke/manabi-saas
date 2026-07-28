@@ -47,7 +47,7 @@ const EMPTY: Form = {
 };
 
 const fieldClass =
-  "mt-1.5 w-full rounded-field border border-line-strong bg-surface px-3.5 py-2.5 text-sm " +
+  "mt-1.5 w-full rounded-[14px] border border-line-strong bg-surface px-3.5 py-2.5 text-sm " +
   "text-ink placeholder:text-ink-faint transition focus:border-brand-400 focus:outline-none " +
   "focus:ring-2 focus:ring-brand-200";
 
@@ -94,7 +94,7 @@ export function InquiryForm() {
 
   if (done) {
     return (
-      <div className="rounded-card border border-line bg-surface p-10 text-center shadow-card">
+      <div className="rounded-[28px] border border-line bg-surface p-10 text-center shadow-card">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-positive-50 text-3xl">
           ✓
         </div>
@@ -109,7 +109,7 @@ export function InquiryForm() {
   }
 
   return (
-    <form onSubmit={submit} className="relative rounded-card border border-line bg-surface p-6 shadow-card sm:p-8">
+    <form onSubmit={submit} className="relative rounded-[28px] border border-line bg-surface p-6 shadow-card sm:p-8">
       <div className="grid gap-5 sm:grid-cols-2">
         <label className="block sm:col-span-2">
           <span className="text-sm font-semibold text-ink">
@@ -214,14 +214,14 @@ export function InquiryForm() {
       </div>
 
       {error && (
-        <p className="mt-5 rounded-field border border-critical-200 bg-critical-50 px-4 py-3 text-sm text-critical-700">
+        <p className="mt-5 rounded-[14px] border border-critical-200 bg-critical-50 px-4 py-3 text-sm text-critical-700">
           {error}
         </p>
       )}
 
       <button
         type="submit" disabled={sending}
-        className="mt-6 w-full rounded-field bg-brand-gradient px-6 py-3.5 text-sm font-bold text-white shadow-brand transition duration-200 ease-out-soft hover:-translate-y-0.5 hover:shadow-pop active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+        className="mt-6 w-full rounded-pill bg-brand-gradient px-6 py-4 text-sm font-bold text-white shadow-brand transition duration-200 ease-out-soft hover:-translate-y-0.5 hover:shadow-pop active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {sending ? "送信中…" : "この内容で相談する"}
       </button>

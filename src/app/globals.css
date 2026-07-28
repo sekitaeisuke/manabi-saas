@@ -203,3 +203,21 @@ button {
     border-top: 1px solid var(--color-line);
   }
 }
+
+/* ==========================================================================
+   /lp（他塾向け紹介サイト）のイラスト用モーション
+   ごくゆっくり上下させるだけ。動きを減らす設定の人には上の @media で止まる。
+   ========================================================================== */
+
+@keyframes lp-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+
+@utility lp-float {
+  animation: lp-float 7s var(--ease-out-soft) infinite;
+}
+
+@utility lp-float-slow {
+  animation: lp-float 11s var(--ease-out-soft) infinite;
+}
