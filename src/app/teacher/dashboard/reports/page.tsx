@@ -344,10 +344,26 @@ export default function ReportsPage() {
   const [filter, setFilter] = useState<"all" | "draft" | "sent">("all");
   const [studentFilter, setStudentFilter] = useState<string>("all");
   const [showManualForm, setShowManualForm] = useState(false);
+  const [presetStudent, setPresetStudent] = useState("");
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [latestProg, setLatestProg] = useState<{ byId: Map<string, ProgressRow>; byName: Map<string, ProgressRow> }>(
     { byId: new Map(), byName: new Map() }
   );
+
+  // ホームの「報告書を書く」から ?new=1&student=氏名 で直接フォームを開く。
+  // useSearchParams は Suspense 境界を要求するので location を直接読む。
+  // location はマウント後にしか読めず（SSRで読むとhydration不一致）、
+  // 1度きりなので cascading render にはならない。
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("new") !== "1") return;
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setPresetStudent(p.get("student") ?? "");
+    setShowManualForm(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // 戻る／リロードでフォームが再び開かないように、クエリだけ消す
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // 生徒ごとの最新の教材進捗（単一の真実）を読み込み、一覧カードにも反映する
   useEffect(() => {
@@ -413,8 +429,9 @@ export default function ReportsPage() {
   if (showManualForm) {
     return (
       <ManualReportForm
-        onBack={() => setShowManualForm(false)}
-        onCreated={() => { setShowManualForm(false); fetchReports(); }}
+        initialStudentName={presetStudent}
+        onBack={() => { setShowManualForm(false); setPresetStudent(""); }}
+        onCreated={() => { setShowManualForm(false); setPresetStudent(""); fetchReports(); }}
       />
     );
   }
@@ -607,12 +624,15 @@ function deleteTemplateFromStorage(id: string) {
 function ManualReportForm({
   onBack,
   onCreated,
+  initialStudentName = "",
 }: {
   onBack: () => void;
   onCreated: () => void;
+  /** ホームの「報告書を書く」から渡ってくる生徒名 */
+  initialStudentName?: string;
 }) {
   const [students, setStudents] = useState<{ id: string; name: string; grade: string }[]>([]);
-  const [studentName, setStudentName] = useState("");
+  const [studentName, setStudentName] = useState(initialStudentName);
   const [studentId, setStudentId] = useState<string | null>(null);
   const [grade, setGrade] = useState("中1");
   const [subject, setSubject] = useState("数学");
@@ -632,10 +652,16 @@ function ManualReportForm({
 
   useEffect(() => {
     supabase.from("students").select("id, name, grade").order("name").then(({ data }) => {
-      setStudents(data ?? []);
+      const list = data ?? [];
+      setStudents(list);
+      // ホームから生徒名を渡された場合は、名簿が届いた時点で学年とIDも埋める
+      if (initialStudentName) {
+        const s = list.find((x) => x.name === initialStudentName);
+        if (s) { setGrade(s.grade); setStudentId(s.id); }
+      }
     });
     setTemplates(loadTemplates());
-  }, []);
+  }, [initialStudentName]);
 
   const toggleItem = (item: string) => {
     setCheckedItems((prev) => {

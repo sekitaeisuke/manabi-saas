@@ -1,105 +1,299 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { Skeleton } from "@/components/Skeleton";
 import { ECON } from "@/lib/economyFeatures";
 import { FEATURES } from "@/lib/features";
-import type { StudentKarteJson } from "@/lib/supabase";
 import {
-  Badge, Callout, Card, CardLink, CountBadge, EmptyState,
-  LinkButton, PageHeader, SectionTitle, cx,
+  Badge, Callout, Card, CountBadge, EmptyState,
+  LinkButton, PageHeader, SectionTitle, Spinner, cx,
 } from "@/components/ui";
 
-type Counts = {
-  pendingReschedules: number;
-  unreadParentMessages: number;
-  unreadStudentMessages: number;
-  pendingDiagnoses: number;
-  draftReports: number;
-  concerns: number;
-  economyApprovals: number;
-  economyVoices: number;
-  economyReferrals: number;
+/* ──────────────────────────────────────────────────────────
+   講師の今日のホーム
+     ① 教室カード（クリックで選択）
+     ② 選んだ教室の「今日来る生徒」を時間順に列挙
+        └ 使用中の教材（textbook_progress・機械的に列挙）
+        └ 今日詰めること（teaching_focus・AI選定／無ければカルテで代替）
+        └ そのまま報告書を書くボタン
+     ③ 教室カードの下に「最近お休みしている生徒」
+   ────────────────────────────────────────────────────────── */
+
+const WEEKDAY = ["日", "月", "火", "水", "木", "金", "土"];
+const LAST_SCHOOL_KEY = "teacher.home.schoolId";
+
+type SchoolRow = { id: string; name: string };
+
+type FocusSource = "progress" | "report" | "parent" | "diagnosis" | "collab";
+type FocusItem = {
+  action: string; why: string; source: FocusSource;
+  sourceDate: string | null; priority: "high" | "normal";
+};
+type FocusJson = { headline: string; items: FocusItem[] };
+
+const SOURCE_LABEL: Record<FocusSource, string> = {
+  progress: "教材進捗", report: "報告書", parent: "保護者", diagnosis: "多層診断", collab: "講師連携",
+};
+const SOURCE_ICON: Record<FocusSource, string> = {
+  progress: "📘", report: "📝", parent: "👪", diagnosis: "📊", collab: "🤝",
 };
 
-type ActivityItem = {
-  id: string;
-  kind: "report" | "diagnosis" | "reschedule" | "parent_msg";
-  title: string;
-  body: string;
-  created_at: string;
-  href: string;
+type TextbookNow = {
+  subject: string | null; textbook: string; where: string | null;
+  understanding: string | null; lessonDate: string;
 };
 
 type TodayStudent = {
-  id: string;
-  name: string;
-  grade: string;
-  firstAt: string | null;   // 授業予定の時刻（出席曜日のみの生徒は null）
+  id: string; name: string; grade: string; schoolId: string | null;
+  firstAt: string | null;          // 授業予定の時刻（出席曜日だけの子は null）
   subjects: string[];
-  karte: StudentKarteJson | null;
-  karteAt: string | null;
-  tasksDone: number;
-  tasksTotal: number;
+  textbooks: TextbookNow[];        // いま使っている教材
+  focus: FocusJson | null;         // AI選定
+  karteCautions: string | null;    // AI未生成のときの代替
+  kartePace: string | null;
   lastProgress: string | null;
+  reportToday: boolean;            // 今日ぶんの報告書を出したか
 };
 
-type EventRow = { id: string; title: string; event_type: string; date: string };
+type RestingStudent = {
+  id: string; name: string; grade: string; schoolId: string | null;
+  lastSeen: string | null;         // 最後に記録が付いた日
+  missedCount: number;             // 来るはずだったのに記録が無い回数
+  canceledCount: number;           // 授業が「中止」になった回数
+};
 
-const EVENT_ICON: Record<string, string> = { event: "🎉", exam: "📝", holiday: "🏖", class: "📚", info: "ℹ️" };
+type Counts = {
+  pendingReschedules: number; unreadParentMessages: number; unreadStudentMessages: number;
+  pendingDiagnoses: number; draftReports: number; concerns: number;
+  economyApprovals: number; economyVoices: number; economyReferrals: number;
+};
 
-const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
-function endOfToday() { const d = new Date(); d.setHours(23, 59, 59, 999); return d; }
+const UNDERSTAND: Record<string, { label: string; tone: "positive" | "neutral" | "caution" }> = {
+  good:   { label: "◎手応えあり", tone: "positive" },
+  normal: { label: "○ふつう",     tone: "neutral" },
+  weak:   { label: "△不安",       tone: "caution" },
+};
+
+const keyOf = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+const endOfToday = () => { const d = new Date(); d.setHours(23, 59, 59, 999); return d; };
+
 function daysSince(date: string | null): number | null {
   if (!date) return null;
   const [y, m, d] = date.split("-").map(Number);
-  const then = new Date(y, m - 1, d).getTime();
-  return Math.floor((startOfToday().getTime() - then) / 86_400_000);
+  return Math.floor((startOfToday().getTime() - new Date(y, m - 1, d).getTime()) / 86_400_000);
 }
 
-const QUICK_ACTIONS = [
-  { title: "テスト作成", desc: "AIでボタン1つで問題作成・配布", href: "/teacher/dashboard/tests" },
-  { title: "報告書を書く", desc: "手動作成・未送信の送信", href: "/teacher/dashboard/reports" },
-  { title: "教材進捗を入力", desc: "何をどこまで・理解度", href: "/teacher/dashboard/progress" },
-  ...(FEATURES.dailyKarte ? [{ title: "カルテ（日次）", desc: "現状＋今日やることの一覧・一括生成", href: "/teacher/dashboard/karte-daily" }] : []),
-  { title: "生徒・講師管理", desc: "生徒一覧から操作卓へ", href: "/teacher/dashboard/schools" },
-  { title: "メッセージ", desc: "保護者・生徒との連絡", href: "/teacher/dashboard/messages" },
-  { title: "多層診断", desc: "学力・学習習慣・学習の質", href: "/teacher/dashboard/diagnosis" },
-  { title: "塾内経済（AC・株）", desc: "承認・株主の声・株価", href: "/teacher/dashboard/economy" },
-];
+/** 出席曜日から「直近days日で来るはずだった日」を数える */
+function expectedVisits(attendanceDays: string[] | null, days: number): string[] {
+  if (!attendanceDays || attendanceDays.length === 0) return [];
+  const out: string[] = [];
+  for (let i = 1; i <= days; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    if (attendanceDays.includes(WEEKDAY[d.getDay()])) out.push(keyOf(d));
+  }
+  return out;
+}
 
 export default function TeacherDashboardPage() {
-  const today = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+  const today = new Date().toLocaleDateString("ja-JP", {
+    year: "numeric", month: "long", day: "numeric", weekday: "long",
+  });
+  const todayKey = keyOf(new Date());
+
+  const [schools, setSchools] = useState<SchoolRow[]>([]);
+  const [schoolId, setSchoolId] = useState<string | null>(null);
+  const [students, setStudents] = useState<TodayStudent[]>([]);
+  const [resting, setResting] = useState<RestingStudent[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
-  const [todayStudents, setTodayStudents] = useState<TodayStudent[]>([]);
-  const [events, setEvents] = useState<EventRow[]>([]);
   const [failedNotifications, setFailedNotifications] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [busyKarte, setBusyKarte] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [busyFocus, setBusyFocus] = useState<string | null>(null);
 
+  /* ── 教室一覧＋最後に見ていた教室 ───────────────────────── */
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const [{ data: schoolRows }, { data: me }] = await Promise.all([
+        supabase.from("schools").select("id, name").order("name"),
+        session?.user?.email
+          ? supabase.from("teachers").select("school_id").eq("email", session.user.email).maybeSingle()
+          : Promise.resolve({ data: null } as { data: { school_id: string | null } | null }),
+      ]);
+      const list = (schoolRows as SchoolRow[]) ?? [];
+      setSchools(list);
+
+      const stored = typeof window !== "undefined" ? localStorage.getItem(LAST_SCHOOL_KEY) : null;
+      const initial =
+        (stored && list.some((s) => s.id === stored) && stored) ||
+        (me?.school_id && list.some((s) => s.id === me.school_id) && me.school_id) ||
+        null;
+      setSchoolId(initial);
+    })();
+  }, []);
+
+  const selectSchool = (id: string) => {
+    const next = schoolId === id ? null : id;   // もう一度押したら選択解除
+    setSchoolId(next);
+    setOpenId(null);
+    if (typeof window !== "undefined") {
+      if (next) localStorage.setItem(LAST_SCHOOL_KEY, next);
+      else localStorage.removeItem(LAST_SCHOOL_KEY);
+    }
+  };
+
+  /* ── 本体の読み込み ───────────────────────────────────── */
   const load = useCallback(async () => {
     setLoading(true);
     const todayStart = startOfToday().toISOString();
     const todayEnd = endOfToday().toISOString();
-    const todayKey = keyOf(new Date());
+    const todayLabel = WEEKDAY[new Date().getDay()];
 
-    // ── B: さばくインボックスの件数 ──
+    /* A. 今日来る生徒 = 授業予定がある人 ∪ 出席曜日が今日の人 */
+    const [{ data: lessonRows }, { data: attStudents }] = await Promise.all([
+      supabase.from("lessons")
+        .select("student_id, subject, scheduled_at, students(name, grade, school_id)")
+        .gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).neq("status", "canceled")
+        .order("scheduled_at", { ascending: true }),
+      supabase.from("students")
+        .select("id, name, grade, school_id, attendance_days")
+        .contains("attendance_days", [todayLabel]),
+    ]);
+
+    const map = new Map<string, TodayStudent>();
+    const blank = (id: string, name: string, grade: string, sid: string | null): TodayStudent => ({
+      id, name, grade, schoolId: sid, firstAt: null, subjects: [],
+      textbooks: [], focus: null, karteCautions: null, kartePace: null,
+      lastProgress: null, reportToday: false,
+    });
+
+    for (const l of (lessonRows ?? []) as {
+      student_id: string | null; subject: string | null; scheduled_at: string;
+      students: { name: string; grade: string; school_id: string | null }
+        | { name: string; grade: string; school_id: string | null }[] | null;
+    }[]) {
+      if (!l.student_id) continue;
+      const stu = Array.isArray(l.students) ? l.students[0] : l.students;
+      if (!map.has(l.student_id)) {
+        const e = blank(l.student_id, stu?.name ?? "—", stu?.grade ?? "", stu?.school_id ?? null);
+        e.firstAt = l.scheduled_at;
+        map.set(l.student_id, e);
+      }
+      const e = map.get(l.student_id)!;
+      if (l.subject && !e.subjects.includes(l.subject)) e.subjects.push(l.subject);
+    }
+    for (const s of (attStudents ?? []) as
+      { id: string; name: string; grade: string; school_id: string | null }[]) {
+      if (!map.has(s.id)) map.set(s.id, blank(s.id, s.name, s.grade, s.school_id));
+    }
+
+    const ids = [...map.keys()];
+    if (ids.length > 0) {
+      const [{ data: progRows }, { data: focusRows }, { data: karteRows }, { data: repRows }] =
+        await Promise.all([
+          supabase.from("textbook_progress")
+            .select("student_id, subject, textbook, progress_where, understanding, lesson_date")
+            .in("student_id", ids).order("lesson_date", { ascending: false }),
+          supabase.from("teaching_focus")
+            .select("student_id, focus_json").eq("focus_date", todayKey).in("student_id", ids),
+          supabase.from("student_karte").select("student_id, karte_json").in("student_id", ids),
+          supabase.from("lesson_reports")
+            .select("student_id, created_at").in("student_id", ids).gte("created_at", todayStart),
+        ]);
+
+      // 教材は「科目ごとの最新1件」だけを、いま使っているものとして出す
+      const seen = new Set<string>();
+      for (const p of (progRows ?? []) as {
+        student_id: string; subject: string | null; textbook: string;
+        progress_where: string | null; understanding: string | null; lesson_date: string;
+      }[]) {
+        const e = map.get(p.student_id); if (!e) continue;
+        if (!e.lastProgress) e.lastProgress = p.lesson_date;
+        const k = `${p.student_id}::${p.subject ?? ""}::${p.textbook}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        if (e.textbooks.length < 4) {
+          e.textbooks.push({
+            subject: p.subject, textbook: p.textbook, where: p.progress_where,
+            understanding: p.understanding, lessonDate: p.lesson_date,
+          });
+        }
+      }
+      for (const f of (focusRows ?? []) as { student_id: string; focus_json: FocusJson | null }[]) {
+        const e = map.get(f.student_id); if (e) e.focus = f.focus_json;
+      }
+      for (const k of (karteRows ?? []) as {
+        student_id: string; karte_json: { cautions?: string; textbookPace?: string } | null;
+      }[]) {
+        const e = map.get(k.student_id); if (!e) continue;
+        e.karteCautions = k.karte_json?.cautions ?? null;
+        e.kartePace = k.karte_json?.textbookPace ?? null;
+      }
+      for (const r of (repRows ?? []) as { student_id: string }[]) {
+        const e = map.get(r.student_id); if (e) e.reportToday = true;
+      }
+    }
+
+    setStudents([...map.values()].sort((a, b) => {
+      if (a.firstAt && b.firstAt) return a.firstAt.localeCompare(b.firstAt);
+      if (a.firstAt) return -1;
+      if (b.firstAt) return 1;
+      return a.name.localeCompare(b.name, "ja");
+    }));
+
+    /* B. 最近お休みしている生徒
+         「来るはずだった日（出席曜日）に記録が無い」＋「授業が中止になった」で拾う。
+         あくまで記録からの推定なので、UI にもそう書く。 */
+    const since = keyOf(new Date(Date.now() - 21 * 86_400_000));
+    const [{ data: allStudents }, { data: recentProg }, { data: canceled }] = await Promise.all([
+      supabase.from("students").select("id, name, grade, school_id, attendance_days"),
+      supabase.from("textbook_progress").select("student_id, lesson_date").gte("lesson_date", since),
+      supabase.from("lessons")
+        .select("student_id, scheduled_at").eq("status", "canceled")
+        .gte("scheduled_at", new Date(Date.now() - 21 * 86_400_000).toISOString()),
+    ]);
+
+    const seenDates = new Map<string, Set<string>>();
+    for (const p of (recentProg ?? []) as { student_id: string; lesson_date: string }[]) {
+      if (!seenDates.has(p.student_id)) seenDates.set(p.student_id, new Set());
+      seenDates.get(p.student_id)!.add(p.lesson_date);
+    }
+    const cancelCount = new Map<string, number>();
+    for (const c of (canceled ?? []) as { student_id: string | null }[]) {
+      if (c.student_id) cancelCount.set(c.student_id, (cancelCount.get(c.student_id) ?? 0) + 1);
+    }
+
+    const rest: RestingStudent[] = [];
+    for (const s of (allStudents ?? []) as {
+      id: string; name: string; grade: string; school_id: string | null; attendance_days: string[] | null;
+    }[]) {
+      const expected = expectedVisits(s.attendance_days, 21);
+      const got = seenDates.get(s.id) ?? new Set<string>();
+      const missed = expected.filter((d) => !got.has(d)).length;
+      const canceledN = cancelCount.get(s.id) ?? 0;
+      // 2回以上空けている、または中止が2回以上。1回はただの欠席なので拾わない。
+      if (missed < 2 && canceledN < 2) continue;
+      const lastSeen = [...got].sort().pop() ?? null;
+      rest.push({
+        id: s.id, name: s.name, grade: s.grade, schoolId: s.school_id,
+        lastSeen, missedCount: missed, canceledCount: canceledN,
+      });
+    }
+    rest.sort((a, b) => (b.missedCount + b.canceledCount) - (a.missedCount + a.canceledCount));
+    setResting(rest);
+
+    /* C. さばくこと */
     const [
-      { count: pendingReschedules },
-      { count: unreadParent },
-      { count: unreadStudent },
-      { count: pendingDiagnoses },
-      { count: draftReports },
-      { count: concerns },
-      { count: ecoApprovals },
-      { count: ecoVoices },
-      { count: ecoReferrals },
+      { count: pendingReschedules }, { count: unreadParent }, { count: unreadStudent },
+      { count: pendingDiagnoses }, { count: draftReports }, { count: concerns },
+      { count: ecoApprovals }, { count: ecoVoices }, { count: ecoReferrals },
     ] = await Promise.all([
       supabase.from("reschedule_requests").select("*", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("parent_messages").select("*", { count: "exact", head: true }).eq("status", "unread").eq("direction", "parent_to_teacher"),
@@ -123,121 +317,63 @@ export default function TeacherDashboardPage() {
       economyReferrals: ecoReferrals ?? 0,
     });
 
-    // ── A: 今日授業する生徒 × カルテ ──
-    const { data: lessonRows } = await supabase
-      .from("lessons")
-      .select("student_id, subject, scheduled_at, students(name, grade)")
-      .gte("scheduled_at", todayStart).lte("scheduled_at", todayEnd).neq("status", "canceled")
-      .order("scheduled_at", { ascending: true });
-
-    const map = new Map<string, TodayStudent>();
-    for (const l of (lessonRows ?? []) as {
-      student_id: string | null; subject: string | null; scheduled_at: string;
-      students: { name: string; grade: string } | { name: string; grade: string }[] | null;
-    }[]) {
-      if (!l.student_id) continue;
-      const stu = Array.isArray(l.students) ? l.students[0] : l.students;
-      if (!map.has(l.student_id)) {
-        map.set(l.student_id, {
-          id: l.student_id, name: stu?.name ?? "—", grade: stu?.grade ?? "",
-          firstAt: l.scheduled_at, subjects: [], karte: null, karteAt: null,
-          tasksDone: 0, tasksTotal: 0, lastProgress: null,
-        });
-      }
-      const e = map.get(l.student_id)!;
-      if (l.subject && !e.subjects.includes(l.subject)) e.subjects.push(l.subject);
-    }
-
-    // 出席曜日が今日を含む生徒も加える（授業予定が無くても拾う。カレンダー画面と同じ論理）
-    const todayLabel = ["日", "月", "火", "水", "木", "金", "土"][new Date().getDay()];
-    const { data: attStudents } = await supabase
-      .from("students")
-      .select("id, name, grade, attendance_days")
-      .contains("attendance_days", [todayLabel]);
-    for (const s of (attStudents ?? []) as { id: string; name: string; grade: string; attendance_days: string[] | null }[]) {
-      if (!map.has(s.id)) {
-        map.set(s.id, { id: s.id, name: s.name, grade: s.grade, firstAt: null, subjects: [], karte: null, karteAt: null, tasksDone: 0, tasksTotal: 0, lastProgress: null });
-      }
-    }
-
-    const ids = [...map.keys()];
-    if (ids.length > 0) {
-      const [{ data: karteRows }, { data: taskRows }, { data: progRows }] = await Promise.all([
-        supabase.from("student_karte").select("student_id, karte_json, generated_at").in("student_id", ids),
-        supabase.from("daily_tasks").select("student_id, done").eq("task_date", todayKey).in("student_id", ids),
-        supabase.from("textbook_progress").select("student_id, lesson_date").in("student_id", ids).order("lesson_date", { ascending: false }),
-      ]);
-      for (const k of (karteRows ?? []) as { student_id: string; karte_json: StudentKarteJson | null; generated_at: string }[]) {
-        const e = map.get(k.student_id); if (e) { e.karte = k.karte_json; e.karteAt = k.generated_at; }
-      }
-      for (const t of (taskRows ?? []) as { student_id: string; done: boolean }[]) {
-        const e = map.get(t.student_id); if (e) { e.tasksTotal++; if (t.done) e.tasksDone++; }
-      }
-      for (const p of (progRows ?? []) as { student_id: string; lesson_date: string }[]) {
-        const e = map.get(p.student_id); if (e && !e.lastProgress) e.lastProgress = p.lesson_date;
-      }
-    }
-    // 授業予定あり（時刻順）→ 出席曜日のみ（氏名順）
-    setTodayStudents([...map.values()].sort((a, b) => {
-      if (a.firstAt && b.firstAt) return a.firstAt.localeCompare(b.firstAt);
-      if (a.firstAt) return -1;
-      if (b.firstAt) return 1;
-      return a.name.localeCompare(b.name, "ja");
-    }));
-
-    // ── C: 今日の教室（行事・テスト） ──
-    const { data: evRows } = await supabase
-      .from("shift_events")
-      .select("id, title, event_type, date")
-      .eq("date", todayKey)
-      .eq("visible_to_teachers", true);
-    setEvents((evRows as EventRow[]) ?? []);
-
-    // 直近のアクティビティ
-    const [{ data: reports }, { data: diags }, { data: rescheds }, { data: pmsgs }] = await Promise.all([
-      supabase.from("lesson_reports").select("id, student_name, test_title, created_at").order("created_at", { ascending: false }).limit(5),
-      supabase.from("questionnaire_responses").select("id, student_name, subject, created_at, status").order("created_at", { ascending: false }).limit(5),
-      supabase.from("reschedule_requests").select("id, parents(name), lessons(subject), proposed_at, status, created_at").order("created_at", { ascending: false }).limit(5),
-      supabase.from("parent_messages").select("id, parent_name, subject, created_at, direction").eq("direction", "parent_to_teacher").order("created_at", { ascending: false }).limit(5),
-    ]);
-    const items: ActivityItem[] = [];
-    for (const r of reports ?? []) items.push({ id: `r-${r.id}`, kind: "report", title: `${r.student_name} の報告書`, body: r.test_title, created_at: r.created_at, href: "/teacher/dashboard/reports" });
-    for (const d of diags ?? []) items.push({ id: `d-${d.id}`, kind: "diagnosis", title: `${d.student_name} の多層診断（${d.status === "pending" ? "未分析" : d.status === "analyzed" ? "分析済" : "承認済"}）`, body: d.subject ?? "—", created_at: d.created_at, href: "/teacher/dashboard/diagnosis" });
-    for (const r of rescheds ?? []) {
-      const p = Array.isArray(r.parents) ? r.parents[0] : r.parents;
-      const l = Array.isArray(r.lessons) ? r.lessons[0] : r.lessons;
-      items.push({ id: `s-${r.id}`, kind: "reschedule", title: `振替申請（${r.status === "pending" ? "申請中" : r.status === "approved" ? "承認" : "不可"}）`, body: `${p?.name ?? "—"} ・ ${l?.subject ?? "—"}`, created_at: r.created_at, href: FEATURES.separateSchedulePages ? "/teacher/dashboard/reschedules" : "/teacher/dashboard/calendar" });
-    }
-    for (const m of pmsgs ?? []) items.push({ id: `m-${m.id}`, kind: "parent_msg", title: `保護者メッセージ：${m.parent_name ?? "—"}`, body: m.subject ?? "(件名なし)", created_at: m.created_at, href: "/teacher/dashboard/messages" });
-    items.sort((a, b) => b.created_at.localeCompare(a.created_at));
-    setActivity(items.slice(0, 8));
-
-    const past24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: failedCount } = await supabase.from("notification_log").select("*", { count: "exact", head: true }).eq("status", "failed").gte("created_at", past24h);
+    const past24h = new Date(Date.now() - 86_400_000).toISOString();
+    const { count: failedCount } = await supabase.from("notification_log")
+      .select("*", { count: "exact", head: true }).eq("status", "failed").gte("created_at", past24h);
     setFailedNotifications(failedCount ?? 0);
 
     setLoading(false);
-  }, []);
+  }, [todayKey]);
 
   useEffect(() => { load(); }, [load]);
 
-  const regenerateKarte = async (id: string, name: string) => {
-    setBusyKarte(id);
+  /* ── 「今日詰めること」を作り直す ──────────────────────── */
+  const regenerateFocus = async (id: string, name: string) => {
+    setBusyFocus(id);
     try {
-      const res = await authFetch("/api/karte/daily-view/generate", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const res = await authFetch("/api/teaching-focus/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ studentId: id }),
       });
       const data = await res.json();
       if (data.error) { showToast(data.error, "error"); return; }
-      showToast(`${name} のカルテを更新しました`, "success");
+      if (data.noMaterial > 0) {
+        showToast(`${name} は材料（進捗・報告書・診断など）がまだありません`, "error");
+        return;
+      }
+      showToast(`${name} の「今日詰めること」を更新しました`, "success");
       await load();
     } catch (e) {
-      showToast("再生成に失敗しました: " + String(e), "error");
+      showToast("生成に失敗しました: " + String(e), "error");
     } finally {
-      setBusyKarte(null);
+      setBusyFocus(null);
     }
   };
+
+  /* ── 教室ごとの集計 ───────────────────────────────────── */
+  const perSchool = useMemo(() => {
+    const m = new Map<string, { today: number; noReport: number; staleProgress: number; resting: number }>();
+    for (const s of schools) m.set(s.id, { today: 0, noReport: 0, staleProgress: 0, resting: 0 });
+    for (const st of students) {
+      if (!st.schoolId) continue;
+      const e = m.get(st.schoolId); if (!e) continue;
+      e.today++;
+      if (!st.reportToday) e.noReport++;
+      const d = daysSince(st.lastProgress);
+      if (d == null || d >= 7) e.staleProgress++;
+    }
+    for (const r of resting) {
+      if (!r.schoolId) continue;
+      const e = m.get(r.schoolId); if (e) e.resting++;
+    }
+    return m;
+  }, [schools, students, resting]);
+
+  const shownStudents = schoolId ? students.filter((s) => s.schoolId === schoolId) : [];
+  const shownResting = schoolId ? resting.filter((r) => r.schoolId === schoolId) : resting;
+  const selectedSchool = schools.find((s) => s.id === schoolId) ?? null;
+  const unassigned = students.filter((s) => !s.schoolId).length;
 
   const inbox = counts ? [
     { label: "保護者からの未読", count: counts.unreadParentMessages, href: "/teacher/dashboard/messages" },
@@ -256,7 +392,7 @@ export default function TeacherDashboardPage() {
       <PageHeader
         eyebrow={today}
         title="今日のホーム"
-        description="今日授業する生徒と、さばくことをここから。"
+        description="教室を選ぶと、今日来る生徒と「その子に今日やること」が出ます。"
       />
 
       {failedNotifications > 0 && (
@@ -273,11 +409,154 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
-      {/* ── B: 今日さばくこと ── */}
+      {/* ── ① 教室カード ─────────────────────────────── */}
       <section className="mb-8">
+        <SectionTitle>教室をえらぶ</SectionTitle>
+        {loading && schools.length === 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-28 w-full rounded-card" />)}
+          </div>
+        ) : schools.length === 0 ? (
+          <EmptyState
+            title="教室が登録されていません"
+            description="生徒一覧・登録から教室を追加すると、ここに並びます。"
+            action={<LinkButton href="/teacher/dashboard/schools">教室を登録する</LinkButton>}
+          />
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {schools.map((s) => {
+              const st = perSchool.get(s.id) ?? { today: 0, noReport: 0, staleProgress: 0, resting: 0 };
+              const active = schoolId === s.id;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => selectSchool(s.id)}
+                  aria-pressed={active}
+                  className={cx(
+                    "rounded-card border p-5 text-left transition duration-200 ease-out-soft",
+                    active
+                      ? "border-brand-600 bg-brand-50 shadow-card-hover ring-1 ring-brand-600"
+                      : "border-line bg-surface shadow-card hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-card-hover",
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className={cx("font-bold", active ? "text-brand-800" : "text-ink")}>{s.name}</p>
+                    {active && <Badge tone="brand">表示中</Badge>}
+                  </div>
+                  <p className="mt-2 flex items-baseline gap-1.5">
+                    <span data-numeric className={cx("text-3xl font-bold", active ? "text-brand-700" : "text-ink")}>
+                      {st.today}
+                    </span>
+                    <span className="text-xs text-ink-faint">人が今日来ます</span>
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {st.noReport > 0 && <Badge tone="caution">報告書まだ {st.noReport}</Badge>}
+                    {st.staleProgress > 0 && <Badge tone="neutral">進捗が空き {st.staleProgress}</Badge>}
+                    {st.resting > 0 && <Badge tone="critical">お休み気味 {st.resting}</Badge>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {unassigned > 0 && (
+          <p className="mt-2 text-xs text-ink-faint">
+            ※ 教室が未設定の生徒が {unassigned} 人います（どの教室カードにも出ません）。
+          </p>
+        )}
+      </section>
+
+      {/* ── ② 選んだ教室の今日の生徒 ──────────────────── */}
+      <section className="mb-8">
+        <SectionTitle>
+          {selectedSchool ? `${selectedSchool.name}・今日来る生徒（${shownStudents.length}人）` : "今日来る生徒"}
+        </SectionTitle>
+
+        {loading ? (
+          <div className="space-y-2.5">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-card" />)}
+          </div>
+        ) : !schoolId ? (
+          <EmptyState
+            icon="🏫"
+            title="上の教室カードを選んでください"
+            description="選んだ教室の、今日来る生徒とその子にやることが並びます。"
+          />
+        ) : shownStudents.length === 0 ? (
+          <EmptyState
+            icon="🗓️"
+            title="この教室に今日来る生徒がいません"
+            description="生徒管理で「出席曜日」を入れると、その曜日に自動でここへ並びます。"
+            action={<LinkButton href="/teacher/dashboard/schools">出席曜日を入力する</LinkButton>}
+          />
+        ) : (
+          <div className="space-y-2.5">
+            {shownStudents.map((s) => (
+              <StudentRow
+                key={s.id}
+                s={s}
+                open={openId === s.id}
+                onToggle={() => setOpenId(openId === s.id ? null : s.id)}
+                busy={busyFocus === s.id}
+                onRegenerate={() => regenerateFocus(s.id, s.name)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── ③ 最近お休みしている生徒 ──────────────────── */}
+      <section className="mb-8">
+        <SectionTitle>
+          最近お休みしている生徒{!loading && shownResting.length > 0 && `（${shownResting.length}人）`}
+        </SectionTitle>
+        {loading ? (
+          <Skeleton className="h-20 w-full rounded-card" />
+        ) : shownResting.length === 0 ? (
+          <Card>
+            <p className="text-sm text-ink-faint">
+              {schoolId ? "この教室では、続けてお休みしている生徒はいません。" : "続けてお休みしている生徒はいません。"}
+            </p>
+          </Card>
+        ) : (
+          <Card padding="sm">
+            <p className="mb-3 text-xs leading-5 text-ink-faint">
+              出席曜日に教材進捗の記録が付いていない回数と、授業が「中止」になった回数からの<strong>推定</strong>です
+              （直近3週間）。記録の入れ忘れも混ざります。
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {shownResting.map((r) => {
+                const gap = daysSince(r.lastSeen);
+                return (
+                  <Link
+                    key={r.id}
+                    href={`/teacher/dashboard/students/${r.id}`}
+                    className="group flex items-center gap-2 rounded-pill border border-critical-200 bg-critical-50 py-1.5 pl-3.5 pr-3 text-sm transition hover:border-critical-600/40 hover:bg-critical-100"
+                  >
+                    <span className="font-semibold text-critical-700">{r.name}</span>
+                    <span className="text-xs text-critical-600">{r.grade}</span>
+                    <span data-numeric className="text-xs text-critical-600">
+                      {r.missedCount >= 2 && `${r.missedCount}回分空き`}
+                      {r.missedCount >= 2 && r.canceledCount >= 2 && " / "}
+                      {r.canceledCount >= 2 && `中止${r.canceledCount}回`}
+                      {gap != null && `・最終 ${gap}日前`}
+                      {gap == null && "・記録なし"}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+      </section>
+
+      {/* ── さばくこと ────────────────────────────────── */}
+      <section>
         <SectionTitle>今日さばくこと</SectionTitle>
         {loading ? (
-          <div className="flex flex-wrap gap-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-9 w-32 rounded-pill" />)}</div>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3].map((i) => <Skeleton key={i} className="h-9 w-32 rounded-pill" />)}
+          </div>
         ) : inbox.length === 0 ? (
           <p className="rounded-card border border-positive-200 bg-positive-50 px-4 py-3 text-sm font-medium text-positive-700">
             今さばくものはありません 🎉
@@ -294,211 +573,187 @@ export default function TeacherDashboardPage() {
           </div>
         )}
       </section>
-
-      {/* ── A: 今日の授業（生徒 × カルテ） ── */}
-      <section className="mb-8">
-        <SectionTitle>今日の生徒{!loading && `（${todayStudents.length}人）`}</SectionTitle>
-        {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {[1,2,3].map((i) => (
-              <Card key={i} className="space-y-3">
-                <Skeleton className="h-5 w-32" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-2/3" />
-              </Card>
-            ))}
-          </div>
-        ) : todayStudents.length === 0 ? (
-          <EmptyState
-            icon="🗓️"
-            title="今日来る生徒がいません"
-            description="生徒管理で「出席曜日」を入れると、その曜日に自動でここへ並びます。"
-            action={
-              <LinkButton href="/teacher/dashboard/schools" size="md">
-                生徒の出席曜日を入力する
-              </LinkButton>
-            }
-          />
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {todayStudents.map((s) => {
-              const stale = daysSince(s.lastProgress);
-              const isStale = stale == null || stale >= 7;
-              return (
-                <Card key={s.id} padding="none" className="flex flex-col overflow-hidden">
-                  <Link
-                    href={`/teacher/dashboard/students/${s.id}`}
-                    className="block flex-1 px-5 pb-4 pt-4 transition hover:bg-canvas/60"
-                  >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <p className="min-w-0 truncate font-bold text-ink">
-                        {s.name} <span className="text-xs font-medium text-ink-faint">{s.grade}</span>
-                      </p>
-                      <span data-numeric className="shrink-0 text-xs text-ink-faint">
-                        {s.firstAt ? new Date(s.firstAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) : "出席予定"}
-                        {s.subjects.length > 0 && ` ・ ${s.subjects.join("・")}`}
-                      </span>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                      <Badge
-                        tone={
-                          s.tasksTotal === 0 ? "neutral"
-                          : s.tasksDone === s.tasksTotal ? "positive" : "brand"
-                        }
-                      >
-                        今日のTODO {s.tasksTotal === 0 ? "なし" : `${s.tasksDone}/${s.tasksTotal}`}
-                      </Badge>
-                      {isStale && (
-                        <Badge tone="caution">
-                          進捗{stale == null ? "未入力" : `${stale}日空き`}
-                        </Badge>
-                      )}
-                      {FEATURES.dailyKarte && !s.karte && <Badge tone="neutral">カルテ未生成</Badge>}
-                    </div>
-
-                    {(s.karte?.cautions || s.karte?.textbookPace || s.karte?.parentNeeds) && (
-                      <dl className="mt-3 space-y-1.5 border-t border-line pt-3">
-                        {s.karte?.cautions && (
-                          <div className="flex gap-2">
-                            <dt className="shrink-0 text-xs" aria-label="配慮">⚠️</dt>
-                            <dd className="line-clamp-2 text-xs leading-5 text-ink-muted">{s.karte.cautions}</dd>
-                          </div>
-                        )}
-                        {s.karte?.textbookPace && (
-                          <div className="flex gap-2">
-                            <dt className="shrink-0 text-xs" aria-label="教材">📖</dt>
-                            <dd className="line-clamp-2 text-xs leading-5 text-ink-muted">{s.karte.textbookPace}</dd>
-                          </div>
-                        )}
-                        {s.karte?.parentNeeds && (
-                          <div className="flex gap-2">
-                            <dt className="shrink-0 text-xs" aria-label="保護者">👪</dt>
-                            <dd className="line-clamp-1 text-xs leading-5 text-ink-faint">{s.karte.parentNeeds}</dd>
-                          </div>
-                        )}
-                      </dl>
-                    )}
-                  </Link>
-
-                  {/* 授業後の締め導線 */}
-                  <div className="flex flex-wrap items-center gap-1.5 border-t border-line bg-canvas/60 px-5 py-2.5">
-                    <Link href={`/teacher/dashboard/students/${s.id}`}
-                      className="rounded-field bg-ink px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-ink/85">操作卓</Link>
-                    <Link href="/teacher/dashboard/progress"
-                      className="rounded-field border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-ink-muted transition hover:border-brand-300 hover:text-brand-700">進捗入力</Link>
-                    <Link href="/teacher/dashboard/reports"
-                      className="rounded-field border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium text-ink-muted transition hover:border-brand-300 hover:text-brand-700">報告書</Link>
-                    {FEATURES.dailyKarte && (
-                      <button onClick={() => regenerateKarte(s.id, s.name)} disabled={busyKarte === s.id}
-                        className="ml-auto rounded-field bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:opacity-40">
-                        {busyKarte === s.id ? "更新中…" : "カルテ再生成"}
-                      </button>
-                    )}
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* ── C: 今日の教室 ── */}
-      {!loading && (events.length > 0 || todayStudents.some((s) => { const d = daysSince(s.lastProgress); return d == null || d >= 7; })) && (
-        <section className="mb-8 grid gap-4 md:grid-cols-2">
-          <Card>
-            <h3 className="mb-2.5 text-sm font-bold text-ink">今日の行事・テスト</h3>
-            {events.length === 0 ? (
-              <p className="text-xs text-ink-faint">今日の行事はありません。</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {events.map((e) => (
-                  <li key={e.id} className="flex gap-2 text-sm text-ink-muted">
-                    <span aria-hidden>{EVENT_ICON[e.event_type] ?? "•"}</span>
-                    <span>{e.title}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-          <Card className="border-caution-200 bg-caution-50">
-            <h3 className="mb-2.5 text-sm font-bold text-caution-700">進捗が空いている子（今日の生徒）</h3>
-            {(() => {
-              const staleList = todayStudents.filter((s) => { const d = daysSince(s.lastProgress); return d == null || d >= 7; });
-              return staleList.length === 0 ? (
-                <p className="text-xs text-caution-700">なし。今日の生徒は進捗が新しいです。</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {staleList.map((s) => (
-                    <Link key={s.id} href={`/teacher/dashboard/students/${s.id}`}
-                      className="rounded-pill border border-caution-200 bg-surface px-3 py-1 text-xs font-semibold text-caution-700 transition hover:bg-caution-100">
-                      {s.name}
-                    </Link>
-                  ))}
-                </div>
-              );
-            })()}
-          </Card>
-        </section>
-      )}
-
-      {/* 直近のアクティビティ */}
-      <section className="mb-8">
-        <SectionTitle>直近のアクティビティ</SectionTitle>
-        <Card padding="sm" className="sm:p-5">
-          {loading ? (
-            <div className="space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-10 w-full rounded-field" />)}</div>
-          ) : activity.length === 0 ? (
-            <p className="py-2 text-sm text-ink-faint">記録されたアクティビティはありません。</p>
-          ) : (
-            <ul className="grid gap-1.5 sm:grid-cols-2">
-              {activity.map((a) => (
-                <li key={a.id}>
-                  <Link href={a.href} className="block rounded-field px-3 py-2 transition hover:bg-canvas-sunken">
-                    <div className="flex items-center gap-2">
-                      <KindDot kind={a.kind} />
-                      <p className="flex-1 truncate text-sm font-semibold text-ink">{a.title}</p>
-                      <time data-numeric className="shrink-0 text-xs text-ink-faint">
-                        {new Date(a.created_at).toLocaleString("ja-JP", { month: "short", day: "numeric" })}
-                      </time>
-                    </div>
-                    <p className="mt-0.5 truncate pl-4 text-xs text-ink-faint">{a.body}</p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </section>
-
-      {/* クイックアクション */}
-      <section>
-        <SectionTitle>その他の操作</SectionTitle>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {QUICK_ACTIONS.map((item) => (
-            <CardLink key={item.title} href={item.href} padding="sm" className="group">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-semibold text-ink">{item.title}</p>
-                <svg
-                  className="h-4 w-4 shrink-0 text-ink-faint transition-transform duration-200 group-hover:translate-x-0.5 group-hover:text-brand-600"
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-ink-faint">{item.desc}</p>
-            </CardLink>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
 
-function KindDot({ kind }: { kind: ActivityItem["kind"] }) {
-  const map: Record<ActivityItem["kind"], string> = {
-    report: "bg-critical-600/60",
-    diagnosis: "bg-accent-500",
-    reschedule: "bg-caution-600",
-    parent_msg: "bg-brand-500",
-  };
-  return <span aria-hidden className={cx("h-2 w-2 shrink-0 rounded-pill", map[kind])} />;
+/* ──────────────────────────────────────────────────────────
+   生徒1人の行。閉じているときは名前・時刻・要点だけ。
+   開くと 使用教材 / 今日詰めること / 操作。
+   ────────────────────────────────────────────────────────── */
+function StudentRow({
+  s, open, onToggle, busy, onRegenerate,
+}: {
+  s: TodayStudent; open: boolean; onToggle: () => void;
+  busy: boolean; onRegenerate: () => void;
+}) {
+  const stale = daysSince(s.lastProgress);
+  const isStale = stale == null || stale >= 7;
+  const items = s.focus?.items ?? [];
+  const time = s.firstAt
+    ? new Date(s.firstAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
+    : "出席予定";
+
+  return (
+    <Card padding="none" className="overflow-hidden">
+      {/* 見出し行（クリックで開閉） */}
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition hover:bg-canvas/70 sm:px-5"
+      >
+        <span
+          data-numeric
+          className={cx(
+            "w-16 shrink-0 text-sm font-bold tabular-nums",
+            s.firstAt ? "text-brand-700" : "text-ink-faint",
+          )}
+        >
+          {time}
+        </span>
+
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="font-bold text-ink">{s.name}</span>
+            <span className="text-xs text-ink-faint">{s.grade}</span>
+            {s.subjects.length > 0 && (
+              <span className="text-xs text-ink-faint">・{s.subjects.join("・")}</span>
+            )}
+          </span>
+          {/* 閉じていても要点だけは見える */}
+          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+            {items.length > 0 ? (
+              <Badge tone="brand">やること {items.length}</Badge>
+            ) : (
+              <Badge tone="neutral">やること未生成</Badge>
+            )}
+            {!s.reportToday && <Badge tone="caution">報告書まだ</Badge>}
+            {isStale && (
+              <Badge tone="neutral">進捗{stale == null ? "未入力" : `${stale}日空き`}</Badge>
+            )}
+            {s.focus?.headline && (
+              <span className="truncate text-xs text-ink-muted">{s.focus.headline}</span>
+            )}
+          </span>
+        </span>
+
+        <svg
+          className={cx("h-5 w-5 shrink-0 text-ink-faint transition-transform duration-200", open && "rotate-180")}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="border-t border-line bg-canvas/50 px-4 py-4 sm:px-5">
+          {/* 使用中の教材（textbook_progress から機械的に） */}
+          <div className="mb-4">
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-ink-faint">いま使っている教材</p>
+            {s.textbooks.length === 0 ? (
+              <p className="text-sm text-ink-faint">
+                教材進捗がまだありません。
+                <Link href="/teacher/dashboard/progress" className="ml-1 font-semibold text-brand-600 hover:underline">
+                  入力する →
+                </Link>
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {s.textbooks.map((t, i) => {
+                  const u = t.understanding ? UNDERSTAND[t.understanding] : null;
+                  return (
+                    <li key={i} className="flex flex-wrap items-center gap-2 rounded-field border border-line bg-surface px-3 py-2">
+                      <span aria-hidden>📘</span>
+                      {t.subject && <span className="text-xs font-semibold text-ink-faint">{t.subject}</span>}
+                      <span className="text-sm font-semibold text-ink">{t.textbook}</span>
+                      {t.where && <span className="text-sm text-ink-muted">{t.where}</span>}
+                      {u && <Badge tone={u.tone}>{u.label}</Badge>}
+                      <time data-numeric className="ml-auto text-xs text-ink-faint">{t.lessonDate}</time>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* 今日詰めること */}
+          <div className="mb-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-bold uppercase tracking-[0.08em] text-ink-faint">今日この授業で詰めること</p>
+              <button
+                onClick={onRegenerate}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-field bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:opacity-40"
+              >
+                {busy ? <><Spinner className="h-3 w-3" />作成中…</> : items.length > 0 ? "作り直す" : "AIに選ばせる"}
+              </button>
+            </div>
+
+            {items.length > 0 ? (
+              <ul className="space-y-1.5">
+                {items.map((it, i) => (
+                  <li
+                    key={i}
+                    className={cx(
+                      "rounded-field border px-3 py-2.5",
+                      it.priority === "high"
+                        ? "border-caution-200 bg-caution-50"
+                        : "border-line bg-surface",
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
+                      {it.priority === "high" && <span className="shrink-0 text-sm" aria-hidden>🔥</span>}
+                      <p className="flex-1 text-sm font-semibold leading-6 text-ink">{it.action}</p>
+                    </div>
+                    <p className="mt-1 flex flex-wrap items-center gap-1.5 pl-0 text-xs text-ink-faint">
+                      <span aria-hidden>{SOURCE_ICON[it.source]}</span>
+                      <span className="font-medium">{SOURCE_LABEL[it.source]}</span>
+                      {it.sourceDate && <time data-numeric>{it.sourceDate}</time>}
+                      <span>—</span>
+                      <span>{it.why}</span>
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              // AI未生成でも手ぶらにしない。カルテがあれば代わりに出す。
+              <div className="rounded-field border border-dashed border-line-strong bg-surface px-3 py-3">
+                {s.karteCautions || s.kartePace ? (
+                  <>
+                    <p className="mb-1.5 text-xs text-ink-faint">まだAIが選んでいません。カルテの内容を出しています。</p>
+                    {s.karteCautions && (
+                      <p className="text-sm leading-6 text-ink-muted"><span aria-hidden>⚠️ </span>{s.karteCautions}</p>
+                    )}
+                    {s.kartePace && (
+                      <p className="mt-1 text-sm leading-6 text-ink-muted"><span aria-hidden>📖 </span>{s.kartePace}</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-ink-faint">
+                    まだ材料（教材進捗・報告書・診断など）が足りません。進捗を入力すると出せるようになります。
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 操作 — 報告書をその場で書ける */}
+          <div className="flex flex-wrap gap-2">
+            <LinkButton
+              href={`/teacher/dashboard/reports?new=1&student=${encodeURIComponent(s.name)}`}
+              size="sm"
+            >
+              報告書を書く
+            </LinkButton>
+            <LinkButton href="/teacher/dashboard/progress" variant="secondary" size="sm">
+              進捗を入力
+            </LinkButton>
+            <LinkButton href={`/teacher/dashboard/students/${s.id}`} variant="secondary" size="sm">
+              操作卓
+            </LinkButton>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
 }
