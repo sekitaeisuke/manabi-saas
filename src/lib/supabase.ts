@@ -134,18 +134,50 @@ export type LearningPlan = {
   teacher_notes: string | null;
   status: "draft" | "shared";
   created_at: string;
+  // ── 講習ビジョン（karte-materials-setup.sql で追加）──
+  // 夏期/冬期/春期の目標と成果。面談で使う書類として運用する。
+  term_type: TermType | null;
+  term_label: string | null;
+  term_start: string | null;
+  term_end: string | null;
+  result_json: unknown | null;
+  result_html: string | null;
+  meeting_notes: string | null;
 };
 
-// ── 日次カルテ（student_karte）──────────────────────────────
-// 「今日/今週やること」は 3か月ビジョン由来の daily_tasks（チェック可）を単一の真実として表示する。
-// カルテはそれを中心に、AIが書く文脈（現状・テキストの進め方・気を付けること・保護者ニーズ）を束ねる。
-// 生成は /api/karte/daily-view/generate。
+export type TermType = "summer" | "winter" | "spring" | "regular";
+
+export const TERM_LABEL: Record<TermType, string> = {
+  summer: "夏期講習", winter: "冬期講習", spring: "春期講習", regular: "通常期",
+};
+
+// ── カルテ（student_karte）──────────────────────────────────
+// 素材（報告書 > テスト結果 > 保護者メッセージ > 教材進捗 > 診断）のビュー。
+// AIは見立てだけを書き、素材そのものは画面側で素のまま並べる。素材が無い項目は null のまま。
+// 生成は /api/karte/build（報告書の保存時・手動再生成・一括）。
 export type StudentKarteJson = {
-  visionSummary: string;        // 3か月ビジョンの現在要約（北極星）
-  currentStatus: string;        // 現状サマリー（教材進捗＋報告書＋17項目から）
-  textbookPace: string;         // テキストをどれくらい進めるか（今週/今日の目安）
-  cautions: string;             // 何に気を付けるか
-  parentNeeds: string | null;   // 保護者ニーズ（要望メッセージの反映）
+  reached: string | null;          // ① 今の到達点
+  stumblePoint: string | null;     // ② つまずきの正体（1つ）
+  stumbleEvidence: string | null;  // ②の根拠（設問・報告書からの引用）
+  nextStep: string | null;         // ③ 次の一手（今日〜今週）
+  family: string | null;           // ④ 家庭の願い・配慮（保護者メッセージ最優先）
+  visionProgress: string | null;   // ⑤ 講習ビジョンに対する進み具合
+  conflict: string | null;         // 報告書とテストの食い違い
+  // ↓ 旧形式（2026-07までに生成された行）。読み出し時の互換のため残す。
+  visionSummary?: string;
+  currentStatus?: string;
+  textbookPace?: string;
+  cautions?: string;
+  parentNeeds?: string | null;
+};
+
+// 素材の充足状況（何が足りなくてカルテが薄いかを画面に出す）
+export type KarteMaterialStatus = {
+  reports: number;
+  tests: number;
+  parentMessages: number;
+  progress: number;
+  diagnosis: number;
 };
 
 export type StudentKarte = {
@@ -155,6 +187,8 @@ export type StudentKarte = {
   grade: string | null;
   learning_plan_id: string | null;
   source_snapshot: unknown;
+  material_status: KarteMaterialStatus | null;
+  built_from: string | null;
   karte_html: string | null;
   karte_json: StudentKarteJson | null;
   status: "draft" | "shared";

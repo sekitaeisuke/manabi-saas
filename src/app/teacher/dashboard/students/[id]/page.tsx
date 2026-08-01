@@ -180,7 +180,7 @@ export default function StudentDetailPage() {
     if (!studentId) return;
     setKarteBusy(true);
     try {
-      const res = await authFetch("/api/karte/daily-view/generate", {
+      const res = await authFetch("/api/karte/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ studentId }),

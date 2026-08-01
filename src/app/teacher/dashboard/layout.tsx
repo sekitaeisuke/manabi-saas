@@ -58,8 +58,7 @@ const DASHBOARD: NavLeaf = { href: "/teacher/dashboard", label: "ダッシュボ
 const GROUPS: NavGroup[] = [
   { key: "students", label: "生徒", iconKey: "users", items: [
     { href: "/teacher/dashboard/schools",       label: "生徒一覧・登録", iconKey: "users" },
-    { href: "/teacher/dashboard/karte-daily",   label: "カルテ",         iconKey: "card" },
-    { href: "/teacher/dashboard/karte",         label: "3か月ビジョン",  iconKey: "card" },
+    { href: "/teacher/dashboard/karte",         label: "カルテ",         iconKey: "card" },
     { href: "/teacher/dashboard/progress",      label: "教材進捗",       iconKey: "book" },
     { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
     { href: "/teacher/dashboard/collaboration", label: "講師連携",       iconKey: "collab" },
@@ -177,7 +176,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const leafBadge = (item: NavLeaf) => (item.badge ? badgeMap[item.badge] : 0);
   const visibleItems = (g: NavGroup) => g.items.filter((it) => {
     if (it.adminOnly && userRole !== "admin") return false;
-    if (it.href === "/teacher/dashboard/karte-daily" && !FEATURES.dailyKarte) return false;
     if ((it.href === "/teacher/dashboard/lessons" || it.href === "/teacher/dashboard/reschedules") && !FEATURES.separateSchedulePages) return false;
     if (it.href === "/teacher/dashboard/notifications" && !FEATURES.notificationLog) return false;
     const mod = HREF_MODULE[it.href];
