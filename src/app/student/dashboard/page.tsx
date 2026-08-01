@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Logo } from "@/components/Logo";
 import { EconomyPanel } from "@/components/EconomyPanel";
-import { FEATURES } from "@/lib/features";
 import { EmptyState, cx } from "@/components/ui";
 import type { Student, ShiftEvent, StudentKarte } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
@@ -409,7 +408,7 @@ export default function StudentDashboardPage() {
         {/* カルテタブ（現状・進め方・注意・保護者ニーズ＋毎日のTODO） */}
         {tab === "todo" && (
           <div className="space-y-5">
-            {FEATURES.dailyKarte && myKarte?.karte_html && (
+            {myKarte?.karte_html && (
               <div className="rounded-card border border-line bg-surface p-6 shadow-card">
                 <style>{`
                   #student-karte h2 { font-size:1rem; font-weight:700; margin:16px 0 6px; padding:6px 12px; background:var(--color-brand-50); border-left:4px solid var(--color-accent-600); color:var(--color-brand-900); border-radius:0 6px 6px 0; }

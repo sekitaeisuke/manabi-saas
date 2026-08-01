@@ -748,6 +748,15 @@ function ManualReportForm({
       });
       if (dbErr) { setError("報告書の保存に失敗しました: " + dbErr.message); return; }
 
+      // 報告書＝カルテの骨格。保存できた時点でその子のカルテを組み立て直す。
+      // 失敗しても報告書の保存は成立させる（カルテは後から手動で作り直せる）。
+      if (studentId) {
+        authFetch("/api/karte/build", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ studentId, trigger: "report_saved" }),
+        }).catch(() => { /* カルテ更新の失敗は報告書保存を妨げない */ });
+      }
+
       setPreviewHtml(data.reportHtml);
     } catch (e) {
       setError("エラー: " + String(e));

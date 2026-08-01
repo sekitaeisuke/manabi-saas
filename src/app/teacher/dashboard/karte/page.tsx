@@ -6,10 +6,13 @@ import { showToast } from "@/lib/toast";
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import type { Textbook, LearningPlan } from "@/lib/supabase";
+import type { Textbook, LearningPlan, TermType } from "@/lib/supabase";
+import { TERM_LABEL } from "@/lib/supabase";
 import { GRADE_ORDER, SUBJECT_LIST } from "@/lib/curriculum";
+import KarteMaterialsView from "./KarteMaterialsView";
 
 type View = "list" | "create" | "detail" | "textbooks";
+type Tab = "karte" | "vision";
 
 type DiagnosisPreset = {
   studentName: string;
@@ -49,6 +52,27 @@ function avatarColor(name: string) {
   return AVATAR_COLORS[(name.charCodeAt(0) ?? 0) % AVATAR_COLORS.length];
 }
 
+// 講習ビジョンの既定期間（面談で使う単位＝講習ごと）。年をまたぐ冬期は翌年1月まで。
+function termDefaults(type: TermType): { label: string; start: string; end: string } {
+  const now = new Date();
+  const y = now.getFullYear();
+  const iso = (yy: number, m: number, d: number) =>
+    `${yy}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  switch (type) {
+    case "summer": return { label: `${y} 夏期講習`, start: iso(y, 7, 21), end: iso(y, 8, 31) };
+    case "winter": return { label: `${y} 冬期講習`, start: iso(y, 12, 23), end: iso(y + 1, 1, 7) };
+    case "spring": return { label: `${y} 春期講習`, start: iso(y, 3, 21), end: iso(y, 4, 7) };
+    default: {
+      const e = new Date(now); e.setMonth(e.getMonth() + 3);
+      return {
+        label: `${y} 通常期`,
+        start: iso(y, now.getMonth() + 1, now.getDate()),
+        end: iso(e.getFullYear(), e.getMonth() + 1, e.getDate()),
+      };
+    }
+  }
+}
+
 // ─── エントリ ─────────────────────────────────────────────
 export default function KartePage() {
   return <Suspense><KartePageInner /></Suspense>;
@@ -59,6 +83,8 @@ function KartePageInner() {
   const [view, setView] = useState<View>(
     searchParams.get("create") === "1" ? "create" : "list"
   );
+  // 既定は「カルテ」。診断から ?create=1 で来たときだけ講習ビジョン側を開く。
+  const [tab, setTab] = useState<Tab>(searchParams.get("create") === "1" ? "vision" : "karte");
   const [plans, setPlans] = useState<LearningPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [tableError, setTableError] = useState(false);
@@ -105,22 +131,46 @@ function KartePageInner() {
     <div className="min-h-screen bg-slate-50 px-6 py-8 text-slate-900">
       <div className="mx-auto max-w-5xl">
         {/* ヘッダー */}
-        <div className="mb-7 flex items-center justify-between gap-4">
+        <div className="mb-5 flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-950">3か月ビジョン一覧</h1>
-            <p className="mt-0.5 text-sm text-slate-500">生徒ごとの3か月ビジョン（3か月後の到達イメージ＝北極星）</p>
+            <h1 className="text-2xl font-bold text-slate-950">
+              {tab === "karte" ? "カルテ" : "講習ビジョン一覧"}
+            </h1>
+            <p className="mt-0.5 text-sm text-slate-500">
+              {tab === "karte"
+                ? "報告書・テスト結果・保護者メッセージ・教材進捗から、その子の今を1枚にまとめます"
+                : "夏期・冬期・春期の目標と成果。面談で使う書類として作ります"}
+            </p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => setView("textbooks")}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
-              テキスト管理
-            </button>
-            <button onClick={() => setView("create")}
-              className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
-              + 新規作成
-            </button>
-          </div>
+          {tab === "vision" && (
+            <div className="flex gap-2">
+              <button onClick={() => setView("textbooks")}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                テキスト管理
+              </button>
+              <button onClick={() => setView("create")}
+                className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+                + 新規作成
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* タブ */}
+        <div className="mb-6 flex gap-1 rounded-xl border border-slate-200 bg-white p-1 w-fit">
+          {([["karte", "カルテ"], ["vision", "講習ビジョン"]] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`rounded-lg px-4 py-1.5 text-sm font-semibold transition ${
+                tab === key ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "karte" && <KarteMaterialsView />}
+        {tab === "vision" && (
+        <>
 
         {/* テーブル未作成エラー */}
         {tableError && (
@@ -179,8 +229,8 @@ CREATE TABLE learning_plans (
         ) : filtered.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-20 text-center text-slate-500">
             <p className="text-5xl mb-4">📋</p>
-            <p className="font-semibold text-slate-700">3か月ビジョンがまだありません</p>
-            <p className="mt-1 text-sm">多層診断の「3か月ビジョンを作成」ボタン、または「新規作成」から作成できます</p>
+            <p className="font-semibold text-slate-700">講習ビジョンがまだありません</p>
+            <p className="mt-1 text-sm">多層診断の「ビジョンを作成」ボタン、または「新規作成」から作成できます</p>
             <button onClick={() => setView("create")}
               className="mt-5 rounded-xl bg-violet-600 px-6 py-2.5 text-sm font-semibold text-white hover:bg-violet-700">
               + 新規作成
@@ -221,13 +271,15 @@ CREATE TABLE learning_plans (
                       {plan.status === "shared" && (
                         <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">共有済</span>
                       )}
-                      <span className="text-xs font-medium text-violet-600 group-hover:underline">3か月ビジョンを開く →</span>
+                      <span className="text-xs font-medium text-violet-600 group-hover:underline">講習ビジョンを開く →</span>
                     </div>
                   </div>
                 </button>
               );
             })}
           </div>
+        )}
+        </>
         )}
       </div>
     </div>
@@ -623,6 +675,16 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
   const [allTextbooks, setAllTextbooks] = useState<Textbook[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // 講習ビジョン（面談で使う単位）
+  const [termType, setTermType] = useState<TermType>("summer");
+  const [termLabel, setTermLabel] = useState(termDefaults("summer").label);
+  const [termStart, setTermStart] = useState(termDefaults("summer").start);
+  const [termEnd, setTermEnd] = useState(termDefaults("summer").end);
+  const changeTerm = (t: TermType) => {
+    const d = termDefaults(t);
+    setTermType(t); setTermLabel(d.label); setTermStart(d.start); setTermEnd(d.end);
+  };
+
   const [genStep, setGenStep] = useState(0); // 0=idle 1=chatgpt 2=claude 3=done（Gemini精査は廃止）
   const [planHtml, setPlanHtml] = useState("");
   const [refinedJson, setRefinedJson] = useState<unknown>(null); // 3か月方針の構造化JSON（日割りTODOの元）
@@ -769,6 +831,8 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
       diagnosis_session_id: diagnosisSessionId,
       selected_textbooks: selectedTextbooks.length > 0 ? selectedTextbooks : null,
       plan_html: planHtml, status: "draft",
+      term_type: termType, term_label: termLabel,
+      term_start: termStart || null, term_end: termEnd || null,
     };
 
     // plan_json（3か月方針の構造化JSON）も保存。列が未追加の環境では列なしで再試行する。
@@ -776,6 +840,11 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
       .insert({ ...baseRow, plan_json: refinedJson }).select("id").single();
     if (res.error && /plan_json/.test(res.error.message)) {
       res = await supabase.from("learning_plans").insert(baseRow).select("id").single();
+    }
+    // term_* 列が未追加の環境（karte-materials-setup.sql 未実行）では講習情報を落として保存する
+    if (res.error && /term_/.test(res.error.message)) {
+      const { term_type, term_label, term_start, term_end, ...noTerm } = baseRow;  // eslint-disable-line @typescript-eslint/no-unused-vars
+      res = await supabase.from("learning_plans").insert(noTerm).select("id").single();
     }
     const { data: inserted, error } = res;
     if (error) {
@@ -858,6 +927,30 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
                     {SUBJECT_LIST.map((s) => <option key={s}>{s}</option>)}
                   </select>
                 </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="mb-1 text-sm font-semibold text-slate-700">どの講習のビジョンか</p>
+              <p className="mb-3 text-xs text-slate-500">面談で「この講習で何を目指し、どこまで来たか」を話すための単位です。</p>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {(["summer", "winter", "spring", "regular"] as TermType[]).map((t) => (
+                  <button key={t} type="button" onClick={() => changeTerm(t)}
+                    className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                      termType === t ? "bg-violet-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}>
+                    {TERM_LABEL[t]}
+                  </button>
+                ))}
+              </div>
+              <input value={termLabel} onChange={(e) => setTermLabel(e.target.value)}
+                className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-400"
+                placeholder="表示名（例: 2026 夏期講習）" />
+              <div className="grid grid-cols-2 gap-2">
+                <input type="date" value={termStart} onChange={(e) => setTermStart(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-400" />
+                <input type="date" value={termEnd} onChange={(e) => setTermEnd(e.target.value)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-violet-400" />
               </div>
             </div>
 
