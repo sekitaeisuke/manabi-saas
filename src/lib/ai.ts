@@ -40,11 +40,57 @@ const ENV_KEY: Record<Provider, string> = {
 export type KeySource = "tenant" | "company";
 export type ResolvedKey = { provider: Provider; key: string; source: KeySource };
 
-/** AIが使えないときのエラー。呼び出し側はこれを掴んで日本語のまま画面に出してよい */
+/** 失敗の種類。講師への案内文とヘルプデスクの初動を変えるために使う */
+export type AiErrorKind = "no_key" | "invalid_key" | "no_balance" | "busy" | "other";
+
+/**
+ * AIが使えないときのエラー。呼び出し側はこれを掴んで日本語のまま画面に出してよい。
+ * kind / provider を持たせてあるので、画面側で「ヘルプデスクに連絡」に添付できる。
+ */
 export class AiUnavailableError extends Error {
-  constructor(message: string) {
+  kind: AiErrorKind;
+  provider: Provider | null;
+  feature: string;
+  constructor(message: string, opts?: { kind?: AiErrorKind; provider?: Provider | null; feature?: string }) {
     super(message);
     this.name = "AiUnavailableError";
+    this.kind = opts?.kind ?? "other";
+    this.provider = opts?.provider ?? null;
+    this.feature = opts?.feature ?? "";
+  }
+}
+
+/**
+ * 失敗を ai_error_log に残す。講師が何もしなくても運営が原因を掴めるようにするための記録で、
+ * 失敗しても本体の処理は止めない（テーブル未作成の環境でも静かに無視する）。
+ */
+async function logAiError(row: {
+  feature: string; provider: Provider | null; keySource: KeySource | null;
+  kind: AiErrorKind; message: string; detail?: string;
+}): Promise<void> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  try {
+    await fetch(`${url}/rest/v1/ai_error_log`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        feature: row.feature,
+        provider: row.provider,
+        key_source: row.keySource,
+        kind: row.kind,
+        message: row.message,
+        detail: row.detail?.slice(0, 500) ?? null,
+      }),
+    });
+  } catch {
+    /* 記録できなくても本体は止めない */
   }
 }
 
@@ -102,10 +148,14 @@ export async function pickProvider(
     const r = await resolveKey(p, tenantId);
     if (r) return r;
   }
-  throw new AiUnavailableError(
-    "生成AIのキーが設定されていません。設定 → AI設定 でAPIキーを登録してください" +
-    "（ChatGPT Plus や Claude Pro の月額プランではなく、APIキーが必要です）。",
-  );
+  const msg =
+    "生成AIのキーが設定されていません。ご利用にはAPIキーの登録が必要です" +
+    "（ChatGPT Plus や Claude Pro の月額プランでは動きません。別物です）。" +
+    "下の「ヘルプデスクに連絡」から取得方法をご案内します。";
+  void logAiError({
+    feature: "", provider: null, keySource: null, kind: "no_key", message: msg,
+  });
+  throw new AiUnavailableError(msg, { kind: "no_key" });
 }
 
 export type GenerateOptions = {
@@ -142,8 +192,13 @@ export async function generateText(opts: GenerateOptions): Promise<GenerateResul
     const text = await callProvider(resolved, model, opts, maxTokens);
     return { text, provider: resolved.provider, model, source: resolved.source };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new AiUnavailableError(describeFailure(resolved.provider, resolved.source, msg));
+    const raw = e instanceof Error ? e.message : String(e);
+    const { kind, message } = describeFailure(resolved.provider, resolved.source, raw);
+    void logAiError({
+      feature: opts.feature, provider: resolved.provider, keySource: resolved.source,
+      kind, message, detail: raw,
+    });
+    throw new AiUnavailableError(message, { kind, provider: resolved.provider, feature: opts.feature });
   }
 }
 
@@ -216,19 +271,34 @@ async function callProvider(
 }
 
 /** 失敗の理由を、講師が読んで次の一手が分かる日本語にする */
-function describeFailure(provider: Provider, source: KeySource, raw: string): string {
+function describeFailure(
+  provider: Provider, source: KeySource, raw: string,
+): { kind: AiErrorKind; message: string } {
   const who = source === "tenant" ? "この塾に登録されたキー" : "当社のキー";
   const name = PROVIDER_LABEL[provider];
+  const help = "解決しない場合は下の「ヘルプデスクに連絡」からお知らせください。";
   if (/HTTP 401|invalid_api_key|API key not valid|Unauthorized/i.test(raw)) {
-    return `${name} のAPIキーが無効です（${who}）。設定 → AI設定 でキーを入れ直してください。`;
+    return {
+      kind: "invalid_key",
+      message: `${name} のAPIキーが無効です（${who}）。キーを入れ直してください。${help}`,
+    };
   }
   if (/HTTP 402|credit balance|insufficient_quota|quota/i.test(raw)) {
-    return `${name} の残高・利用枠が足りません（${who}）。プロバイダ側で残高を追加するか、別のAIに切り替えてください。`;
+    return {
+      kind: "no_balance",
+      message: `${name} の残高・利用枠が足りません（${who}）。プロバイダ側で残高を追加するか、別のAIに切り替えてください。${help}`,
+    };
   }
   if (/HTTP 429|rate.?limit|overloaded|high demand/i.test(raw)) {
-    return `${name} が混み合っています。少し待ってからもう一度お試しください。`;
+    return {
+      kind: "busy",
+      message: `${name} が混み合っています。少し待ってからもう一度お試しください。`,
+    };
   }
-  return `${name} の呼び出しに失敗しました（${who}）。${raw.slice(0, 120)}`;
+  return {
+    kind: "other",
+    message: `${name} の呼び出しに失敗しました（${who}）。${help}`,
+  };
 }
 
 /** ```json フェンスを外して JSON を取り出す。失敗したら null */

@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText, extractJson } from "@/lib/ai";
+import { generateText, extractJson, AiUnavailableError } from "@/lib/ai";
 // カルテを「素材」から組み立てる。
 //
 // 素材の優先順位（この順に重い。矛盾したら上位を採るのではなく、下の解決ルールに従う）:
@@ -279,7 +279,10 @@ ${m.vision || "（未作成）"}
       visionProgress: pick(p.visionProgress, 300),
       conflict: pick(p.conflict, 300),
     };
-  } catch {
+  } catch (e) {
+    // AIが使えない（キー無し・残高切れ・混雑）は握りつぶさず上へ返す。
+    // 黙って空のカルテを作ると、講師は「AIが動いていない」ことに気づけない。
+    if (e instanceof AiUnavailableError) throw e;
     return null;
   }
 }
@@ -291,12 +294,22 @@ async function buildOne(
   student: { id: string; name: string; grade: string | null },
   generatedBy: string | null,
   trigger: string
-): Promise<{ ok: boolean; reason?: string; empty?: boolean }> {
+): Promise<{ ok: boolean; reason?: string; empty?: boolean; ai?: { kind: string; provider?: string } }> {
   const { material, planId } = await collect(svc, student);
   const total = Object.values(material.counts).reduce((a, b) => a + b, 0);
 
   // 素材ゼロでもカルテは作る（空欄のまま「何が足りないか」を出す）。AIは呼ばない。
-  const karte = total === 0 ? EMPTY_KARTE : (await askClaude(material)) ?? EMPTY_KARTE;
+  let karte: KarteBuildJson = EMPTY_KARTE;
+  if (total > 0) {
+    try {
+      karte = (await askClaude(material)) ?? EMPTY_KARTE;
+    } catch (e) {
+      if (e instanceof AiUnavailableError) {
+        return { ok: false, reason: e.message, ai: { kind: e.kind, provider: e.provider ?? undefined } };
+      }
+      throw e;
+    }
+  }
 
   const row = {
     student_id: student.id,
@@ -372,6 +385,11 @@ export async function POST(req: NextRequest) {
   }
 
   const r = await buildOne(svc, student, generatedBy, trigger);
-  if (!r.ok) return NextResponse.json({ error: r.reason }, { status: 500 });
+  if (!r.ok) {
+    return NextResponse.json(
+      { error: r.reason, aiKind: r.ai?.kind, aiProvider: r.ai?.provider, feature: "karte_build" },
+      { status: 500 },
+    );
+  }
   return NextResponse.json({ built: 1, studentName: student.name, empty: r.empty ?? false });
 }

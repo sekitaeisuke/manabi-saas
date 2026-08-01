@@ -12,6 +12,7 @@ import type { StudentKarte, KarteMaterialStatus } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { Card, Badge, Button, inputClass, cx } from "@/components/ui";
+import { AiErrorNotice, type AiErrorContext } from "@/components/AiErrorNotice";
 
 type StudentLite = { id: string; name: string; grade: string | null };
 
@@ -104,6 +105,8 @@ export default function KarteMaterialsView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [tableMissing, setTableMissing] = useState(false);
+  // AIが使えなかったときの案内（ヘルプデスク導線つき）
+  const [aiError, setAiError] = useState<{ message: string; context: AiErrorContext } | null>(null);
 
   // 詳細で開いている生徒の素材
   const [reports, setReports] = useState<ReportRow[]>([]);
@@ -162,9 +165,17 @@ export default function KarteMaterialsView() {
         body: JSON.stringify({ studentId: s.id, trigger: "manual" }),
       });
       const d = await r.json();
-      if (d.error) showToast(d.error, "error");
-      else if (d.empty) showToast(`${s.name} はまだ素材がありません（報告書を書くとカルテが埋まります）`, "info");
-      else showToast(`${s.name} のカルテを更新しました`, "success");
+      if (d.error) {
+        // AI起因ならトーストで流さず、画面に残して連絡導線を出す
+        setAiError({
+          message: d.error,
+          context: { feature: d.feature ?? "karte_build", kind: d.aiKind, provider: d.aiProvider, screen: "カルテ" },
+        });
+      } else {
+        setAiError(null);
+        if (d.empty) showToast(`${s.name} はまだ素材がありません（報告書を書くとカルテが埋まります）`, "info");
+        else showToast(`${s.name} のカルテを更新しました`, "success");
+      }
       await load();
       if (selected?.id === s.id) await loadMaterials(s);
     } finally { setBusy(null); }
@@ -209,6 +220,14 @@ export default function KarteMaterialsView() {
             {busy === selected.id ? "組み立て中..." : "カルテを作り直す"}
           </Button>
         </div>
+
+        {aiError && (
+          <AiErrorNotice
+            message={aiError.message}
+            context={aiError.context}
+            onRetry={() => { setAiError(null); rebuild(selected); }}
+          />
+        )}
 
         {/* 素材の充足 */}
         <div className="flex flex-wrap gap-2">
