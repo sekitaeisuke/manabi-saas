@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher, isInternalCall, isServiceKeyCall } from "@/lib/apiAuth";
 
+import { generateText } from "@/lib/ai";
 // 講師ホーム「今日この授業で詰めること」を選定する。
 //
 // daily_tasks（3か月ビジョン→生徒が家でやる宿題）とは【別物】。ここは講師の手元用で、
@@ -56,8 +57,6 @@ function hasMaterial(m: Record<string, string>): boolean {
 }
 
 async function callClaude(material: Record<string, string> & { studentName: string; grade: string }): Promise<FocusJson | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
 
   const prompt = `あなたは個別指導塾のベテラン教室長です。今日この生徒の授業で「講師が詰めるべきこと」を選んでください。
 これは講師の手元用のメモです。生徒に見せる宿題リストではありません（それは別にあります）。
@@ -95,22 +94,9 @@ ${material.collab || "（なし）"}
 {"headline":"...","items":[{"action":"...","why":"...","source":"report","sourceDate":"2026-07-24","priority":"normal"}]}`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1500,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    let text: string = data.content?.[0]?.text ?? "";
+    let text = (await generateText({
+      prompt, maxTokens: 1500, feature: "teaching_focus",
+    })).text;
     text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const s = text.indexOf("{");
     const e = text.lastIndexOf("}");

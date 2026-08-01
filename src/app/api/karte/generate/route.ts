@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText, AiUnavailableError } from "@/lib/ai";
 type TextbookInput = {
   id: string;
   name: string;
@@ -111,27 +112,13 @@ ${textbookInfo}
 ⑦【保護者へのメッセージ】温かく・具体的に・励ましの内容（3〜4文）`;
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8192,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    return NextResponse.json({ error: "AI生成に失敗しました", raw: errText.slice(0, 200) }, { status: 500 });
+  let planHtml: string;
+  try {
+    planHtml = (await generateText({ prompt, maxTokens: 8192, feature: "vision_html" })).text;
+  } catch (e) {
+    const msg = e instanceof AiUnavailableError ? e.message : "AI生成に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const data = await res.json();
-  let planHtml = (data.content?.[0]?.text ?? "").trim();
 
   if (planHtml.startsWith("```html")) planHtml = planHtml.slice(7);
   else if (planHtml.startsWith("```")) planHtml = planHtml.slice(3);

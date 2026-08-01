@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/apiAuth";
 
+import { generateText, AiUnavailableError } from "@/lib/ai";
 export const runtime = "edge";
 export const maxDuration = 30;
 
@@ -55,27 +56,15 @@ event_typeの選択基準:
 - class: 特別授業・補講・夏期講習など
 - info: お知らせ・連絡事項など`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: fullPrompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text().catch(() => "(読み取り不可)");
-    return NextResponse.json({ error: `Claude API ${res.status}: ${err}` }, { status: 500 });
+  let content: string;
+  try {
+    content = (await generateText({
+      prompt: fullPrompt, maxTokens: 2000, tier: "fast", feature: "shift_events",
+    })).text;
+  } catch (e) {
+    const msg = e instanceof AiUnavailableError ? e.message : "行事の読み取りに失敗しました";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const data = await res.json();
-  let content: string = (data.content?.[0]?.text ?? "").trim();
 
   if (content.startsWith("```json")) content = content.slice(7);
   else if (content.startsWith("```")) content = content.slice(3);

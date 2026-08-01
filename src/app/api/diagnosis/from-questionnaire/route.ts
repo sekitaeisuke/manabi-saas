@@ -7,6 +7,7 @@ import {
   renderTeacherReport,
   renderParentReport,
 } from "@/lib/diagnosisReport";
+import { generateText } from "@/lib/ai";
 
 type SectionAnswers = Record<string, number>;
 
@@ -67,26 +68,8 @@ function scoreItems(answers: SectionAnswers, keys: string[]): number {
 }
 
 async function callClaude(prompt: string, system?: string): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      ...(system ? { system } : {}),
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Claude APIエラー: ${(err as { error?: { message?: string } }).error?.message ?? res.status}`);
-  }
-  const data = await res.json() as { content?: { text?: string }[] };
-  return data.content?.[0]?.text ?? "";
+  const { text } = await generateText({ prompt, system, maxTokens: 4096, feature: "diagnosis" });
+  return text;
 }
 
 // ─── 三角測定・三層固定診断モデル ─────────────────────────

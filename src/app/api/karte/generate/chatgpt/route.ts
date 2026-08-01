@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText, extractJson, AiUnavailableError } from "@/lib/ai";
 type TextbookInput = {
   id: string;
   name: string;
@@ -104,35 +105,18 @@ ${textbookInfo}
   "parentMessage": "保護者への温かく具体的なメッセージ（3〜4文）"
 }`;
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    return NextResponse.json(
-      { error: `OpenAI APIエラー: ${err.error?.message ?? `HTTP ${res.status}`}` },
-      { status: 500 }
-    );
-  }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) return NextResponse.json({ error: "初稿生成に失敗しました" }, { status: 500 });
-
+  let content: string;
   try {
-    const draft = JSON.parse(content);
-    return NextResponse.json({ draft });
-  } catch {
+    content = (await generateText({
+      provider: "openai", prompt, maxTokens: 8192, json: true, feature: "vision_draft",
+    })).text;
+  } catch (e) {
+    const msg = e instanceof AiUnavailableError ? e.message : "初稿生成に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+  const draft = extractJson(content);
+  if (!draft) {
     return NextResponse.json({ error: "JSONパースに失敗しました", raw: content.slice(0, 300) }, { status: 500 });
   }
+  return NextResponse.json({ draft });
 }

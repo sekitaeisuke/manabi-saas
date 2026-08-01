@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/apiAuth";
 
+import { generateText } from "@/lib/ai";
 export const runtime = "edge";
 export const maxDuration = 30;
 
@@ -95,30 +96,19 @@ async function summarize(shifts: ShiftRow[], warnings: string[], customInstructi
   const instructionPart = customInstruction.trim()
     ? `\n管理者追加指示（参考）: 「${customInstruction.slice(0, 100)}」`
     : "";
-  const body = JSON.stringify({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 200,
-    system: "50字以内の日本語テキストのみ返してください。",
-    messages: [{
-      role: "user",
-      content: `シフト自動割り当て結果: ${shifts.length}件配置、未配置警告${warnings.length}件。${instructionPart}\n一言で要約してください。`,
-    }],
-  });
+  const fallback = `${shifts.length}件のシフトを自動生成しました。`;
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-        "anthropic-version": "2023-06-01",
-      },
-      body,
+    const { text } = await generateText({
+      prompt: `シフト自動割り当て結果: ${shifts.length}件配置、未配置警告${warnings.length}件。${instructionPart}\n一言で要約してください。`,
+      system: "50字以内の日本語テキストのみ返してください。",
+      maxTokens: 200,
+      tier: "fast",
+      feature: "shift_summary",
     });
-    if (!res.ok) return `${shifts.length}件のシフトを自動生成しました。`;
-    const data = await res.json();
-    return (data.content?.[0]?.text ?? "").trim() || `${shifts.length}件のシフトを自動生成しました。`;
+    return text.trim() || fallback;
   } catch {
-    return `${shifts.length}件のシフトを自動生成しました。`;
+    // 要約はおまけ。AIが使えなくてもシフト生成は成立させる
+    return fallback;
   }
 }
 

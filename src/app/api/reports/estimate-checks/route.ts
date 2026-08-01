@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 import { CHECK_GROUPS, CHECK_ITEMS, GROUP_SCORE_HINT } from "@/lib/checkGroups";
 
+import { generateText } from "@/lib/ai";
 // 報告書の「学習スキル17項目」を、学力診断(questionnaire_responses)から推定して下書きチェックを返す。
 // これは講師が最終確認・調整する下書き。
 //
@@ -98,8 +99,6 @@ async function estimateWithAI(
   scores: Record<string, number | null>,
   aiAnalysis: string | null
 ): Promise<PerItem[] | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
 
   const scoreLines = Object.entries(scores)
     .map(([k, v]) => `${k}: ${v == null ? "データなし" : v}`)
@@ -125,22 +124,9 @@ ${groupBlock}
 - item は上記の項目名を一字一句そのまま使う。`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    let text: string = data.content?.[0]?.text ?? "";
+    let text = (await generateText({
+      prompt, maxTokens: 2048, feature: "estimate_checks",
+    })).text;
     text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");

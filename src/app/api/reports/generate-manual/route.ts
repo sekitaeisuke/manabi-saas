@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText, AiUnavailableError } from "@/lib/ai";
 const CHECKED_GROUPS = [
   {
     label: "成果物",
@@ -105,27 +106,13 @@ ${teacherNotes ? `【講師メモ（補足）】\n${teacherNotes}` : ""}
 ④ 講師からのメッセージ（次回に向けたアドバイスを温かく2〜3文）
 ⑤ 次回の授業に向けて（宿題・家庭学習のポイントを具体的に1〜2項目）`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    return NextResponse.json({ error: "AI生成に失敗しました", raw: errText.slice(0, 200) }, { status: 500 });
+  let reportHtml: string;
+  try {
+    reportHtml = (await generateText({ prompt, maxTokens: 4096, feature: "report_manual" })).text;
+  } catch (e) {
+    const msg = e instanceof AiUnavailableError ? e.message : "AI生成に失敗しました";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-
-  const aiData = await res.json();
-  let reportHtml = (aiData.content?.[0]?.text ?? "").trim();
 
   if (reportHtml.startsWith("```html")) reportHtml = reportHtml.slice(7);
   else if (reportHtml.startsWith("```")) reportHtml = reportHtml.slice(3);

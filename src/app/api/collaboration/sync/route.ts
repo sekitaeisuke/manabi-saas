@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText } from "@/lib/ai";
 // 報告書・学力診断から「気がかりな生徒」を講師連携(collaboration_tasks)へ自動掲載する。
 //
 // 判定:
@@ -92,22 +93,9 @@ async function judgeReportsWithAI(
     `報告書一覧:\n${JSON.stringify(items, null, 2)}`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return {};
-    const data = await res.json();
-    let text: string = data.content?.[0]?.text ?? "";
+    let text = (await generateText({
+      prompt, maxTokens: 2048, feature: "collaboration_sync",
+    })).text;
     text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");
@@ -175,22 +163,9 @@ async function judgeKarteUrgency(
     `生徒一覧:\n${JSON.stringify(items, null, 2)}`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return {};
-    const data = await res.json();
-    let text: string = data.content?.[0]?.text ?? "";
+    let text = (await generateText({
+      prompt, maxTokens: 2048, feature: "collaboration_sync",
+    })).text;
     text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const start = text.indexOf("[");
     const end = text.lastIndexOf("]");

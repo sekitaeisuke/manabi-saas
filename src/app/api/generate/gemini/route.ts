@@ -1,28 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
+import { generateText, resolveKey } from "@/lib/ai";
 
 // テスト作成AIパイプラインの第2段階「推敲」。
 // ChatGPTが作った問題ドラフト(questions)を Gemini が校閲・改善し、改善後の questions を返す。
 // この後、第3段階 Claude が最終チェック＋HTML化を行う。
+//
+// この段は「あると品質が上がる」オプション。Googleのキーが無い塾では黙って省略し、
+// 下書きをそのまま次の段へ渡す（3社そろわないと動かない機能を作らないため）。
 async function callGemini(prompt: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY ?? "";
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, responseMimeType: "application/json", maxOutputTokens: 8192 },
-      }),
-    }
-  );
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e.error?.message ?? `HTTP ${res.status}`);
-  }
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  const { text } = await generateText({
+    provider: "google", prompt, maxTokens: 8192, temperature: 0.4, json: true,
+    feature: "test_refine",
+  });
+  return text;
 }
 
 export async function POST(req: NextRequest) {
@@ -32,6 +23,15 @@ export async function POST(req: NextRequest) {
 
   if (!Array.isArray(questions) || questions.length === 0) {
     return NextResponse.json({ error: "推敲対象の問題がありません（先に作成を実行してください）" }, { status: 400 });
+  }
+
+  // Googleのキーが無ければ推敲を飛ばす。呼び出し側は d2.questions ?? d1.questions で受けている。
+  if (!(await resolveKey("google"))) {
+    return NextResponse.json({
+      questions,
+      skipped: true,
+      note: "Gemini（Google）のキーが未設定のため、推敲の段を省略しました。",
+    });
   }
 
   const typeLabel = testType === "diagnostic"

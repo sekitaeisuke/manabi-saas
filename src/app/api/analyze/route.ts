@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
+import { generateText, AiUnavailableError } from "@/lib/ai";
 
 // 全角→半角・空白・大文字小文字を正規化（採点の表記ゆれ吸収）。submit ルートと同一ロジック。
 function normalize(s: string): string {
@@ -134,27 +135,14 @@ ${wrongList || "（なし）"}
 HTMLを含むJSON形式で返してください:
 {"reportHtml": "<div>...報告書HTML...</div>", "score": ${earned}, "total": ${totalPoints}, "rate": ${rate}}`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error("Claude API error:", res.status, errText);
-    return NextResponse.json({ error: "分析に失敗しました" }, { status: 502 });
+  let content: string;
+  try {
+    content = (await generateText({ prompt, maxTokens: 4096, feature: "analyze" })).text;
+  } catch (e) {
+    const msg = e instanceof AiUnavailableError ? e.message : "分析に失敗しました";
+    console.error("AI error:", msg);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
-  const data = await res.json();
-  let content = (data.content?.[0]?.text ?? "") as string;
   // Strip markdown code fences if present
   content = content.trim();
   if (content.startsWith("```json")) content = content.slice(7);

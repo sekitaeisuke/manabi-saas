@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+import { generateText } from "@/lib/ai";
 // 全角→半角正規化（数字・英字・スペース）
 function normalize(s: string): string {
   return s
@@ -42,25 +43,8 @@ async function resolveStudentId(studentName: string, grade: string): Promise<str
 }
 
 async function callClaude(prompt: string, maxTokens = 1500): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: maxTokens,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "(読み取り不可)");
-    throw new Error(`Claude API ${res.status}: ${errText}`);
-  }
-  const data = await res.json();
-  return data.content?.[0]?.text ?? "";
+  const { text } = await generateText({ prompt, maxTokens, feature: "test_submit" });
+  return text;
 }
 
 type RawAnswer = { question_id: string; answer: string };

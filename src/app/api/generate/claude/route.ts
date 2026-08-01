@@ -1,28 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText } from "@/lib/ai";
 async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: maxTokens,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message ?? `HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  return data.content?.[0]?.text ?? "";
+  const { text } = await generateText({ prompt, maxTokens, feature: "test_finalize" });
+  return text;
 }
 
 export async function POST(req: NextRequest) {

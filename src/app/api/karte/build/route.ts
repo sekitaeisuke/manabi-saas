@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText, extractJson } from "@/lib/ai";
 // カルテを「素材」から組み立てる。
 //
 // 素材の優先順位（この順に重い。矛盾したら上位を採るのではなく、下の解決ルールに従う）:
@@ -214,8 +215,6 @@ async function collect(svc: any, student: { id: string; name: string; grade: str
 // ── AIに見立てを書かせる ─────────────────────────────────────
 
 async function askClaude(m: Material): Promise<KarteBuildJson | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
 
   const prompt = `あなたは個別指導塾のベテラン講師です。以下の素材から、生徒1人のカルテを書いてください。
 
@@ -260,27 +259,9 @@ ${m.vision || "（未作成）"}
 {"reached":"...またはnull","stumblePoint":"...またはnull","stumbleEvidence":"...またはnull","nextStep":"...またはnull","family":"...またはnull","visionProgress":"...またはnull","conflict":"...またはnull"}`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    let text: string = data.content?.[0]?.text ?? "";
-    text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
-    const s = text.indexOf("{");
-    const e = text.lastIndexOf("}");
-    if (s === -1 || e === -1) return null;
-    const p = JSON.parse(text.slice(s, e + 1));
+    const { text } = await generateText({ prompt, maxTokens: 2000, feature: "karte_build" });
+    const p = extractJson<Record<string, unknown>>(text);
+    if (!p) return null;
     // 「素材が無い」ことの説明文はカルテに載せない（画面側で「まだ素材がありません」と出すため）。
     const NO_MATERIAL = /(未作成|未実施|情報が?(ありません|ない)|記載(が)?(ありません|ない)|データが?(ありません|ない)|評価(は)?(でき|不可)|該当(する素材|なし)|素材が?(ありません|ない))/;
     const pick = (v: unknown, n: number) => {

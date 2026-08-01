@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
+import { generateText } from "@/lib/ai";
 // カルテ(learning_plans.plan_json)の3か月方針を「毎日のTODO」に日割り展開して daily_tasks に保存する。
 // カルテ作成時にクライアントから {learningPlanId} で呼ばれる（再生成も同じ）。
 
@@ -43,22 +44,9 @@ ${JSON.stringify(planJson, null, 2)}
 {"weeks":[{"week":1,"month":1,"theme":"今週のテーマ","days":[{"dow":"月","tasks":[{"subject":"${subject}","content":"例: 正負の数 p.10-12","amount":"2ページ"}]},{"dow":"火","tasks":[...]}, ... 月〜日の7日 ...]}, ... ${WEEKS}週分 ...]}`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8192,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    let text: string = data.content?.[0]?.text ?? "";
+    let text = (await generateText({
+      prompt, maxTokens: 8192, feature: "daily_tasks",
+    })).text;
     text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
     const s = text.indexOf("{");
     const e = text.lastIndexOf("}");
