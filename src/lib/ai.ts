@@ -179,6 +179,7 @@ export type GenerateResult = {
   provider: Provider;
   model: string;
   source: KeySource;
+  usage: TokenUsage;
 };
 
 /** 統一の生成呼び出し。失敗時は AiUnavailableError（日本語）を投げる */
@@ -189,8 +190,13 @@ export async function generateText(opts: GenerateOptions): Promise<GenerateResul
   const maxTokens = opts.maxTokens ?? 4096;
 
   try {
-    const text = await callProvider(resolved, model, opts, maxTokens);
-    return { text, provider: resolved.provider, model, source: resolved.source };
+    const { text, usage } = await callProvider(resolved, model, opts, maxTokens);
+    // 当社の鍵で動かす以上、いくら使ったかは実測で持っておく
+    void logAiUsage({
+      feature: opts.feature, provider: resolved.provider, keySource: resolved.source,
+      model, usage, tenantId: opts.tenantId,
+    });
+    return { text, provider: resolved.provider, model, source: resolved.source, usage };
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
     const { kind, message } = describeFailure(resolved.provider, resolved.source, raw);
@@ -202,12 +208,15 @@ export async function generateText(opts: GenerateOptions): Promise<GenerateResul
   }
 }
 
+/** 1回の呼び出しで使ったトークン数（提供元ごとに項目名が違うのでここで揃える） */
+export type TokenUsage = { input: number; output: number };
+
 async function callProvider(
   resolved: ResolvedKey,
   model: string,
   opts: GenerateOptions,
   maxTokens: number,
-): Promise<string> {
+): Promise<{ text: string; usage: TokenUsage }> {
   if (resolved.provider === "anthropic") {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -226,7 +235,10 @@ async function callProvider(
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
     const data = await res.json();
-    return (data.content?.[0]?.text ?? "").trim();
+    return {
+      text: (data.content?.[0]?.text ?? "").trim(),
+      usage: { input: data.usage?.input_tokens ?? 0, output: data.usage?.output_tokens ?? 0 },
+    };
   }
 
   if (resolved.provider === "openai") {
@@ -246,7 +258,10 @@ async function callProvider(
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
     const data = await res.json();
-    return (data.choices?.[0]?.message?.content ?? "").trim();
+    return {
+      text: (data.choices?.[0]?.message?.content ?? "").trim(),
+      usage: { input: data.usage?.prompt_tokens ?? 0, output: data.usage?.completion_tokens ?? 0 },
+    };
   }
 
   // google
@@ -267,7 +282,66 @@ async function callProvider(
   );
   if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
-  return (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
+  return {
+    text: (data.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim(),
+    usage: {
+      input: data.usageMetadata?.promptTokenCount ?? 0,
+      output: data.usageMetadata?.candidatesTokenCount ?? 0,
+    },
+  };
+}
+
+/**
+ * 1Mトークンあたりの単価（USD）。実測コストを出すために使う。
+ * Anthropic は公表値。他社は各社の料金ページを見て埋めること（未設定なら費用は null で記録される）。
+ */
+const PRICE_PER_MTOK: Record<string, { in: number; out: number }> = {
+  "claude-sonnet-4-6": { in: 3, out: 15 },
+  "claude-haiku-4-5-20251001": { in: 1, out: 5 },
+  // "gpt-4o": { in: ?, out: ? },
+  // "gpt-4o-mini": { in: ?, out: ? },
+  // "gemini-2.5-flash": { in: ?, out: ? },
+};
+
+function costUsd(model: string, usage: TokenUsage): number | null {
+  const p = PRICE_PER_MTOK[model];
+  if (!p) return null;
+  return (usage.input / 1_000_000) * p.in + (usage.output / 1_000_000) * p.out;
+}
+
+/**
+ * 成功した呼び出しを ai_usage_log に残す。
+ * 「実際にいくら使っているか」を試算でなく実測で持つための記録。塾ごとの上限設計の根拠にもなる。
+ * 記録に失敗しても本体は止めない。
+ */
+async function logAiUsage(row: {
+  feature: string; provider: Provider; keySource: KeySource; model: string;
+  usage: TokenUsage; tenantId?: string | null;
+}): Promise<void> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  try {
+    await fetch(`${url}/rest/v1/ai_usage_log`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: key, Authorization: `Bearer ${key}`, Prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        feature: row.feature,
+        provider: row.provider,
+        key_source: row.keySource,
+        model: row.model,
+        input_tokens: row.usage.input,
+        output_tokens: row.usage.output,
+        cost_usd: costUsd(row.model, row.usage),
+        tenant_id: row.tenantId ?? null,
+      }),
+    });
+  } catch {
+    /* 記録できなくても本体は止めない */
+  }
 }
 
 /** 失敗の理由を、講師が読んで次の一手が分かる日本語にする */
