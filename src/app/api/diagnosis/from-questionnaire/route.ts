@@ -7,7 +7,7 @@ import {
   renderTeacherReport,
   renderParentReport,
 } from "@/lib/diagnosisReport";
-import { generateText } from "@/lib/ai";
+import { generateText, aiErrorPayload } from "@/lib/ai";
 
 type SectionAnswers = Record<string, number>;
 
@@ -202,7 +202,7 @@ observations は5〜10件。矛盾は必ず consistency を「矛盾」にし、
     teacherReportHtml = renderTeacherReport(diagnosis);
     parentReportHtml = renderParentReport(diagnosis);
   } catch (e) {
-    return NextResponse.json({ error: "診断の生成に失敗しました: " + String(e) }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "diagnosis"), { status: 502 });
   }
 
   // Save both reports, structured diagnosis, scores and the bottleneck fields.

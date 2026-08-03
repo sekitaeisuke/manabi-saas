@@ -1,6 +1,7 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { authFetch } from "@/lib/authFetch";
+import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
@@ -602,6 +603,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [saving, setSaving] = useState(false);
   const [reportSaved, setReportSaved] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [aiError, setAiError] = useState<AiErrorState | null>(null);
 
   const adjacentGrades = getAdjacentGrades(grade);
 
@@ -651,10 +653,17 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         return;
       }
       if (data.error) {
-        const detail = data.raw ? `\n詳細: ${data.raw}` : "";
-        setErrorMsg(`[${step}] ${data.error}${detail}`);
+        // AI起因なら「次に何をすればよいか」＋ヘルプデスク導線つきで出す
+        const ai = aiErrorFrom(data as { error?: string; aiKind?: string; aiProvider?: string; feature?: string }, "テスト作成");
+        if (ai) {
+          setAiError(ai);
+        } else {
+          const detail = data.raw ? `\n詳細: ${data.raw}` : "";
+          setErrorMsg(`[${step}] ${data.error}${detail}`);
+        }
         return;
       }
+      setAiError(null);
       if (data.html) setGeneratedHtml(data.html as string);
       if (data.questions) setQuestions(data.questions as GeneratedQuestion[]);
       setAiStep(step);
@@ -676,7 +685,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       const r1 = await authFetch("/api/generate/chatgpt", { method: "POST", headers: hdr,
         body: JSON.stringify({ testType, title, subject, grade, selectedUnits, difficulties, count, instructions }) });
       const d1 = await r1.json().catch(() => null);
-      if (!d1 || d1.error) { setErrorMsg(`[chatgpt] ${d1?.error ?? `サーバーエラー (HTTP ${r1.status})`}`); setGenerating(false); return; }
+      if (!d1 || d1.error) { const ai = aiErrorFrom(d1, "テスト作成（下書き）"); if (ai) setAiError(ai); else setErrorMsg(`[chatgpt] ${d1?.error ?? "サーバーエラー"}`); setGenerating(false); return; }
       let q = (d1.questions as GeneratedQuestion[]) ?? [];
       if (d1.html) setGeneratedHtml(d1.html as string);
       if (q.length) setQuestions(q);
@@ -685,7 +694,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       const r2 = await authFetch("/api/generate/gemini", { method: "POST", headers: hdr,
         body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q }) });
       const d2 = await r2.json().catch(() => null);
-      if (!d2 || d2.error) { setErrorMsg(`[gemini] ${d2?.error ?? `サーバーエラー (HTTP ${r2.status})`}`); setGenerating(false); return; }
+      if (!d2 || d2.error) { const ai = aiErrorFrom(d2, "テスト作成（推敲）"); if (ai) setAiError(ai); else setErrorMsg(`[gemini] ${d2?.error ?? "サーバーエラー"}`); setGenerating(false); return; }
       if (Array.isArray(d2.questions) && d2.questions.length) q = d2.questions as GeneratedQuestion[];
       setQuestions(q);
       setAiStep("gemini");
@@ -693,7 +702,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       const r3 = await authFetch("/api/generate/claude", { method: "POST", headers: hdr,
         body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q }) });
       const d3 = await r3.json().catch(() => null);
-      if (!d3 || d3.error) { setErrorMsg(`[claude] ${d3?.error ?? `サーバーエラー (HTTP ${r3.status})`}`); setGenerating(false); return; }
+      if (!d3 || d3.error) { const ai = aiErrorFrom(d3, "テスト作成（仕上げ）"); if (ai) setAiError(ai); else setErrorMsg(`[claude] ${d3?.error ?? "サーバーエラー"}`); setGenerating(false); return; }
       if (d3.html) setGeneratedHtml(d3.html as string);
       if (d3.questions) setQuestions(d3.questions as GeneratedQuestion[]);
       setAiStep("claude");
@@ -1166,6 +1175,12 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               AIが処理中です。しばらくお待ちください...
             </div>
           )}
+          {aiError && (
+            <div className="mt-4">
+              <AiErrorNotice message={aiError.message} context={aiError.context} />
+            </div>
+          )}
+
           {errorMsg && (
             <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 whitespace-pre-wrap">
               <span className="font-semibold">エラー：</span>{errorMsg}

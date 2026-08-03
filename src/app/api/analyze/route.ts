@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
-import { generateText, AiUnavailableError } from "@/lib/ai";
+import { generateText, AiUnavailableError, aiErrorPayload } from "@/lib/ai";
 
 // 全角→半角・空白・大文字小文字を正規化（採点の表記ゆれ吸収）。submit ルートと同一ロジック。
 function normalize(s: string): string {
@@ -139,9 +139,7 @@ HTMLを含むJSON形式で返してください:
   try {
     content = (await generateText({ prompt, maxTokens: 4096, feature: "analyze" })).text;
   } catch (e) {
-    const msg = e instanceof AiUnavailableError ? e.message : "分析に失敗しました";
-    console.error("AI error:", msg);
-    return NextResponse.json({ error: msg }, { status: 502 });
+    return NextResponse.json(aiErrorPayload(e, "analyze"), { status: 502 });
   }
   // Strip markdown code fences if present
   content = content.trim();

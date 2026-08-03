@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText, extractJson, AiUnavailableError } from "@/lib/ai";
+import { generateText, extractJson, AiUnavailableError, aiErrorPayload } from "@/lib/ai";
 export async function POST(req: NextRequest) {
   const auth = await requireTeacher(req);
   if (auth instanceof NextResponse) return auth;
@@ -92,8 +92,7 @@ JSONのみを返してください。`;
       provider: "openai", prompt, maxTokens: 8192, json: true, feature: "test_draft",
     })).text;
   } catch (e) {
-    const msg = e instanceof AiUnavailableError ? e.message : "生成に失敗しました";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "test_draft"), { status: 502 });
   }
   const parsed = extractJson(content);
   if (!parsed) return NextResponse.json({ error: "生成結果のJSON解析に失敗しました" }, { status: 500 });

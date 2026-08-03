@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText, extractJson, AiUnavailableError } from "@/lib/ai";
+import { generateText, extractJson, AiUnavailableError, aiErrorPayload } from "@/lib/ai";
 type TextbookInput = {
   id: string;
   name: string;
@@ -111,8 +111,7 @@ ${textbookInfo}
       provider: "openai", prompt, maxTokens: 8192, json: true, feature: "vision_draft",
     })).text;
   } catch (e) {
-    const msg = e instanceof AiUnavailableError ? e.message : "初稿生成に失敗しました";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "vision_draft"), { status: 502 });
   }
   const draft = extractJson(content);
   if (!draft) {

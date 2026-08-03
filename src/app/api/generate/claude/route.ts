@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText } from "@/lib/ai";
+import { generateText, aiErrorPayload } from "@/lib/ai";
 async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
   const { text } = await generateText({ prompt, maxTokens, feature: "test_finalize" });
   return text;
@@ -79,7 +79,7 @@ HTMLのみを返してください（JSONや説明文は不要）。`;
     const match = htmlText.match(/<div[\s\S]*<\/div>/);
     finalHtml = match ? match[0] : htmlText;
   } catch (e) {
-    return NextResponse.json({ error: "Claude（HTML生成）エラー: " + String(e) }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "test_finalize"), { status: 502 });
   }
 
   return NextResponse.json({ html: finalHtml, questions: finalQuestions });

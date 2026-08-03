@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
 import { Skeleton } from "@/components/Skeleton";
+import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 import { resolveEnabled, type ModuleSettingRow } from "@/lib/modules";
 import { StockChart, type StockPoint } from "@/components/StockChart";
 import {
@@ -124,6 +125,7 @@ export default function TeacherDashboardPage() {
   const [resting, setResting] = useState<RestingStudent[]>([]);
   const [failedNotifications, setFailedNotifications] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [aiError, setAiError] = useState<AiErrorState | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [busyFocus, setBusyFocus] = useState<string | null>(null);
   // 塾内経済は既定OFFのモジュール。ONの塾でだけ株価を出す。
@@ -388,7 +390,12 @@ export default function TeacherDashboardPage() {
         body: JSON.stringify({ studentId: id }),
       });
       const data = await res.json();
-      if (data.error) { showToast(data.error, "error"); return; }
+      if (data.error) {
+        const ai = aiErrorFrom(data, "講師ホーム（今日詰めること）");
+        if (ai) setAiError(ai); else showToast(data.error, "error");
+        return;
+      }
+      setAiError(null);
       if (data.noMaterial > 0) {
         showToast(`${name} は材料（進捗・報告書・診断など）がまだありません`, "error");
         return;
@@ -445,6 +452,11 @@ export default function TeacherDashboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-8 sm:py-9">
+      {aiError && (
+        <div className="mb-4">
+          <AiErrorNotice message={aiError.message} context={aiError.context} />
+        </div>
+      )}
       <PageHeader
         eyebrow={today}
         title="今日のホーム"

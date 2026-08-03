@@ -16,6 +16,24 @@ export type AiErrorContext = {
   screen?: string;     // 講師が見ていた画面
 };
 
+export type AiErrorState = { message: string; context: AiErrorContext };
+
+/**
+ * APIの応答から AiErrorNotice 用の状態を作る。
+ * aiKind が付いていないもの（入力ミス・保存失敗など）は AI起因ではないので null を返し、
+ * 各画面の従来のエラー表示に任せる。
+ */
+export function aiErrorFrom(
+  data: { error?: string; aiKind?: string; aiProvider?: string; feature?: string } | null | undefined,
+  screen: string,
+): AiErrorState | null {
+  if (!data?.error || !data.aiKind) return null;
+  return {
+    message: data.error,
+    context: { feature: data.feature, kind: data.aiKind, provider: data.aiProvider, screen },
+  };
+}
+
 /** エラー種別ごとの「まず何をすればよいか」 */
 const NEXT_STEP: Record<string, string> = {
   no_key:

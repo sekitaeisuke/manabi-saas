@@ -1,6 +1,7 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { authFetch } from "@/lib/authFetch";
+import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
@@ -647,6 +648,7 @@ function ManualReportForm({
   const [generating, setGenerating] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
   const [error, setError] = useState("");
+  const [aiError, setAiError] = useState<AiErrorState | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [estimateNote, setEstimateNote] = useState("");
 
@@ -684,7 +686,11 @@ function ManualReportForm({
         body: JSON.stringify({ studentName: studentName.trim(), studentId: studentId || undefined, subject }),
       });
       const data = await res.json();
-      if (data.error) { setEstimateNote(data.error); return; }
+      if (data.error) {
+        const ai = aiErrorFrom(data, "報告書作成（17項目の推定）");
+        if (ai) setAiError(ai); else setEstimateNote(data.error);
+        return;
+      }
       if (Array.isArray(data.checkedItems)) {
         setCheckedItems(new Set(data.checkedItems));
         setEstimateNote(
@@ -728,7 +734,13 @@ function ManualReportForm({
         }),
       });
       const data = await res.json();
-      if (data.error) { setError(data.error); return; }
+      if (data.error) {
+        // AI起因なら「次に何をすればよいか」＋ヘルプデスク導線つきで出す
+        const ai = aiErrorFrom(data, "報告書作成");
+        if (ai) setAiError(ai); else setError(data.error);
+        return;
+      }
+      setAiError(null);
 
       // Step2: 認証済みセッションでクライアントから直接INSERT（RLS対応）
       const { error: dbErr } = await supabase.from("lesson_reports").insert({
@@ -802,6 +814,12 @@ function ManualReportForm({
             )}
           </div>
         </div>
+
+        {aiError && (
+          <div className="no-print">
+            <AiErrorNotice message={aiError.message} context={aiError.context} />
+          </div>
+        )}
 
         {error && (
           <div className="no-print rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>

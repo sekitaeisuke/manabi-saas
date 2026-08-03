@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText, AiUnavailableError } from "@/lib/ai";
+import { generateText, AiUnavailableError, aiErrorPayload } from "@/lib/ai";
 const CHECKED_GROUPS = [
   {
     label: "成果物",
@@ -110,8 +110,7 @@ ${teacherNotes ? `【講師メモ（補足）】\n${teacherNotes}` : ""}
   try {
     reportHtml = (await generateText({ prompt, maxTokens: 4096, feature: "report_manual" })).text;
   } catch (e) {
-    const msg = e instanceof AiUnavailableError ? e.message : "AI生成に失敗しました";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "report_manual"), { status: 502 });
   }
 
   if (reportHtml.startsWith("```html")) reportHtml = reportHtml.slice(7);

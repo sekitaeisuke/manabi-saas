@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import { showToast } from "@/lib/toast";
+import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 import { sanitizeHtml } from "@/lib/sanitize";
 import type { Student, StudentKarte } from "@/lib/supabase";
 import { Skeleton } from "@/components/Skeleton";
@@ -78,6 +79,7 @@ export default function StudentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<HubTab>("overview");
   const [karteBusy, setKarteBusy] = useState(false);
+  const [aiError, setAiError] = useState<AiErrorState | null>(null);
   // 「現在時刻」はマウント時に一度だけ確定させ、レンダーを純粋に保つ（授業の前後判定の基準）
   const [now, setNow] = useState(0);
 
@@ -186,7 +188,12 @@ export default function StudentDetailPage() {
         body: JSON.stringify({ studentId }),
       });
       const data = await res.json();
-      if (data.error) { showToast(data.error, "error"); return; }
+      if (data.error) {
+        const ai = aiErrorFrom(data, "生徒詳細（カルテ再生成）");
+        if (ai) setAiError(ai); else showToast(data.error, "error");
+        return;
+      }
+      setAiError(null);
       showToast("カルテを更新しました", "success");
       await load();
     } catch (e) {
@@ -374,6 +381,7 @@ export default function StudentDetailPage() {
         {/* ── カルテ（日次＋3か月ビジョン）── */}
         {tab === "karte" && (
           <div className="space-y-6">
+            {aiError && <AiErrorNotice message={aiError.message} context={aiError.context} />}
             <div className="rounded-3xl border border-violet-100 bg-white p-6 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>

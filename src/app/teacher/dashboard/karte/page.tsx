@@ -10,6 +10,7 @@ import type { Textbook, LearningPlan, TermType } from "@/lib/supabase";
 import { TERM_LABEL } from "@/lib/supabase";
 import { GRADE_ORDER, SUBJECT_LIST } from "@/lib/curriculum";
 import KarteMaterialsView from "./KarteMaterialsView";
+import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 
 type View = "list" | "create" | "detail" | "textbooks";
 type Tab = "karte" | "vision";
@@ -689,6 +690,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
   const [planHtml, setPlanHtml] = useState("");
   const [refinedJson, setRefinedJson] = useState<unknown>(null); // 3か月方針の構造化JSON（日割りTODOの元）
   const [genError, setGenError] = useState("");
+  const [aiError, setAiError] = useState<AiErrorState | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -796,7 +798,12 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
         body: JSON.stringify(basePayload),
       });
       const d1 = await r1.json();
-      if (d1.error) { setGenError("ChatGPT: " + d1.error); setGenStep(0); return; }
+      if (d1.error) {
+        const ai = aiErrorFrom(d1, "講習ビジョン作成");
+        if (ai) setAiError(ai); else setGenError("ChatGPT: " + d1.error);
+        setGenStep(0); return;
+      }
+      setAiError(null);
       setRefinedJson(d1.draft ?? null);
 
       // Step 2: Claude — 初稿をそのまま仕上げてHTML化（Geminiの中間精査は廃止）
@@ -806,7 +813,11 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
         body: JSON.stringify({ ...basePayload, refined: d1.draft }),
       });
       const d3 = await r3.json();
-      if (d3.error) { setGenError("Claude: " + d3.error); setGenStep(0); return; }
+      if (d3.error) {
+        const ai = aiErrorFrom(d3, "講習ビジョン作成");
+        if (ai) setAiError(ai); else setGenError("Claude: " + d3.error);
+        setGenStep(0); return;
+      }
       setPlanHtml(d3.planHtml);
       setGenStep(3);
     } catch (e) {
@@ -1026,6 +1037,7 @@ function CreateKarteFlow({ onSaved, onBack }: { onSaved: () => void; onBack: () 
               </div>
             )}
 
+            {aiError && <AiErrorNotice message={aiError.message} context={aiError.context} />}
             {genError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{genError}</p>}
             {saveError && <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{saveError}</p>}
 

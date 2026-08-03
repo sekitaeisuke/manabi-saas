@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText, AiUnavailableError } from "@/lib/ai";
+import { generateText, AiUnavailableError, aiErrorPayload } from "@/lib/ai";
 type TextbookInput = {
   id: string;
   name: string;
@@ -116,8 +116,7 @@ ${textbookInfo}
   try {
     planHtml = (await generateText({ prompt, maxTokens: 8192, feature: "vision_html" })).text;
   } catch (e) {
-    const msg = e instanceof AiUnavailableError ? e.message : "AI生成に失敗しました";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "vision_html"), { status: 502 });
   }
 
   if (planHtml.startsWith("```html")) planHtml = planHtml.slice(7);

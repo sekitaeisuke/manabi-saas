@@ -301,6 +301,22 @@ function describeFailure(
   };
 }
 
+/**
+ * AIの失敗を画面へ返すときの共通の形。
+ * 画面側は AiErrorNotice にそのまま渡せば、種別ごとの案内とヘルプデスク導線が出る。
+ */
+export function aiErrorPayload(e: unknown, feature: string): {
+  error: string; aiKind: string; aiProvider: string | null; feature: string;
+} {
+  if (e instanceof AiUnavailableError) {
+    return { error: e.message, aiKind: e.kind, aiProvider: e.provider, feature: e.feature || feature };
+  }
+  return {
+    error: "処理に失敗しました。解決しない場合は「ヘルプデスクに連絡」からお知らせください。",
+    aiKind: "other", aiProvider: null, feature,
+  };
+}
+
 /** ```json フェンスを外して JSON を取り出す。失敗したら null */
 export function extractJson<T = unknown>(text: string): T | null {
   const t = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();

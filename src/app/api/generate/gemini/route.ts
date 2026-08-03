@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
-import { generateText, resolveKey } from "@/lib/ai";
+import { generateText, resolveKey, aiErrorPayload } from "@/lib/ai";
 
 // テスト作成AIパイプラインの第2段階「推敲」。
 // ChatGPTが作った問題ドラフト(questions)を Gemini が校閲・改善し、改善後の questions を返す。
@@ -64,6 +64,6 @@ ${JSON.stringify(questions)}
     const improved = Array.isArray(parsed.questions) && parsed.questions.length > 0 ? parsed.questions : questions;
     return NextResponse.json({ questions: improved });
   } catch (e) {
-    return NextResponse.json({ error: "Gemini（推敲）エラー: " + String(e) }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "test_refine"), { status: 502 });
   }
 }

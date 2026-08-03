@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/apiAuth";
 
-import { generateText, AiUnavailableError } from "@/lib/ai";
+import { generateText, AiUnavailableError, aiErrorPayload } from "@/lib/ai";
 export const runtime = "edge";
 export const maxDuration = 30;
 
@@ -62,8 +62,7 @@ event_typeの選択基準:
       prompt: fullPrompt, maxTokens: 2000, tier: "fast", feature: "shift_events",
     })).text;
   } catch (e) {
-    const msg = e instanceof AiUnavailableError ? e.message : "行事の読み取りに失敗しました";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json(aiErrorPayload(e, "shift_events"), { status: 502 });
   }
 
   if (content.startsWith("```json")) content = content.slice(7);

@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import type { Student, TestSession } from "@/lib/supabase";
 import { GRADE_ORDER, getAdjacentGrades, getUnitsForGrade, SUBJECT_LIST } from "@/lib/curriculum";
 import { authFetch } from "@/lib/authFetch";
+import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 import { FEATURES } from "@/lib/features";
 
 // ─── メインページ ─────────────────────────────────────
@@ -792,6 +793,7 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
   const [selectedUnits, setSelectedUnits] = useState<{ grade: string; unit: string }[]>([]);
   const [step, setStep] = useState<GenStep>("idle");
   const [error, setError] = useState("");
+  const [aiError, setAiError] = useState<AiErrorState | null>(null);
   const [publishedUrl, setPublishedUrl] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -817,19 +819,19 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
       // Step1: ChatGPT
       const r1 = await authFetch("/api/generate/chatgpt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d1 = await r1.json();
-      if (d1.error) throw new Error(`[Step1] ${d1.error}`);
+      if (d1.error) { const ai = aiErrorFrom(d1, "多層診断（下書き）"); if (ai) { setAiError(ai); setStep("idle"); return; } throw new Error(`[Step1] ${d1.error}`); }
 
       // Step2: GPT-4o-mini
       setStep("step2");
       const r2 = await authFetch("/api/generate/gemini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d1.questions, subject, grade, difficulties, instructions: "" }) });
       const d2 = await r2.json();
-      if (d2.error) throw new Error(`[Step2] ${d2.error}`);
+      if (d2.error) { const ai = aiErrorFrom(d2, "多層診断（推敲）"); if (ai) { setAiError(ai); setStep("idle"); return; } throw new Error(`[Step2] ${d2.error}`); }
 
       // Step3: Claude
       setStep("step3");
       const r3 = await authFetch("/api/generate/claude", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ questions: d2.questions ?? d1.questions, subject, grade, difficulties, instructions: "" }) });
       const d3 = await r3.json();
-      if (d3.error) throw new Error(`[Step3] ${d3.error}`);
+      if (d3.error) { const ai = aiErrorFrom(d3, "多層診断（仕上げ）"); if (ai) { setAiError(ai); setStep("idle"); return; } throw new Error(`[Step3] ${d3.error}`); }
 
       const finalQuestions: { type: string; text: string; options: string[] | null; correct_answer: string; points: number }[] = d3.questions ?? d2.questions ?? d1.questions;
 
@@ -942,6 +944,8 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
           </div>
           <button onClick={onBack} className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">キャンセル</button>
         </div>
+
+        {aiError && <AiErrorNotice message={aiError.message} context={aiError.context} />}
 
         {error && (
           <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
