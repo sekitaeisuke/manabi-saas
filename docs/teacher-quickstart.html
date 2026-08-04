@@ -1,0 +1,124 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>つながるまなび 講師のはじめかた</title>
+<!--
+  講師向けA4案内（2ページ）。ブラウザで開いて Ctrl+P → PDF で配布する。
+  パスワードは書かない（このファイルはGitに載るため）。口頭・個別連絡で伝えること。
+-->
+<style>
+@page { size: A4; margin: 13mm; }
+body { font-family: "Yu Gothic", "Meiryo", sans-serif; color: #1f2937; margin: 0; line-height: 1.6; }
+.page { page-break-after: always; }
+.page:last-child { page-break-after: auto; }
+.brand { font-size: 9pt; color: #6d28d9; font-weight: 700; letter-spacing: .5px; }
+h1 { font-size: 19pt; margin: 1mm 0 1mm; }
+.lead { font-size: 10pt; color: #4b5563; margin: 0 0 6mm; }
+h2 { font-size: 12.5pt; margin: 6mm 0 2.5mm; padding-left: 3mm;
+     border-left: 4px solid #6d28d9; }
+p, li { font-size: 10pt; }
+ol, ul { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin-bottom: 1.2mm; }
+.box { border: 1.5px solid #6d28d9; border-radius: 7px; padding: 4mm 5mm; margin: 0 0 5mm; }
+.box table { border-collapse: collapse; width: 100%; font-size: 10pt; }
+.box th { text-align: left; width: 32mm; color: #6b7280; font-weight: 600; padding: 1.3mm 0; }
+.box td { padding: 1.3mm 0; font-family: Consolas, monospace; font-weight: 700; }
+.note { background: #fff7ed; border: 1px solid #fdba74; border-radius: 6px;
+        padding: 3mm 4mm; font-size: 9.2pt; margin: 0 0 5mm; }
+.why { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 6px;
+       padding: 3.5mm 4.5mm; font-size: 9.5pt; margin: 4mm 0 0; }
+.why b { color: #5b21b6; }
+.steps { counter-reset: s; list-style: none; padding-left: 0; }
+.steps > li { counter-increment: s; position: relative; padding-left: 9mm; margin-bottom: 2.8mm; }
+.steps > li::before { content: counter(s); position: absolute; left: 0; top: .3mm;
+  width: 6mm; height: 6mm; border-radius: 50%; background: #6d28d9; color: #fff;
+  font-size: 8.5pt; font-weight: 700; text-align: center; line-height: 6mm; }
+.field { display: inline-block; background: #eef2ff; border: 1px solid #c7d2fe;
+         border-radius: 4px; padding: 0 1.5mm; font-size: 9.3pt; font-weight: 600; }
+.foot { margin-top: 7mm; border-top: 1px solid #e5e7eb; padding-top: 2mm;
+        font-size: 8.5pt; color: #6b7280; }
+</style>
+
+<section class="page">
+  <div class="brand">つながるまなび</div>
+  <h1>講師のはじめかた</h1>
+  <p class="lead">まずは「授業のあとに、教材進捗を1件入れる」だけ。それ以外は後からで大丈夫です。</p>
+
+  <h2>1. ログインする</h2>
+  <div class="box">
+    <table>
+      <tr><th>ログイン先</th><td>https://manabi-saas.vercel.app/login</td></tr>
+      <tr><th>メールアドレス</th><td>教室で使っているご自身のメールアドレス</td></tr>
+      <tr><th>パスワード</th><td>別途お伝えします</td></tr>
+    </table>
+  </div>
+  <div class="note">
+    スマートフォンからも同じURLで入れます。ログインできないときは関田までご連絡ください。
+    パスワードはこちらで再設定できます。
+  </div>
+
+  <h2>2. 授業のあとに、教材進捗を1件入れる</h2>
+  <ol class="steps">
+    <li>左メニューの <span class="field">生徒</span> → <span class="field">教材進捗</span> を開く</li>
+    <li>生徒・日付・科目をえらぶ</li>
+    <li><span class="field">使用テキスト</span> を入れる（例：eng3合本）</li>
+    <li><span class="field">どこまで</span> を入れる（例：Lesson7 p.42）</li>
+    <li><span class="field">量</span> を入れる（例：4ページ／大問3つ）</li>
+    <li>手応えを <b>◎ 手応えあり ／ ○ ふつう ／ △ 不安</b> から選ぶ</li>
+    <li>ひとことメモ（例：符号ミスが続く。次回は復習から。）</li>
+    <li><span class="field">記録する</span> を押す</li>
+  </ol>
+  <p>同じ生徒に続けて入れるときは、生徒とテキストが残るのでそのまま次を入力できます。</p>
+
+  <div class="why">
+    <b>なぜこれを最優先にするか。</b>
+    「何のテキストを、どこまで、どんな手応えで進んだか」は、この場でしか残らない情報です。
+    ここさえ入っていれば、保護者への説明も、次の授業の組み立ても、あとから全部たどれます。
+    逆にここが空だと、他のどの機能も土台がないまま動くことになります。
+  </div>
+
+  <div class="foot">株式会社地域教育工房　つながるまなび　／　困ったときは関田まで</div>
+</section>
+
+<section class="page">
+  <div class="brand">つながるまなび</div>
+  <h1>入れた記録は、どこに出るか</h1>
+  <p class="lead">入力が誰の役に立つのかを知っておくと、続けやすくなります。</p>
+
+  <h2>保護者がその日のうちに見られる</h2>
+  <ul>
+    <li>保護者ページの <b>報告書</b> に、進捗がそのまま表示されます</li>
+    <li>「今日は何をやったんですか」という問い合わせが、聞かれる前に解決します</li>
+  </ul>
+
+  <h2>15時の教室TODOに反映される</h2>
+  <ul>
+    <li>毎日15時に各教室のChatworkへ出る「本日のTODO」に <b>📘 進捗</b> として入ります</li>
+    <li>つなぐの報告書と照らし合わせて、実際の到達度を出しています</li>
+    <li>入力が空の生徒は、この欄が出ません</li>
+  </ul>
+
+  <h2>カルテと3か月ビジョンの素材になる</h2>
+  <ul>
+    <li>生徒ごとの現在地が積み上がり、面談で使えるようになります</li>
+  </ul>
+
+  <h2>やらなくていいこと</h2>
+  <ul>
+    <li><b>つなぐの報告書はこれまで通り</b>。まなびに二重入力する必要はありません</li>
+    <li>カルテ・診断・シフトなどの他の機能は、案内があるまで触らなくて構いません</li>
+  </ul>
+
+  <div class="note">
+    <b>1日1件でも構いません。</b>まず「授業が終わったら開く」を習慣にしてください。
+    完璧な記録より、続いている記録のほうが役に立ちます。
+  </div>
+
+  <h2>困ったとき</h2>
+  <ul>
+    <li>ログインできない／パスワードを忘れた … 関田へ。すぐ再設定します</li>
+    <li>生徒が一覧に出てこない … 関田へ。登録を確認します</li>
+    <li>画面が真っ白・エラーが出た … 画面の写真を撮って関田へ</li>
+  </ul>
+
+  <div class="foot">株式会社地域教育工房　つながるまなび　／　困ったときは関田まで</div>
+</section>
