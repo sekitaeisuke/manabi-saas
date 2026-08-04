@@ -26,6 +26,12 @@ type LineEvent = {
   message?: { type: string; text?: string };
 };
 
+/** 返信の失敗を握りつぶさない。無反応の原因（トークン違い・期限切れ）はここにしか出ない */
+async function reply(replyToken: string, text: string) {
+  const res = await lineReply(replyToken, text);
+  if (!res.ok) console.error("[line/webhook] 返信に失敗:", res.error);
+}
+
 function svc(): SupabaseClient {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -107,7 +113,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (ev.type === "follow") {
-        if (ev.replyToken) await lineReply(ev.replyToken, GUIDE);
+        if (ev.replyToken) await reply(ev.replyToken, GUIDE);
         continue;
       }
 
@@ -117,12 +123,12 @@ export async function POST(req: NextRequest) {
 
         if (UNLINK_WORDS.includes(text)) {
           await unlinkByUserId(db, lineUserId);
-          await lineReply(ev.replyToken, "連携を解除しました。通知はメールでお届けします。");
+          await reply(ev.replyToken, "連携を解除しました。通知はメールでお届けします。");
           continue;
         }
 
         const result = text.length === 6 ? await handleCode(db, lineUserId, text) : null;
-        await lineReply(ev.replyToken, result ?? GUIDE);
+        await reply(ev.replyToken, result ?? GUIDE);
       }
     } catch (e) {
       // 1イベントの失敗で全体を落とさない（LINEは200以外だと再送してくる）
