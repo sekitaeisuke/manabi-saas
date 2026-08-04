@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# 生成物（生徒のログイン情報など機微を含むため決してコミットしない）
+/output/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
