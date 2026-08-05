@@ -1,5 +1,6 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { mathText } from "@/lib/mathText";
 import { authFetch } from "@/lib/authFetch";
 import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
 
@@ -979,7 +980,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
                 <DifficultyBadge d={q.difficulty} />
                 <span className="text-xs text-slate-400">{q.points}点</span>
               </div>
-              <p className="mb-3 text-slate-900">{q.text}</p>
+              <p className="mb-3 whitespace-pre-line text-slate-900">{mathText(q.text)}</p>
               {q.type === "multiple-choice" && q.options ? (
                 <div className="space-y-1">
                   {q.options.map((opt) => (
@@ -987,7 +988,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
                       <input type="radio" name={q.id} value={opt}
                         checked={answers[q.id] === opt}
                         onChange={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))} />
-                      {opt}
+                      {mathText(opt)}
                     </label>
                   ))}
                 </div>

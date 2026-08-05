@@ -5,6 +5,8 @@
 // 問題データ(JSON)は配列として揃っているので、用紙の組版はここで確実に行う。
 // AIには問題文の推敲（JSON→JSON）だけを任せ、載せ落としが構造的に起きないようにする。
 
+import { mathText } from "@/lib/mathText";
+
 export type TestQuestion = {
   id?: string;
   difficulty?: string;
@@ -46,13 +48,12 @@ function esc(s: unknown): string {
 }
 
 /**
- * 問題文はプレーンテキスト扱いでエスケープするが、
- * 累乗・添字・改行だけはタグとして通す（x<sup>2</sup> が「x2」になるのを防ぐ）。
+ * 問題文は mathText で「そのまま読める文字列」に直したうえで、全部エスケープして出す。
+ * 累乗は x² のようなUnicode文字になっているので、タグを通さなくても数式のまま表示される。
+ * （タグを通していた頃は <span style="…"> のような想定外の記法がそのまま画面に出ていた）
  */
-function escKeepMath(s: unknown): string {
-  return esc(s)
-    .replace(/&lt;(\/?)(sup|sub)&gt;/g, "<$1$2>")
-    .replace(/&lt;br\s*\/?&gt;/g, "<br>");
+function escText(s: unknown): string {
+  return esc(mathText(s)).replace(/\n/g, "<br>");
 }
 
 /** 各問の配点の合計が必ず100点になるよう比例配分する（端数は最大剰余法） */
@@ -117,11 +118,11 @@ export function renderTestHtml(opts: {
         .map(({ q, no }) => {
           const parts: string[] = [];
           parts.push(
-            `<p><strong>問${no}</strong>（${esc(g.label)}・${q.points ?? 0}点）${escKeepMath(q.text)}</p>`,
+            `<p><strong>問${no}</strong>（${esc(g.label)}・${q.points ?? 0}点）${escText(q.text)}</p>`,
           );
           if (q.type === "multiple-choice" && Array.isArray(q.options) && q.options.length > 0) {
             parts.push(
-              "<ol>" + q.options.map((o) => `<li>${escKeepMath(o)}</li>`).join("") + "</ol>",
+              "<ol>" + q.options.map((o) => `<li>${escText(o)}</li>`).join("") + "</ol>",
             );
           }
           const hint =

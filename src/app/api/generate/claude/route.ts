@@ -5,6 +5,7 @@ import { generateText, extractJson } from "@/lib/ai";
 import {
   renderTestHtml, sortByDifficulty, normalizePoints, renumber, type TestQuestion,
 } from "@/lib/testHtml";
+import { normalizeQuestionMath } from "@/lib/mathText";
 
 export const maxDuration = 60;
 
@@ -56,10 +57,10 @@ export async function POST(req: NextRequest) {
 ・**問題数は必ず入力と同じ${chunk.length}問。順序・id・difficulty は変えない**
 ・追加指示: ${instructions || "なし"}
 
-【数式の表記ルール（文字化け防止）】
-・LaTeX記法（$...$や\\frac等）は使わない
-・累乗は x<sup>2</sup>、平方根は √2、記号は ×÷±≤≥≠（Unicode文字）
-・分数は 3/4 のように書く
+【数式の書き方（そのまま文字として表示されます）】
+・**HTMLタグ（<sup> <sub> <span> 等）もLaTeX（$…$、\\frac、^{}、_{}）も使わない**
+・累乗は x²、a³ ／ 添字は a₁ のように上付き・下付きのUnicode文字で書く
+・分数は 3/4 ／ 平方根は √2 ／ 記号は ×÷±≤≥≠π°∠△（Unicode文字）
 
 【入力（問題JSON・${chunk.length}問）】
 ${JSON.stringify(chunk)}
@@ -83,8 +84,12 @@ ${JSON.stringify(chunk)}
     }
   }
 
-  // ── 並べ替え → 採番 → 配点を100点に正規化 → 用紙を組む ──
-  const ordered = renumber(normalizePoints(sortByDifficulty(checked)));
+  // ── 表記そろえ → 並べ替え → 採番 → 配点を100点に正規化 → 用紙を組む ──
+  // 問題文はここから先、解答画面・生徒の受験画面でもそのまま文字として出るので、
+  // タグやLaTeXが残らないよう最後に必ず通す
+  const ordered = renumber(
+    normalizePoints(sortByDifficulty(checked.map((q) => normalizeQuestionMath(q)))),
+  );
   const html = renderTestHtml({ title, grade, subject, questions: ordered });
 
   return NextResponse.json({

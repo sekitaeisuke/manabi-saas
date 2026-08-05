@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { mathText } from "@/lib/mathText";
 import { supabase } from "@/lib/supabase";
 import type { Result, Answer, Question } from "@/lib/supabase";
 import { Skeleton } from "@/components/Skeleton";
@@ -129,7 +130,7 @@ function AnswerSheet({ row, onBack }: { row: ResultRow; onBack: () => void }) {
                     </span>
                   </div>
 
-                  <p className="mb-3 text-sm font-medium leading-relaxed text-slate-900">{q.text}</p>
+                  <p className="mb-3 whitespace-pre-line text-sm font-medium leading-relaxed text-slate-900">{mathText(q.text)}</p>
 
                   <div className="grid gap-2 sm:grid-cols-2">
                     <div className={`rounded-xl border p-3 ${

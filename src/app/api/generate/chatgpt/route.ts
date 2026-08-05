@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
 import { generateText, extractJson, aiErrorPayload } from "@/lib/ai";
+import { mathText } from "@/lib/mathText";
 
 export const maxDuration = 60;
 
@@ -144,11 +145,13 @@ ${already ? `\n【すでに作成済みの問題（重複禁止）】\n${already
 - 正解が特定の位置（特に1番目）に偏らないよう意図的に分散させること
 - correct_answer には必ず options の中の実際のテキストをそのままセットすること
 
-【数式の表記ルール（文字化け防止）】
-- LaTeX記法（$...$や\\frac等）は絶対に使用しない
-- 累乗: x<sup>2</sup>、a<sup>3</sup>　／　分数: 3/4 のように書く
-- 平方根: √2、√3（Unicode文字）／ 記号: ×、÷、±、≤、≥、≠（Unicode文字）
-- 方程式: 2x + 3 = 7 のように半角英数字と記号で表現
+【数式の書き方（そのまま画面に文字として表示されます）】
+- **HTMLタグ（<sup> <sub> <span> <br> など）は絶対に使わない**
+- **LaTeX記法（$...$、\\frac、\\sqrt、^{}、_{} 等）も絶対に使わない**
+- 累乗は上付き文字をそのまま書く: x²、a³、2⁴（x^2 や x<sup>2</sup> は不可）
+- 添字も下付き文字をそのまま書く: a₁、x₂
+- 分数: 3/4 ／ 平方根: √2、√3 ／ 記号: ×、÷、±、≤、≥、≠、π、°、∠、△
+- 方程式: 2x + 3 = 7 のように半角英数字と記号で表現する
 
 以下のJSON形式のみで返してください（説明文・HTMLは不要）:
 {
@@ -195,16 +198,19 @@ JSONのみを返してください。`;
     let added = 0;
     for (const q of got) {
       if (!q || typeof q.text !== "string" || !q.text.trim()) continue;
-      const k = keyOf(q.text);
+      // 指示してもタグやLaTeXが混ざることがあるので、ここで読める表記にそろえる
+      const text = mathText(q.text);
+      if (!text) continue;
+      const k = keyOf(text);
       if (seen.has(k)) continue;
       seen.add(k);
       collected.push({
         difficulty: useDiffs.includes(q.difficulty ?? "") ? q.difficulty : plan[0].d,
         section: q.section ?? "",
-        text: q.text,
+        text,
         type: q.type === "multiple-choice" || q.type === "descriptive" ? q.type : "short-answer",
-        options: Array.isArray(q.options) && q.options.length > 0 ? q.options : null,
-        correct_answer: q.correct_answer ?? "",
+        options: Array.isArray(q.options) && q.options.length > 0 ? q.options.map((o) => mathText(o)) : null,
+        correct_answer: mathText(q.correct_answer ?? ""),
         points: Number(q.points) > 0 ? Number(q.points) : 5,
       });
       added++;

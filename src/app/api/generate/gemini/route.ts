@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 import { generateText, resolveKey, extractJson } from "@/lib/ai";
+import { normalizeQuestionMath } from "@/lib/mathText";
 
 export const maxDuration = 60;
 
@@ -65,6 +66,8 @@ export async function POST(req: NextRequest) {
 ・選択肢の重複や不適切な選択肢を修正し、正答が1つに確定するようにする
 ・**問題数は必ず入力と同じ${chunk.length}問。増やすことも減らすこともしない**
 ・**JSONの構造・フィールド名・型・並び順は入力と同一に保つ**（新しいキーを足さない・id を変えない）
+・数式はそのまま文字として表示されます。**HTMLタグ（<sup>等）もLaTeX（$…$、\\frac、^{}）も使わない**。
+　累乗は x²、添字は a₁、分数は 3/4、平方根は √2 のように上付き・下付きのUnicode文字で書く
 ・追加指示: ${instructions || "（なし）"}
 
 【入力（問題JSON・${chunk.length}問）】
@@ -82,7 +85,7 @@ ${JSON.stringify(chunk)}
       const improved = parsed?.questions;
       // 数が合わない＝どこかが欠けている。そのときは元をそのまま使う
       if (Array.isArray(improved) && improved.length === chunk.length) {
-        result.push(...improved.map((q, i) => ({ ...chunk[i], ...q })));
+        result.push(...improved.map((q, i) => normalizeQuestionMath({ ...chunk[i], ...q })));
         refined += chunk.length;
       } else {
         result.push(...chunk);

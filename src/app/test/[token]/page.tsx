@@ -1,5 +1,6 @@
 "use client";
 import { showToast } from "@/lib/toast";
+import { mathText } from "@/lib/mathText";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
@@ -240,7 +241,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
                   <p className="text-xs font-semibold text-slate-400">第{i + 1}問</p>
                   <span className="text-xs text-slate-400">{q.points}点</span>
                 </div>
-                <p className="text-slate-900 font-medium mb-4 leading-relaxed">{q.text}</p>
+                <p className="text-slate-900 font-medium mb-4 leading-relaxed whitespace-pre-line">{mathText(q.text)}</p>
                 {(q.type === "multiple-choice" || q.type === "multi-select") && q.options && (
                   /* ── 単一選択（ラジオボタン）。1問1答に統一 ── */
                   <div className="space-y-2">
@@ -248,7 +249,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
                       <label key={j} className={`flex items-center gap-3 cursor-pointer p-3 rounded-2xl border transition ${answers[q.id] === opt ? "border-blue-400 bg-blue-50" : "border-slate-100 hover:bg-slate-50"}`}>
                         <input type="radio" name={q.id} value={opt} checked={answers[q.id] === opt}
                           onChange={() => setAnswers({ ...answers, [q.id]: opt })} className="text-blue-600" />
-                        <span className="text-slate-700">{opt}</span>
+                        <span className="text-slate-700">{mathText(opt)}</span>
                       </label>
                     ))}
                   </div>
