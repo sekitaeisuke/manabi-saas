@@ -16,7 +16,7 @@ export function sanitizeHtml(html: string): string {
     USE_PROFILES: { html: true },
     ALLOWED_TAGS: [
       "h1","h2","h3","h4","h5","h6","p","br","hr","ul","ol","li",
-      "strong","em","b","i","u","s","span","div","table","thead","tbody",
+      "strong","em","b","i","u","s","sup","sub","span","div","table","thead","tbody",
       "tr","th","td","a","img","blockquote","pre","code",
     ],
     ALLOWED_ATTR: ["href","src","alt","class","id","style","target","rel"],

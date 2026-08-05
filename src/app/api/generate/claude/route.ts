@@ -1,86 +1,97 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
-import { generateText, aiErrorPayload } from "@/lib/ai";
-async function callClaude(prompt: string, maxTokens = 4096): Promise<string> {
-  const { text } = await generateText({ prompt, maxTokens, feature: "test_finalize" });
-  return text;
-}
+import { generateText, extractJson } from "@/lib/ai";
+import {
+  renderTestHtml, sortByDifficulty, normalizePoints, renumber, type TestQuestion,
+} from "@/lib/testHtml";
+
+export const maxDuration = 60;
+
+// テスト作成AIパイプラインの第3段階「最終チェック＋用紙化」。
+//
+// 以前はHTML用紙そのものをAIに書かせていたため、問題数が増えると出力上限で途中で切れ、
+// 作った問題が用紙に載らなかった。いまは役割を分ける:
+//   ・AI  … 問題文の誤字・表現・答えの整合をJSONのまま直す（10問ずつ）
+//   ・コード… 用紙の組版（renderTestHtml）。全問が必ず載る・配点合計は必ず100点
+// 推敲AIが落ちても用紙は必ずできる（warning を添えて返す）。
+
+const CHUNK = 10;
+const DEADLINE_MS = 40_000;
 
 export async function POST(req: NextRequest) {
   const auth = await requireTeacher(req);
   if (auth instanceof NextResponse) return auth;
   const { questions, subject, grade, title, testType, instructions } = await req.json();
 
+  if (!Array.isArray(questions) || questions.length === 0) {
+    return NextResponse.json({ error: "仕上げ対象の問題がありません（先に作成を実行してください）" }, { status: 400 });
+  }
+
   const typeLabel = testType === "diagnostic"
     ? "学力学習習慣診断分析多層型テスト"
     : "授業確認テスト（報告書用）";
 
-  // ── Step A+B 統合: 問題チェック＋HTML生成を1回で実施（レート制限対策）──
-  // 配点を自動調整してHTMLを生成する
-  const totalPoints = (questions as { points?: number }[]).reduce((s, q) => s + (q.points ?? 0), 0);
-  let normalizedQuestions = questions;
-  if (totalPoints > 0) {
-    // 各問を比例配分しつつ、合計が必ず100点になるよう最大剰余法で端数を配分する
-    const raw = (questions as { points?: number }[]).map((q) => ((q.points ?? 1) / totalPoints) * 100);
-    const floored = raw.map((v) => Math.floor(v));
-    let remainder = 100 - floored.reduce((s, v) => s + v, 0);
-    const order = raw
-      .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-      .sort((a, b) => b.frac - a.frac);
-    const bonus: number[] = new Array(raw.length).fill(0);
-    for (const { i } of order) {
-      if (remainder <= 0) break;
-      bonus[i] = 1;
-      remainder--;
+  // ── 最終チェック（問題文の推敲）。10問ずつに分け、失敗した束は元のまま通す ──
+  const src = questions as TestQuestion[];
+  const chunks: TestQuestion[][] = [];
+  for (let i = 0; i < src.length; i += CHUNK) chunks.push(src.slice(i, i + CHUNK));
+
+  const startedAt = Date.now();
+  const checked: TestQuestion[] = [];
+  let skipped = 0;
+
+  for (const chunk of chunks) {
+    if (Date.now() - startedAt > DEADLINE_MS) {
+      checked.push(...chunk);
+      skipped += chunk.length;
+      continue;
     }
-    normalizedQuestions = (questions as { points?: number }[]).map((q, i) => ({
-      ...q,
-      points: floored[i] + bonus[i],
-    }));
-  }
+    const prompt = `あなたは日本の教育専門家です。「${title}」（${grade}・${subject}・${typeLabel}）の問題を最終チェックしてください。
 
-  const finalQuestions = normalizedQuestions;
-
-  // ── HTML生成 ──
-  const htmlPrompt = `あなたは日本の教育専門家です。
-以下の問題データをもとに「${title}」（${grade}・${subject}・${typeLabel}）のHTMLテストを作成してください。
-問題文の表現・誤字脱字を直しながら、そのままHTMLに組み込んでください。
-
-【追加指示】
-${instructions || "なし"}
-
-【問題データ】
-${JSON.stringify(finalQuestions, null, 2)}
-
-【HTML作成ルール】
-- <div id="test-body">〜</div> の形式で返す（html/bodyタグは不要）
-- テスト先頭に：テスト名・学年・科目・日付欄・氏名欄・合計点欄を入れる
-- 難易度ごとに見出し（h2）でセクションを区切る（基礎・標準・応用）
-- 各問題に問題番号・難易度・配点を明記する
-- 解答欄は <div class="answer-box"></div> で示す
-- 図・表が必要な場合はHTMLタグ（table/figure等）を使う
-- 選択肢式は番号付きリストで表示する
+【チェック内容】
+・誤字脱字・不自然な日本語を直す
+・設問と correct_answer が食い違っていないか確認し、食い違っていれば正しい方に直す
+・選択肢式は正答が1つに確定するようにする
+・**問題数は必ず入力と同じ${chunk.length}問。順序・id・difficulty は変えない**
+・追加指示: ${instructions || "なし"}
 
 【数式の表記ルール（文字化け防止）】
-- LaTeX記法（$...$や\frac等）は絶対に使用しない
-- 累乗: x<sup>2</sup>、a<sup>3</sup>
-- 分数: <sup>1</sup>/<sub>2</sub>（HTMLタグで表現）
-- 平方根: √2、√3（Unicode文字）
-- 数学記号: ×、÷、±、≤、≥、≠（Unicode文字）
-- 方程式: 2x + 3 = 7 のように半角英数字と記号で記述
-- 計算問題の解答欄には必ず「半角数字で答えなさい」と明記する
+・LaTeX記法（$...$や\\frac等）は使わない
+・累乗は x<sup>2</sup>、平方根は √2、記号は ×÷±≤≥≠（Unicode文字）
+・分数は 3/4 のように書く
 
-HTMLのみを返してください（JSONや説明文は不要）。`;
+【入力（問題JSON・${chunk.length}問）】
+${JSON.stringify(chunk)}
 
-  let finalHtml: string;
-  try {
-    const htmlText = await callClaude(htmlPrompt, 8192);
-    const match = htmlText.match(/<div[\s\S]*<\/div>/);
-    finalHtml = match ? match[0] : htmlText;
-  } catch (e) {
-    return NextResponse.json(aiErrorPayload(e, "test_finalize"), { status: 502 });
+【出力】次の形のJSONのみ（説明文・コードフェンス不要）:
+{"questions": [ ...最終版の${chunk.length}問（入力と同じ構造・同じ順序） ]}`;
+
+    try {
+      const { text } = await generateText({ prompt, maxTokens: 8192, feature: "test_finalize" });
+      const parsed = extractJson<{ questions?: TestQuestion[] }>(text);
+      const fixed = parsed?.questions;
+      if (Array.isArray(fixed) && fixed.length === chunk.length) {
+        checked.push(...fixed.map((q, i) => ({ ...chunk[i], ...q })));
+      } else {
+        checked.push(...chunk);
+        skipped += chunk.length;
+      }
+    } catch {
+      checked.push(...chunk);
+      skipped += chunk.length;
+    }
   }
 
-  return NextResponse.json({ html: finalHtml, questions: finalQuestions });
+  // ── 並べ替え → 採番 → 配点を100点に正規化 → 用紙を組む ──
+  const ordered = renumber(normalizePoints(sortByDifficulty(checked)));
+  const html = renderTestHtml({ title, grade, subject, questions: ordered });
+
+  return NextResponse.json({
+    html,
+    questions: ordered,
+    ...(skipped > 0
+      ? { warning: `${skipped}問はAIの最終チェックを省略しました（応答が得られなかったため）。内容をご確認ください。` }
+      : {}),
+  });
 }

@@ -18,6 +18,8 @@ import {
 type Difficulty = "basic" | "standard" | "advanced";
 type TestType = "diagnostic" | "lesson";
 type AiStep = "idle" | "chatgpt" | "gemini" | "claude";
+/** 生成の3段。失敗した段からやり直せるようにするための識別子 */
+type PipeStage = "draft" | "refine" | "finalize";
 
 type GeneratedQuestion = {
   id: string;
@@ -593,6 +595,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [generating, setGenerating] = useState(false);
   const [generatedHtml, setGeneratedHtml] = useState("");
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([]);
+  // 途中で失敗したときに「どの段からやり直せばよいか」を覚えておく
+  const [failedStage, setFailedStage] = useState<PipeStage | null>(null);
+  const [progressText, setProgressText] = useState("");
+  const [warnMsg, setWarnMsg] = useState("");
 
   // 解答・分析
   const [phase, setPhase] = useState<"form" | "preview" | "answers" | "report">("form");
@@ -628,89 +634,168 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     return cur >= order.indexOf(step);
   };
 
-  const generate = async (step: "chatgpt" | "gemini" | "claude") => {
-    if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
-    if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
-    setGenerating(true);
-    setErrorMsg("");
+  // AIの各段を叩く。混雑（busy）や一時的な通信断は1回だけ自動で入れ直す
+  type GenResponse = Record<string, unknown> & { error?: string; aiKind?: string };
+  const callGen = async (
+    step: "chatgpt" | "gemini" | "claude",
+    body: Record<string, unknown>,
+    retried = false,
+  ): Promise<{ ok: boolean; data: GenResponse | null; status: number }> => {
     try {
-      let body: Record<string, unknown>;
-      if (step === "chatgpt") {
-        body = { testType, title, subject, grade, selectedUnits, difficulties, count, instructions };
-      } else {
-        body = { testType, title, subject, grade, instructions, questions };
-      }
       const res = await authFetch(`/api/generate/${step}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      let data: Record<string, unknown>;
-      try {
-        data = await res.json();
-      } catch {
-        setErrorMsg(`[${step}] サーバーエラー (HTTP ${res.status})`);
-        return;
-      }
-      if (data.error) {
-        // AI起因なら「次に何をすればよいか」＋ヘルプデスク導線つきで出す
-        const ai = aiErrorFrom(data as { error?: string; aiKind?: string; aiProvider?: string; feature?: string }, "テスト作成");
-        if (ai) {
-          setAiError(ai);
-        } else {
-          const detail = data.raw ? `\n詳細: ${data.raw}` : "";
-          setErrorMsg(`[${step}] ${data.error}${detail}`);
+      const data = (await res.json().catch(() => null)) as GenResponse | null;
+      if (data?.error) {
+        if (!retried && data.aiKind === "busy") {
+          await new Promise((r) => setTimeout(r, 4000));
+          return callGen(step, body, true);
         }
-        return;
+        return { ok: false, data, status: res.status };
       }
-      setAiError(null);
-      if (data.html) setGeneratedHtml(data.html as string);
-      if (data.questions) setQuestions(data.questions as GeneratedQuestion[]);
-      setAiStep(step);
+      if (!data) return { ok: false, data: null, status: res.status };
+      return { ok: true, data, status: res.status };
     } catch (e) {
-      setErrorMsg(`[${step}] ネットワークエラー: ${String(e)}`);
+      if (!retried) {
+        await new Promise((r) => setTimeout(r, 3000));
+        return callGen(step, body, true);
+      }
+      return { ok: false, data: { error: `通信に失敗しました（${String(e)}）` }, status: 0 };
     }
-    setGenerating(false);
   };
 
-  // ①ChatGPTで作成 →②Geminiで推敲 →③Claudeで最終チェック を1ボタンで一気通貫（手数削減）
-  const generateAll = async () => {
+  const showFailure = (stage: PipeStage, step: string, data: GenResponse | null, label: string) => {
+    setFailedStage(stage);
+    const ai = aiErrorFrom(data as { error?: string; aiKind?: string; aiProvider?: string; feature?: string } | null, label);
+    if (ai) setAiError(ai);
+    else setErrorMsg(`[${step}] ${data?.error ?? "サーバーエラー"}`);
+  };
+
+  // ①作成（下書き）。指定した問題数に届くまで10問ずつ足していく。
+  // 1回の応答で作れる量には限りがあるため、届かなければ「すでに作った分」を渡して続きを頼む。
+  const runDraft = async (carryOver: GeneratedQuestion[]): Promise<GeneratedQuestion[] | null> => {
+    let q = carryOver;
+    setProgressText(q.length > 0 ? `作成中… ${q.length}/${count}問` : "作成中…");
+    for (let round = 0; round < 8; round++) {
+      const before = q.length;
+      const res = await callGen("chatgpt", {
+        testType, title, subject, grade, selectedUnits, difficulties, count, instructions,
+        existingQuestions: q.map((x) => ({ text: x.text, difficulty: x.difficulty })),
+      });
+      if (!res.ok) {
+        // 途中まで作れていれば、その分は残したうえで失敗を知らせる（再チャレンジで続きから）
+        if (q.length > 0) setQuestions(q);
+        showFailure("draft", "chatgpt", res.data, "テスト作成（下書き）");
+        return null;
+      }
+      const got = (res.data?.questions as GeneratedQuestion[]) ?? [];
+      if (got.length === 0) break;
+      q = got;
+      setQuestions(q);
+      setProgressText(`作成中… ${q.length}/${count}問`);
+      if (res.data?.complete || q.length >= count) break;
+      if (q.length <= before) break; // 増えなくなったら打ち切る（同じ問題ばかりになるのを防ぐ）
+    }
+    if (q.length === 0) {
+      showFailure("draft", "chatgpt", { error: "問題を作成できませんでした" }, "テスト作成（下書き）");
+      return null;
+    }
+    if (q.length < count) {
+      setWarnMsg(`ご指定の${count}問に対して${q.length}問まで作成しました。足りない場合は「もう一度試す」で続きを作れます。`);
+    }
+    return q;
+  };
+
+  // ②推敲
+  const runRefine = async (q: GeneratedQuestion[]): Promise<GeneratedQuestion[] | null> => {
+    setProgressText(`推敲中… 全${q.length}問`);
+    const res = await callGen("gemini", { testType, title, subject, grade, instructions, questions: q });
+    if (!res.ok) { showFailure("refine", "gemini", res.data, "テスト作成（推敲）"); return null; }
+    if (res.data?.warning) setWarnMsg(String(res.data.warning));
+    const improved = res.data?.questions as GeneratedQuestion[] | undefined;
+    return Array.isArray(improved) && improved.length > 0 ? improved : q;
+  };
+
+  // ③最終チェック＋用紙化
+  const runFinalize = async (q: GeneratedQuestion[]): Promise<boolean> => {
+    setProgressText(`最終チェック中… 全${q.length}問`);
+    const res = await callGen("claude", { testType, title, subject, grade, instructions, questions: q });
+    if (!res.ok) { showFailure("finalize", "claude", res.data, "テスト作成（仕上げ）"); return false; }
+    if (res.data?.warning) setWarnMsg(String(res.data.warning));
+    if (res.data?.html) setGeneratedHtml(res.data.html as string);
+    if (res.data?.questions) setQuestions(res.data.questions as GeneratedQuestion[]);
+    return true;
+  };
+
+  // ①作成 →②推敲 →③最終チェック を1ボタンで一気通貫（手数削減）。
+  // 失敗した段からやり直せるよう startAt を受ける（できているところは作り直さない）。
+  const runPipeline = async (startAt: PipeStage = "draft", carryOver: GeneratedQuestion[] = []) => {
     if (!title) { showToast("テスト名を入力してください", "info"); return; }
     if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
     if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
-    setGenerating(true); setErrorMsg(""); setAiStep("idle");
-    const hdr = { "Content-Type": "application/json" };
+    setGenerating(true);
+    setErrorMsg(""); setAiError(null); setWarnMsg(""); setFailedStage(null);
     try {
-      // step1: ChatGPT（作成）
-      const r1 = await authFetch("/api/generate/chatgpt", { method: "POST", headers: hdr,
-        body: JSON.stringify({ testType, title, subject, grade, selectedUnits, difficulties, count, instructions }) });
-      const d1 = await r1.json().catch(() => null);
-      if (!d1 || d1.error) { const ai = aiErrorFrom(d1, "テスト作成（下書き）"); if (ai) setAiError(ai); else setErrorMsg(`[chatgpt] ${d1?.error ?? "サーバーエラー"}`); setGenerating(false); return; }
-      let q = (d1.questions as GeneratedQuestion[]) ?? [];
-      if (d1.html) setGeneratedHtml(d1.html as string);
-      if (q.length) setQuestions(q);
-      setAiStep("chatgpt");
-      // step2: Gemini（推敲）— chatgptの結果 q を改善
-      const r2 = await authFetch("/api/generate/gemini", { method: "POST", headers: hdr,
-        body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q }) });
-      const d2 = await r2.json().catch(() => null);
-      if (!d2 || d2.error) { const ai = aiErrorFrom(d2, "テスト作成（推敲）"); if (ai) setAiError(ai); else setErrorMsg(`[gemini] ${d2?.error ?? "サーバーエラー"}`); setGenerating(false); return; }
-      if (Array.isArray(d2.questions) && d2.questions.length) q = d2.questions as GeneratedQuestion[];
-      setQuestions(q);
-      setAiStep("gemini");
-      // step3: Claude（最終チェック＋HTML化）— 推敲後の q を使う
-      const r3 = await authFetch("/api/generate/claude", { method: "POST", headers: hdr,
-        body: JSON.stringify({ testType, title, subject, grade, instructions, questions: q }) });
-      const d3 = await r3.json().catch(() => null);
-      if (!d3 || d3.error) { const ai = aiErrorFrom(d3, "テスト作成（仕上げ）"); if (ai) setAiError(ai); else setErrorMsg(`[claude] ${d3?.error ?? "サーバーエラー"}`); setGenerating(false); return; }
-      if (d3.html) setGeneratedHtml(d3.html as string);
-      if (d3.questions) setQuestions(d3.questions as GeneratedQuestion[]);
+      let q = questions;
+      if (startAt === "draft") {
+        setAiStep("idle");
+        const drafted = await runDraft(carryOver);
+        if (!drafted) return;
+        q = drafted;
+        setAiStep("chatgpt");
+      }
+      if (startAt === "draft" || startAt === "refine") {
+        const refined = await runRefine(q);
+        if (!refined) return;
+        q = refined;
+        setQuestions(q);
+        setAiStep("gemini");
+      }
+      if (!(await runFinalize(q))) return;
       setAiStep("claude");
       setPhase("preview");
     } catch (e) {
+      setFailedStage(startAt);
       setErrorMsg(`AI生成エラー: ${String(e)}`);
+    } finally {
+      setGenerating(false);
+      setProgressText("");
     }
-    setGenerating(false);
+  };
+
+  const generateAll = () => runPipeline("draft", []);
+
+  /** 失敗した段からやり直す。下書きの途中で落ちた場合は、できている問題の続きから作る */
+  const retryFromFailure = () => {
+    const stage = failedStage ?? "draft";
+    runPipeline(stage, stage === "draft" ? questions : []);
+  };
+
+  // 上級者向け：1段ずつ実行
+  const generate = async (step: "chatgpt" | "gemini" | "claude") => {
+    if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
+    if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
+    setGenerating(true);
+    setErrorMsg(""); setAiError(null); setWarnMsg(""); setFailedStage(null);
+    try {
+      if (step === "chatgpt") {
+        // 目標に届いていなければ続きから、届いていれば作り直し
+        const drafted = await runDraft(questions.length > 0 && questions.length < count ? questions : []);
+        if (drafted) setAiStep("chatgpt");
+      } else if (step === "gemini") {
+        const refined = await runRefine(questions);
+        if (refined) { setQuestions(refined); setAiStep("gemini"); }
+      } else {
+        if (await runFinalize(questions)) setAiStep("claude");
+      }
+    } catch (e) {
+      setErrorMsg(`[${step}] エラー: ${String(e)}`);
+    } finally {
+      setGenerating(false);
+      setProgressText("");
+    }
   };
 
   const startAnswers = () => {
@@ -852,6 +937,8 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             #test-body h1 { font-size: 1.4rem; font-weight: bold; text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 16px; }
             #test-body h2 { font-size: 1.1rem; font-weight: bold; background: #f1f5f9; padding: 6px 12px; margin: 24px 0 12px; border-left: 4px solid #6366f1; }
             #test-body .question { margin: 16px 0; }
+            #test-body ol { padding-left: 1.8rem; margin: 6px 0; }
+            #test-body .answer-hint { font-size: 0.8rem; color: #64748b; margin: 2px 0; }
             #test-body .answer-box { border-bottom: 1px solid #94a3b8; min-height: 40px; margin: 8px 0 16px; }
             #test-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
             #test-body td, #test-body th { border: 1px solid #cbd5e1; padding: 6px 10px; }
@@ -1040,9 +1127,14 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               </select>
             </label>
             <label className="grid gap-2 text-sm text-slate-700">
-              問題数（合計目安）
-              <input type="number" value={count} onChange={(e) => setCount(Number(e.target.value))} min={1} max={30}
+              問題数（合計）
+              <input type="number" value={count}
+                onChange={(e) => setCount(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
+                min={1} max={60}
                 className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:ring-2 focus:ring-green-400" />
+              <span className="text-xs text-slate-400">
+                1〜60問。20問以上でも作れます（10問ずつに分けて生成するため、少し時間がかかります）
+              </span>
             </label>
           </div>
         </section>
@@ -1147,8 +1239,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
             className="w-full rounded-2xl bg-indigo-600 px-6 py-4 text-lg font-bold text-white transition hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
             {generating
-              ? (aiStep === "idle" ? "① 作成中…（ChatGPT）" : aiStep === "chatgpt" ? "② 推敲中…（Gemini）" : "③ 最終チェック中…（Claude）")
-              : "🤖 AIでテストを作成"}
+              ? (aiStep === "idle"
+                  ? `① ${progressText || "作成中…"}（ChatGPT）`
+                  : aiStep === "chatgpt" ? "② 推敲中…（Gemini）" : "③ 最終チェック中…（Claude）")
+              : failedStage ? "🔄 もう一度AIでテストを作成" : "🤖 AIでテストを作成"}
           </button>
           <details className="mt-3">
             <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">1ステップずつ実行する（上級者向け）</summary>
@@ -1172,18 +1266,61 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
           </details>
           {generating && (
             <div className="mt-4 text-center text-sm text-slate-500 animate-pulse">
-              AIが処理中です。しばらくお待ちください...
+              {progressText || "AIが処理中です。しばらくお待ちください..."}
+              <br />
+              <span className="text-xs text-slate-400">問題数が多いときは数分かかることがあります。</span>
             </div>
           )}
           {aiError && (
             <div className="mt-4">
-              <AiErrorNotice message={aiError.message} context={aiError.context} />
+              <AiErrorNotice
+                message={aiError.message}
+                context={aiError.context}
+                onRetry={generating ? undefined : retryFromFailure}
+              />
             </div>
           )}
 
           {errorMsg && (
             <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 whitespace-pre-wrap">
               <span className="font-semibold">エラー：</span>{errorMsg}
+            </div>
+          )}
+
+          {/* 失敗したときの再チャレンジ。できているところは作り直さず、止まった段から続ける */}
+          {!generating && failedStage && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm text-amber-800">
+                {failedStage === "draft"
+                  ? questions.length > 0
+                    ? `途中まで（${questions.length}問）作成できています。続きから作り直せます。`
+                    : "問題の作成に失敗しました。もう一度お試しください。"
+                  : failedStage === "refine"
+                    ? `問題は${questions.length}問できています。推敲の段でつまずきました。`
+                    : `問題は${questions.length}問できています。仕上げの段でつまずきました。`}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={retryFromFailure}
+                  className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">
+                  🔄 {failedStage === "draft" && questions.length > 0 ? "続きから再チャレンジ" : "再チャレンジ"}
+                </button>
+                {questions.length > 0 && (
+                  <button onClick={() => runPipeline("finalize")}
+                    className="rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm text-amber-800 hover:bg-amber-100">
+                    今できている{questions.length}問で仕上げる
+                  </button>
+                )}
+                <button onClick={() => runPipeline("draft", [])}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">
+                  最初から作り直す
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!generating && warnMsg && (
+            <div className="mt-4 rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+              {warnMsg}
             </div>
           )}
           {generatedHtml && (
