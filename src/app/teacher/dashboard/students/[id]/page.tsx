@@ -80,6 +80,9 @@ export default function StudentDetailPage() {
   const [tab, setTab] = useState<HubTab>("overview");
   const [karteBusy, setKarteBusy] = useState(false);
   const [aiError, setAiError] = useState<AiErrorState | null>(null);
+  // パスワードは保存していないため確認できない。ここでは再設定だけできる。
+  const [pwModal, setPwModal] = useState<{ password: string; done: boolean } | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
   // 「現在時刻」はマウント時に一度だけ確定させ、レンダーを純粋に保つ（授業の前後判定の基準）
   const [now, setNow] = useState(0);
 
@@ -203,6 +206,25 @@ export default function StudentDetailPage() {
     }
   };
 
+  const resetPassword = async () => {
+    if (!studentId || !pwModal || pwModal.password.length < 6) return;
+    setPwBusy(true);
+    try {
+      const res = await authFetch("/api/student/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ student_id: studentId, password: pwModal.password }),
+      });
+      const data = await res.json();
+      if (data.error) { showToast(data.error, "error"); return; }
+      setPwModal({ ...pwModal, done: true });
+    } catch (e) {
+      showToast("再設定に失敗しました: " + String(e), "error");
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="px-6 py-10">
@@ -258,7 +280,15 @@ export default function StudentDetailPage() {
           <div>
             <p className="text-xs text-slate-400">{schoolName}</p>
             <h1 className="text-3xl font-bold text-slate-950">{student.name}</h1>
-            <p className="mt-1 text-sm text-slate-600">{student.grade} ・ ログインID：{student.login_id ?? "—"}</p>
+            <p className="mt-1 text-sm text-slate-600">
+              {student.grade} ・ ログインID：<span className="font-mono font-semibold">{student.login_id ?? "—"}</span>
+              {student.login_id && (
+                <button onClick={() => setPwModal({ password: "", done: false })}
+                  className="ml-2 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">
+                  🔑 パスワード再設定
+                </button>
+              )}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href={FEATURES.separateSchedulePages ? "/teacher/dashboard/lessons" : "/teacher/dashboard/calendar"}
@@ -553,6 +583,58 @@ export default function StudentDetailPage() {
               </ul>
             )}
           </Card>
+        )}
+
+        {/* ── パスワード再設定 ── */}
+        {pwModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
+              {pwModal.done ? (
+                <>
+                  <h3 className="mb-1 text-center text-lg font-bold text-slate-900">パスワード再設定完了</h3>
+                  <p className="mb-6 text-center text-sm text-slate-500">{student.name}さんのログイン情報</p>
+                  <div className="space-y-2 rounded-2xl bg-slate-50 p-4">
+                    <div>
+                      <p className="text-xs text-slate-500">ログインID</p>
+                      <p className="font-mono text-lg font-bold text-slate-900">{student.login_id}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">パスワード</p>
+                      <p className="font-mono text-lg font-bold text-slate-900">{pwModal.password}</p>
+                    </div>
+                  </div>
+                  <p className="mt-4 text-center text-xs text-amber-700">
+                    パスワードはこの画面でしか表示されません。本人へお伝えください。
+                  </p>
+                  <button onClick={() => setPwModal(null)}
+                    className="mt-6 w-full rounded-2xl bg-slate-950 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+                    閉じる
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h3 className="mb-1 text-lg font-bold text-slate-900">パスワード再設定</h3>
+                  <p className="mb-6 text-sm text-slate-500">
+                    {student.name}さんの新しいパスワードを設定します（現在のパスワードは確認できません）
+                  </p>
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">新しいパスワード（6文字以上）</label>
+                  <input type="text" value={pwModal.password} autoFocus
+                    onChange={(e) => setPwModal({ ...pwModal, password: e.target.value })}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400" />
+                  <div className="mt-6 flex gap-2">
+                    <button onClick={() => setPwModal(null)}
+                      className="flex-1 rounded-2xl border border-slate-300 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      キャンセル
+                    </button>
+                    <button onClick={resetPassword} disabled={pwModal.password.length < 6 || pwBusy}
+                      className="flex-1 rounded-2xl bg-slate-950 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
+                      {pwBusy ? "設定中..." : "再設定する"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -81,7 +81,9 @@ async function autoGenerateLessons(
 }
 
 export default function SchoolsPage() {
-  const [tab, setTab] = useState<Tab>("schools");
+  // ナビの入口が「生徒一覧・登録」なので、既定は生徒タブで着地する
+  // （校舎・講師は上のタブから開く）。
+  const [tab, setTab] = useState<Tab>("students");
   const [schools, setSchools] = useState<School[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -687,6 +689,11 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
         </button>
       </div>
 
+      <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs leading-6 text-amber-900">
+        パスワードは暗号化して保存しているため、後から確認することはできません。
+        生徒が分からなくなったら、その子のカードの「🔑 パスワードを再設定」から新しいパスワードを決めて伝えてください。
+      </p>
+
       {showCsvModal && (
         <StudentCsvModal schools={schools} onClose={() => setShowCsvModal(false)} onRefresh={onRefresh} />
       )}
@@ -815,23 +822,30 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
                       ))}
                     </div>
                   )}
-                  {s.login_id ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <div className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1">
-                        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                        <span className="text-xs font-medium text-green-700">ID: {s.login_id}</span>
-                      </div>
-                      <button onClick={() => openResetModal(s)}
-                        className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-100">
-                        パスワード再設定
-                      </button>
-                    </div>
-                  ) : (
-                    <button onClick={() => openAccountModal(s)}
-                      className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-100">
-                      アカウント発行
-                    </button>
-                  )}
+                  {/* ログイン情報：パスワードは保存していないので「再設定」しかできない */}
+                  <div className="mt-2.5 rounded-2xl border border-slate-200 bg-slate-50 p-2.5">
+                    <p className="mb-1.5 text-[11px] font-bold tracking-wide text-slate-500">ログイン情報</p>
+                    {s.login_id ? (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" />
+                          <span className="truncate font-mono text-xs font-semibold text-slate-700">{s.login_id}</span>
+                        </div>
+                        <button onClick={() => openResetModal(s)}
+                          className="mt-2 w-full rounded-xl border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100">
+                          🔑 パスワードを再設定
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-slate-500">未発行（まだログインできません）</p>
+                        <button onClick={() => openAccountModal(s)}
+                          className="mt-2 w-full rounded-xl border border-indigo-300 bg-indigo-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+                          アカウント発行
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <p className="mt-2 text-xs text-slate-400">登録：{s.created_at.slice(0, 10)}</p>
                 </div>
                 <div className="flex flex-col gap-1.5">
