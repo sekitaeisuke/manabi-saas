@@ -58,6 +58,7 @@ const DASHBOARD: NavLeaf = { href: "/teacher/dashboard", label: "ダッシュボ
 const GROUPS: NavGroup[] = [
   { key: "students", label: "生徒", iconKey: "users", items: [
     { href: "/teacher/dashboard/schools",       label: "生徒一覧・登録", iconKey: "users" },
+    { href: "/teacher/dashboard/schools?tab=teachers", label: "講師・PW管理", iconKey: "users", adminOnly: true },
     { href: "/teacher/dashboard/karte",         label: "カルテ",         iconKey: "card" },
     { href: "/teacher/dashboard/progress",      label: "教材進捗",       iconKey: "book" },
     { href: "/teacher/dashboard/reports",       label: "報告書",         iconKey: "doc" },
@@ -86,7 +87,7 @@ const GROUPS: NavGroup[] = [
   { key: "comms", label: "連絡", iconKey: "mail", items: [
     { href: "/teacher/dashboard/messages",      label: "メッセージ", iconKey: "mail", badge: "unread" },
     { href: "/teacher/dashboard/notifications", label: "通知ログ",   iconKey: "bell", badge: "unread" },
-    { href: "/teacher/dashboard/settings",      label: "通知設定",   iconKey: "gear" },
+    { href: "/teacher/dashboard/settings",      label: "設定・パスワード", iconKey: "gear" },
     { href: "/teacher/dashboard/modules",       label: "モジュール設定", iconKey: "gear", adminOnly: true },
   ]},
 ];

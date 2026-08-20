@@ -2,7 +2,8 @@
 import { showToast } from "@/lib/toast";
 
 import Link from "next/link";
-import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import type { School, Teacher, Student } from "@/lib/supabase";
@@ -80,10 +81,23 @@ async function autoGenerateLessons(
   }
 }
 
-export default function SchoolsPage() {
+const TABS: Tab[] = ["schools", "teachers", "students", "highschools", "mailing"];
+
+// useSearchParams は Suspense 境界の内側でしか使えない（静的プリレンダのため）
+export default function SchoolsPageWrapper() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-100 px-6 py-10 text-slate-500">読み込み中...</div>}>
+      <SchoolsPage />
+    </Suspense>
+  );
+}
+
+function SchoolsPage() {
   // ナビの入口が「生徒一覧・登録」なので、既定は生徒タブで着地する
-  // （校舎・講師は上のタブから開く）。
-  const [tab, setTab] = useState<Tab>("students");
+  // （校舎・講師は上のタブから開く）。?tab=teachers のように指定すれば直接開ける。
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(requestedTab && TABS.includes(requestedTab) ? requestedTab : "students");
   const [schools, setSchools] = useState<School[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);

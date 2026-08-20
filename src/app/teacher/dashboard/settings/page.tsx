@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { subscribeWebPush, unsubscribeWebPush, checkWebPushSupport, getCurrentSubscriptionEndpoint } from "@/lib/webPush";
@@ -37,6 +38,13 @@ export default function TeacherSettingsPage() {
   const [pushSupport, setPushSupport] = useState<{ ok: boolean; reason?: string }>({ ok: true });
   const [pushBusy, setPushBusy] = useState(false);
   const [pushError, setPushError] = useState("");
+  // パスワード変更（本人が自分で変更する）
+  const [curPw, setCurPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState("");
+  const [pwDone, setPwDone] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,6 +116,32 @@ export default function TeacherSettingsPage() {
     setPushBusy(false);
   };
 
+  const changePassword = async () => {
+    setPwError("");
+    setPwDone(false);
+    if (newPw.length < 6) { setPwError("新しいパスワードは6文字以上にしてください"); return; }
+    if (newPw !== newPw2) { setPwError("新しいパスワード（確認）が一致しません"); return; }
+    if (!defaultEmail) { setPwError("ログイン情報を取得できませんでした。再ログインしてください"); return; }
+    setPwBusy(true);
+    // 席を離れた隙に変更されないよう、現在のパスワードで本人確認してから変更する
+    const { error: verifyErr } = await supabase.auth.signInWithPassword({ email: defaultEmail, password: curPw });
+    if (verifyErr) {
+      setPwBusy(false);
+      setPwError("現在のパスワードが違います");
+      return;
+    }
+    const { error: updErr } = await supabase.auth.updateUser({ password: newPw });
+    setPwBusy(false);
+    if (updErr) {
+      setPwError(updErr.message.includes("should be different")
+        ? "現在と同じパスワードは設定できません"
+        : updErr.message);
+      return;
+    }
+    setCurPw(""); setNewPw(""); setNewPw2("");
+    setPwDone(true);
+  };
+
   const save = async () => {
     if (!teacherId) return;
     setSaving(true);
@@ -135,8 +169,10 @@ export default function TeacherSettingsPage() {
     <div className="px-6 py-10 text-slate-900">
       <div className="mx-auto max-w-2xl">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-slate-950">通知設定</h1>
-          <p className="mt-1 text-slate-600">保護者・生徒からのメッセージや振替申請の通知の受け取り方を設定します。</p>
+          <h1 className="text-3xl font-bold text-slate-950">設定</h1>
+          <p className="mt-1 text-slate-600">通知の受け取り方と、ログイン用パスワードの変更ができます。</p>
+          <h2 className="mt-6 text-xl font-bold text-slate-950">通知設定</h2>
+          <p className="mt-1 text-sm text-slate-600">保護者・生徒からのメッセージや振替申請の通知の受け取り方を設定します。</p>
         </div>
 
         {loading ? (
@@ -214,6 +250,58 @@ export default function TeacherSettingsPage() {
               </button>
               {saved && <span className="text-sm font-medium text-green-600">保存しました</span>}
             </div>
+
+            {/* ── パスワードの変更（本人） ───────────────────── */}
+            <div className="pt-6">
+              <h2 className="mb-1 text-xl font-bold text-slate-950">パスワードの変更</h2>
+              <p className="mb-3 text-sm text-slate-600">ログイン用のパスワードをご自身で変更できます。</p>
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <p className="mb-4 text-xs text-slate-500">ログインID（メールアドレス）：{defaultEmail || "—"}</p>
+                <div className="space-y-3">
+                  <label className="block text-sm text-slate-700">現在のパスワード
+                    <input type="password" value={curPw} onChange={(e) => setCurPw(e.target.value)}
+                      autoComplete="current-password"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </label>
+                  <label className="block text-sm text-slate-700">新しいパスワード（6文字以上）
+                    <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)}
+                      autoComplete="new-password"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </label>
+                  <label className="block text-sm text-slate-700">新しいパスワード（確認）
+                    <input type="password" value={newPw2} onChange={(e) => setNewPw2(e.target.value)}
+                      autoComplete="new-password"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400" />
+                  </label>
+                </div>
+                {pwError && (
+                  <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{pwError}</p>
+                )}
+                {pwDone && (
+                  <p className="mt-3 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
+                    パスワードを変更しました。次回のログインから新しいパスワードを使ってください。
+                  </p>
+                )}
+                <button onClick={changePassword} disabled={pwBusy || !curPw || !newPw || !newPw2}
+                  className="mt-4 rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
+                  {pwBusy ? "変更中..." : "パスワードを変更する"}
+                </button>
+              </div>
+            </div>
+
+            {/* 管理者は他の講師のパスワードも再設定できる（入口をここにも置く） */}
+            {isAdmin && (
+              <div className="rounded-3xl border border-indigo-200 bg-indigo-50 p-6">
+                <p className="text-sm font-semibold text-indigo-900">講師のパスワードを再設定する（管理者）</p>
+                <p className="mt-1 text-xs text-indigo-800">
+                  講師タブの各カードから「アカウント発行」「パスワード再設定」ができます。
+                </p>
+                <Link href="/teacher/dashboard/schools?tab=teachers"
+                  className="mt-3 inline-block rounded-2xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
+                  講師管理を開く
+                </Link>
+              </div>
+            )}
           </div>
         )}
       </div>
