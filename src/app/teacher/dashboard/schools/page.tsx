@@ -175,7 +175,7 @@ export default function SchoolsPage() {
               <SchoolsTab schools={visibleSchools} isAdmin={isAdmin} onRefresh={fetchAll} />
             )}
             {tab === "teachers" && (
-              <TeachersTab teachers={visibleTeachers} schools={visibleSchools} schoolName={schoolName} onRefresh={fetchAll} />
+              <TeachersTab teachers={visibleTeachers} schools={visibleSchools} schoolName={schoolName} isAdmin={isAdmin} onRefresh={fetchAll} />
             )}
             {tab === "students" && (
               <StudentsTab students={visibleStudents} schools={visibleSchools} teachers={visibleTeachers} schoolName={schoolName} onRefresh={fetchAll} />
@@ -328,28 +328,71 @@ function SchoolsTab({ schools, isAdmin, onRefresh }: {
 }
 
 // ─── 講師タブ ────────────────────────────────────────
-function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
-  teachers: Teacher[]; schools: School[]; schoolName: (id: string | null) => string; onRefresh: () => void;
+type TeacherPwModal =
+  | { teacherId: string; teacherName: string; email: string; password: string; mode: "issue" | "reset" }
+  | null;
+
+function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
+  teachers: Teacher[]; schools: School[]; schoolName: (id: string | null) => string;
+  isAdmin: boolean; onRefresh: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
-  const [form, setForm] = useState<{ name: string; email: string; role: Teacher["role"]; school_id: string }>({
-    name: "", email: "", role: "teacher", school_id: "",
+  const [form, setForm] = useState<{ name: string; email: string; password: string; role: Teacher["role"]; school_id: string }>({
+    name: "", email: "", password: "", role: "teacher", school_id: "",
   });
   const [saving, setSaving] = useState(false);
+  // ログインできる講師（＝Supabase Auth ユーザがあるメール）の一覧
+  const [accountEmails, setAccountEmails] = useState<Set<string>>(new Set());
+  const [pwModal, setPwModal] = useState<TeacherPwModal>(null);
+  const [issuing, setIssuing] = useState(false);
+  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
+
+  const fetchAccounts = useCallback(async () => {
+    if (!isAdmin) return;
+    const res = await authFetch("/api/teacher/accounts");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.emails)) {
+      setAccountEmails(new Set(data.emails.map((e: string) => e.toLowerCase())));
+    }
+  }, [isAdmin]);
+
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts, teachers]);
+
+  const hasAccount = (t: Teacher) => Boolean(t.email && accountEmails.has(t.email.toLowerCase()));
 
   const save = async () => {
     if (!form.name) return;
+    if (form.password && !form.email) {
+      showToast("パスワードを設定するにはメールアドレスが必要です", "error"); return;
+    }
+    if (form.password && form.password.length < 6) {
+      showToast("パスワードは6文字以上にしてください", "error"); return;
+    }
     setSaving(true);
-    await supabase.from("teachers").insert({
-      name: form.name,
-      email: form.email || null,
-      role: form.role,
-      school_id: form.school_id || null,
+    const res = await authFetch("/api/teacher/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: form.name, email: form.email, password: form.password,
+        role: form.role, school_id: form.school_id,
+      }),
     });
-    setForm({ name: "", email: "", role: "teacher", school_id: "" });
-    setShowForm(false);
+    const data = await res.json();
     setSaving(false);
+    if (data.error) { showToast("エラー: " + data.error, "error"); return; }
+
+    if (form.password) {
+      // 登録と同時にアカウントを発行したので、そのままログイン情報を表示する
+      setPwModal({ teacherId: data.teacher_id, teacherName: form.name, email: form.email, password: "", mode: "issue" });
+      setIssued({ email: form.email, password: form.password });
+    } else {
+      showToast(`${form.name}さんを登録しました（ログインは未発行）`, "success");
+    }
+    setForm({ name: "", email: "", password: "", role: "teacher", school_id: "" });
+    setShowForm(false);
+    await fetchAccounts();
     onRefresh();
   };
 
@@ -359,29 +402,53 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
     onRefresh();
   };
 
+  const openPwModal = (t: Teacher, mode: "issue" | "reset") => {
+    setIssued(null);
+    setPwModal({ teacherId: t.id, teacherName: t.name, email: t.email ?? "", password: "", mode });
+  };
+
+  const submitPassword = async () => {
+    if (!pwModal || pwModal.password.length < 6) return;
+    setIssuing(true);
+    const res = await authFetch("/api/teacher/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teacher_id: pwModal.teacherId, password: pwModal.password }),
+    });
+    const data = await res.json();
+    setIssuing(false);
+    if (data.error) { showToast("エラー: " + data.error, "error"); return; }
+    setIssued({ email: data.email ?? pwModal.email, password: pwModal.password });
+    await fetchAccounts();
+    onRefresh();
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-end gap-2">
-        <button onClick={() => setShowCsvModal(true)}
-          className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-          CSVインポート
-        </button>
-        <button onClick={() => setShowForm(!showForm)}
-          className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
-          {showForm ? "キャンセル" : "+ 講師を追加"}
-        </button>
-      </div>
-
-      {showCsvModal && (
-        <TeacherCsvModal schools={schools} onClose={() => setShowCsvModal(false)} onRefresh={onRefresh} />
+      {isAdmin && (
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setShowCsvModal(true)}
+            className="rounded-2xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            CSVインポート
+          </button>
+          <button onClick={() => setShowForm(!showForm)}
+            className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+            {showForm ? "キャンセル" : "+ 講師を追加"}
+          </button>
+        </div>
       )}
 
-      {showForm && (
+      {showCsvModal && (
+        <TeacherCsvModal schools={schools} onClose={() => setShowCsvModal(false)}
+          onRefresh={() => { fetchAccounts(); onRefresh(); }} />
+      )}
+
+      {isAdmin && showForm && (
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="mb-4 font-semibold text-slate-900">新規講師登録</h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="氏名 *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="例：田中花子" />
-            <Field label="メールアドレス" value={form.email} onChange={(v) => setForm({ ...form, email: v })} placeholder="例：tanaka@school.jp" type="email" />
+            <Field label="メールアドレス（ログインID）" value={form.email} onChange={(v) => setForm({ ...form, email: v })} placeholder="例：tanaka@school.jp" type="email" />
             <div className="grid gap-1 text-sm text-slate-700">
               役職
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Teacher["role"] })}
@@ -399,6 +466,24 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
                 {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
+            <div className="sm:col-span-2">
+              <label className="grid gap-1 text-sm text-slate-700">
+                初期パスワード（6文字以上・空欄なら後から発行）
+                <div className="flex gap-2">
+                  <input type="text" value={form.password}
+                    onChange={(e) => setForm({ ...form, password: e.target.value })}
+                    placeholder="例：koubou2025"
+                    className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono outline-none focus:ring-2 focus:ring-slate-400" />
+                  <button type="button" onClick={() => setForm({ ...form, password: genPassword() })}
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    自動生成
+                  </button>
+                </div>
+              </label>
+              <p className="mt-1 text-xs text-slate-400">
+                メールアドレスとこのパスワードで講師ログイン（/login）ができるようになります。
+              </p>
+            </div>
           </div>
           <button onClick={save} disabled={!form.name || saving}
             className="mt-4 rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
@@ -415,23 +500,122 @@ function TeachersTab({ teachers, schools, schoolName, onRefresh }: {
             <div key={t.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <p className="font-bold text-slate-900">{t.name}</p>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${ROLE_COLOR[t.role]}`}>
                       {ROLE_LABEL[t.role]}
                     </span>
+                    {isAdmin && (
+                      hasAccount(t)
+                        ? <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">ログイン可</span>
+                        : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">ログイン未発行</span>
+                    )}
                   </div>
                   {t.email && <p className="mt-1 text-sm text-slate-500">{t.email}</p>}
                   <p className="mt-1 text-sm text-slate-500">所属：{schoolName(t.school_id)}</p>
                   <p className="mt-2 text-xs text-slate-400">登録：{t.created_at.slice(0, 10)}</p>
+                  {isAdmin && (
+                    t.email ? (
+                      <button onClick={() => openPwModal(t, hasAccount(t) ? "reset" : "issue")}
+                        className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+                        {hasAccount(t) ? "パスワード再設定" : "アカウント発行"}
+                      </button>
+                    ) : (
+                      <p className="mt-3 text-xs text-amber-600">メール未登録のためログインを発行できません</p>
+                    )
+                  )}
                 </div>
-                <button onClick={() => del(t.id)}
-                  className="rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
-                  削除
-                </button>
+                {isAdmin && (
+                  <button onClick={() => del(t.id)}
+                    className="rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs text-red-600 hover:bg-red-50">
+                    削除
+                  </button>
+                )}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 講師アカウント発行／パスワード再設定モーダル */}
+      {pwModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-8 shadow-xl">
+            {issued ? (
+              <>
+                <div className="mb-4 text-center text-4xl">✅</div>
+                <h3 className="mb-1 text-center text-lg font-bold text-slate-900">
+                  {pwModal.mode === "reset" ? "パスワード再設定完了" : "アカウント発行完了"}
+                </h3>
+                <p className="mb-6 text-center text-sm text-slate-500">{pwModal.teacherName}先生のログイン情報</p>
+                <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
+                  <div>
+                    <p className="text-xs text-slate-500">ログインURL</p>
+                    <p className="font-mono text-sm font-semibold text-indigo-700">
+                      {typeof window !== "undefined" ? window.location.origin : ""}/login
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">ログインID（メールアドレス）</p>
+                    <p className="font-mono text-sm font-bold break-all text-slate-900">{issued.email}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">パスワード</p>
+                    <p className="font-mono text-lg font-bold text-slate-900">{issued.password}</p>
+                  </div>
+                </div>
+                <p className="mt-4 text-center text-xs text-slate-400">この情報を講師本人に伝えてください</p>
+                <button onClick={() => { setPwModal(null); setIssued(null); }}
+                  className="mt-4 w-full rounded-2xl bg-slate-950 py-3 font-semibold text-white hover:bg-slate-800">
+                  閉じる
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="mb-1 text-lg font-bold text-slate-900">
+                  {pwModal.mode === "reset" ? "パスワード再設定" : "アカウント発行"}
+                </h3>
+                <p className="mb-6 text-sm text-slate-500">
+                  {pwModal.mode === "reset"
+                    ? `${pwModal.teacherName}先生の新しいパスワードを設定します（現在のパスワードは確認できません）`
+                    : `${pwModal.teacherName}先生がログインできるようにします`}
+                </p>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">ログインID（メールアドレス）</label>
+                    <input value={pwModal.email} readOnly
+                      className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 font-mono text-sm text-slate-500 outline-none" />
+                    <p className="mt-1 text-xs text-slate-400">変更するには講師の登録メールを編集してください</p>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                      {pwModal.mode === "reset" ? "新しいパスワード（6文字以上）" : "初期パスワード（6文字以上）"}
+                    </label>
+                    <div className="flex gap-2">
+                      <input type="text" value={pwModal.password}
+                        onChange={(e) => setPwModal({ ...pwModal, password: e.target.value })}
+                        className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-slate-900 outline-none focus:ring-2 focus:ring-indigo-400"
+                        placeholder="例：koubou2025" />
+                      <button type="button" onClick={() => setPwModal({ ...pwModal, password: genPassword() })}
+                        className="rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                        自動生成
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-6 flex gap-2">
+                  <button onClick={submitPassword} disabled={pwModal.password.length < 6 || issuing}
+                    className="flex-1 rounded-2xl bg-indigo-600 py-3 font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">
+                    {issuing ? (pwModal.mode === "reset" ? "設定中..." : "発行中...") : (pwModal.mode === "reset" ? "再設定する" : "発行する")}
+                  </button>
+                  <button onClick={() => { setPwModal(null); setIssued(null); }}
+                    className="flex-1 rounded-2xl border border-slate-300 bg-white py-3 text-slate-700 hover:bg-slate-50">
+                    キャンセル
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -1092,6 +1276,9 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
   const [rows, setRows] = useState<TeacherRow[]>([]);
   const [importing, setImporting] = useState(false);
   const [done, setDone] = useState(false);
+  // 空欄なら teachers 行だけ作る（ログインは後から個別に発行できる）
+  const [password, setPassword] = useState("");
+  const [failed, setFailed] = useState<{ name: string; error: string }[]>([]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1118,10 +1305,28 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
   const importAll = async () => {
     const valid = rows.filter((r) => !r.error);
     if (!valid.length) return;
+    if (password && password.length < 6) {
+      showToast("パスワードは6文字以上にしてください", "error"); return;
+    }
     setImporting(true);
-    await supabase.from("teachers").insert(
-      valid.map((r) => ({ name: r.name, email: r.email || null, role: r.role, school_id: r.school_id || null }))
-    );
+    // 1件ずつ API へ（teachers 行と Auth ユーザをまとめて作る）
+    const errs: { name: string; error: string }[] = [];
+    for (const r of valid) {
+      const res = await authFetch("/api/teacher/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: r.name,
+          email: r.email,
+          password: r.email ? password : "",
+          role: r.role,
+          school_id: r.school_id,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) errs.push({ name: r.name, error: data.error });
+    }
+    setFailed(errs);
     setImporting(false);
     setDone(true);
     onRefresh();
@@ -1140,7 +1345,23 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
         {done ? (
           <div className="text-center py-8">
             <p className="text-4xl mb-4">✅</p>
-            <p className="text-lg font-bold text-slate-900 mb-2">{rows.filter((r) => !r.error).length}件 登録しました</p>
+            <p className="text-lg font-bold text-slate-900 mb-2">
+              {rows.filter((r) => !r.error).length - failed.length}件 登録しました
+              {password && "（ログイン発行済み）"}
+            </p>
+            {failed.length > 0 && (
+              <div className="mx-auto mt-4 max-w-md rounded-2xl bg-red-50 p-4 text-left text-sm text-red-700">
+                <p className="mb-2 font-semibold">{failed.length}件は登録できませんでした</p>
+                <ul className="space-y-1 text-xs">
+                  {failed.map((f, i) => <li key={i}>・{f.name}：{f.error}</li>)}
+                </ul>
+              </div>
+            )}
+            {password && (
+              <p className="mt-4 text-xs text-slate-500">
+                初期パスワードは全員共通で「{password}」です。各講師に伝えてください。
+              </p>
+            )}
             <button onClick={onClose} className="mt-4 rounded-2xl bg-slate-950 px-8 py-3 text-white font-semibold hover:bg-slate-800">閉じる</button>
           </div>
         ) : (
@@ -1155,6 +1376,20 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
 
             <input type="file" accept=".csv,text/csv" onChange={handleFile}
               className="mb-4 w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" />
+
+            <div className="mb-4">
+              <label className="mb-1.5 block text-sm font-medium text-slate-700">共通の初期パスワード（任意・6文字以上）</label>
+              <div className="flex gap-2">
+                <input type="text" value={password} onChange={(e) => setPassword(e.target.value)}
+                  placeholder="空欄ならログインは発行しない"
+                  className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-slate-400" />
+                <button type="button" onClick={() => setPassword(genPassword())}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  自動生成
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-slate-400">メールがある講師だけ、このパスワードでログインを発行します</p>
+            </div>
 
             {rows.length > 0 && (
               <div className="mb-4 max-h-64 overflow-y-auto rounded-2xl border border-slate-200">
