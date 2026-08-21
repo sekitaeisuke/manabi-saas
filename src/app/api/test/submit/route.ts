@@ -259,15 +259,20 @@ ${analysisSection}
   }
 
   // ── Step3: session_id から student_id を取得 ──────────
-  const { data: assignment } = await supabase
+  // 1つのセッション（＝1つの受験URL）を複数の生徒に割り当てるのが普通なので
+  // maybeSingle は使わない（複数行だとエラーになり student_id が付かなくなる）。
+  const { data: assignments } = await supabase
     .from("test_assignments")
     .select("student_id")
-    .eq("test_session_id", session_id)
-    .maybeSingle();
-  // 割り当てが無い受験（氏名手入力の共有URL）は、入力名から students を照合して紐付ける。
-  // これにより lesson_reports / questionnaire_responses に student_id が入り、
-  // 講師の生徒別ページ・保護者の多層診断に結果が表示される。
-  const student_id = assignment?.student_id ?? await resolveStudentId(student_name, grade);
+    .eq("test_session_id", session_id);
+  const assignedIds = (assignments ?? []).map((a) => a.student_id as string);
+  // 割り当てが1人ならその生徒。複数人・割り当て無し（氏名手入力の共有URL）は
+  // 入力名から students を照合して紐付ける。これにより lesson_reports /
+  // questionnaire_responses に student_id が入り、講師の生徒別ページ・
+  // 保護者の多層診断に結果が表示される。
+  const student_id = assignedIds.length === 1
+    ? assignedIds[0]
+    : await resolveStudentId(student_name, grade);
 
   // ── Step4: 採点結果を確定してDB保存 ──────────────────
   // 重複送信チェック（同一session_id + student_name で既に回答済みの場合は既存結果を返す）

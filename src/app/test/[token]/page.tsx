@@ -60,13 +60,17 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
   const [qcAnswers, setQcAnswers] = useState<QAnswers>({});
   const [phase, setPhase] = useState<Phase>("name");
   const [loading, setLoading] = useState(true);
+  // URLは正しいが期限切れ、という状態を「見つかりません」と区別して伝える
+  const [expiredAt, setExpiredAt] = useState<string | null>(null);
 
   const loadTest = async (tok: string) => {
     const { data: sessionData } = await supabase
       .from("test_sessions").select("*").eq("url_token", tok).single();
     if (!sessionData) { setLoading(false); return; }
-    // 有効期限切れのURLは受験不可（session 未設定のまま終了 → 「見つかりません」表示）
+    // 有効期限切れのURLは受験不可。「見つかりません」ではなく期限切れとして伝える
+    // （先生が再発行すれば同じURLのまま受験できる）
     if (sessionData.expires_at && new Date(sessionData.expires_at).getTime() < Date.now()) {
+      setExpiredAt(sessionData.expires_at);
       setLoading(false); return;
     }
     setSession(sessionData);
@@ -133,6 +137,22 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
 
   // ── ローディング・エラー ──
   if (loading) return <Center><p className="text-slate-500">読み込み中...</p></Center>;
+  if (expiredAt) {
+    const d = new Date(expiredAt);
+    return (
+      <Center>
+        <p className="text-4xl mb-4">⏰</p>
+        <p className="font-semibold text-amber-700">このテストの受験URLは有効期限が切れています</p>
+        <p className="mt-2 text-sm text-slate-500">
+          （{d.getFullYear()}/{d.getMonth() + 1}/{d.getDate()} まで有効でした）
+        </p>
+        <p className="mt-4 text-sm text-slate-600">
+          先生に「テストのURLを再発行してください」と伝えてください。<br />
+          再発行されると、この同じリンクからそのまま受験できます。
+        </p>
+      </Center>
+    );
+  }
   if (!test) return (
     <Center>
       <p className="text-4xl mb-4">😕</p>

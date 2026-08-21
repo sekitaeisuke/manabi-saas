@@ -53,6 +53,7 @@ type AssignedTest = {
   test_grade: string;
   completed: boolean;
   percentage: number | null;
+  expired: boolean; // 受験URLの有効期限切れ（押しても受験できない）
 };
 
 type StudentMessage = {
@@ -136,7 +137,7 @@ export default function StudentDashboardPage() {
         const [{ data: sessions }, { data: results }] = await Promise.all([
           supabase
             .from("test_sessions")
-            .select("id, url_token, tests(title, subject, grade)")
+            .select("id, url_token, expires_at, tests(title, subject, grade)")
             .in("id", sessionIds),
           supabase
             .from("results")
@@ -159,6 +160,8 @@ export default function StudentDashboardPage() {
             test_grade: testInfo?.grade ?? "",
             completed: !!result,
             percentage: result?.percentage ?? null,
+            // 期限切れのURLは開いても受験できないので、リンクではなく案内を出す
+            expired: !!s.expires_at && new Date(s.expires_at).getTime() < Date.now(),
           };
         });
         setTests(assembled);
@@ -561,12 +564,21 @@ export default function StudentDashboardPage() {
                                 {t.test_subject} ・ {t.test_grade}
                               </p>
                             </div>
-                            <a
-                              href={`/test/${t.url_token}?studentName=${encodeURIComponent(student?.name ?? "")}`}
-                              className="shrink-0 rounded-2xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-                            >
-                              受験する →
-                            </a>
+                            {t.expired ? (
+                              <span className="shrink-0 rounded-2xl bg-amber-50 px-4 py-2.5 text-center text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
+                                受験期限が切れています
+                                <span className="mt-0.5 block text-[11px] font-normal text-amber-600">
+                                  先生にURLの再発行をお願いしてください
+                                </span>
+                              </span>
+                            ) : (
+                              <a
+                                href={`/test/${t.url_token}?studentName=${encodeURIComponent(student?.name ?? "")}`}
+                                className="shrink-0 rounded-2xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                              >
+                                受験する →
+                              </a>
+                            )}
                           </div>
                         </div>
                       ))}

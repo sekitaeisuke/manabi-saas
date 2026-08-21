@@ -167,6 +167,23 @@ function groupTests(tests: Test[]): FolderGroup[] {
   return result;
 }
 
+// 受験URL（test_sessions）の期限まわり。
+// 期限切れのURLを配ると生徒側は「テストが見つかりません」になるだけで理由が分からないため、
+// 講師画面で状態が見えるようにし、割り当て時は必ず有効なURLに直してから配る。
+type SessionInfo = { token: string; session_id: string; expires_at: string | null };
+
+const isAlive = (expiresAt: string | null | undefined) =>
+  !expiresAt || new Date(expiresAt).getTime() > Date.now();
+
+const formatExpiry = (expiresAt: string | null) => {
+  if (!expiresAt) return "期限なし";
+  const d = new Date(expiresAt);
+  const ymd = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+  if (!isAlive(expiresAt)) return `${ymd} に期限切れ`;
+  const left = Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86400000);
+  return `${ymd} まで（あと${left}日）`;
+};
+
 function TestList({ tests, loading, onDelete, onRefresh }: {
   tests: Test[];
   loading: boolean;
@@ -176,26 +193,33 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [publishedUrls, setPublishedUrls] = useState<Record<string, string>>({});
   const [sessionTokens, setSessionTokens] = useState<Record<string, string>>({});
-  // test_id → { token, session_id }
-  const [sessionData, setSessionData] = useState<Record<string, { token: string; session_id: string }>>({});
+  // test_id → { token, session_id, expires_at }
+  const [sessionData, setSessionData] = useState<Record<string, SessionInfo>>({});
   // 割り当て済み一覧
   const [assignments, setAssignments] = useState<{ id: string; test_session_id: string; student_id: string; student_name: string }[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [startModal, setStartModal] = useState<Test | null>(null);
   const [selectedStudent, setSelectedStudent] = useState("");
   const [starting, setStarting] = useState(false);
-  const [assignSuccess, setAssignSuccess] = useState<{ studentName: string; token: string } | null>(null);
+  const [assignSuccess, setAssignSuccess] = useState<{ studentName: string; token: string; expires_at: string | null } | null>(null);
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [openSubfolders, setOpenSubfolders] = useState<Set<string>>(new Set());
 
   const loadSessionsAndAssignments = async () => {
     const [{ data: sessions }, { data: assigns }] = await Promise.all([
-      supabase.from("test_sessions").select("id, test_id, url_token"),
+      supabase.from("test_sessions")
+        .select("id, test_id, url_token, expires_at")
+        .order("created_at", { ascending: false }),
       supabase.from("test_assignments").select("id, test_session_id, student_id, students(name)"),
     ]);
-    const sMap: Record<string, { token: string; session_id: string }> = {};
-    (sessions ?? []).forEach((s: { id: string; test_id: string; url_token: string }) => {
-      sMap[s.test_id] = { token: s.url_token, session_id: s.id };
+    // 1テストに複数セッションがありうる。新しい順に見て「未失効のもの」を優先して採用する
+    // （期限切れのURLを配ってしまうと生徒側は「テストが見つかりません」になる）
+    const sMap: Record<string, SessionInfo> = {};
+    (sessions ?? []).forEach((s: { id: string; test_id: string; url_token: string; expires_at: string | null }) => {
+      const info: SessionInfo = { token: s.url_token, session_id: s.id, expires_at: s.expires_at };
+      const cur = sMap[s.test_id];
+      if (!cur) { sMap[s.test_id] = info; return; }
+      if (!isAlive(cur.expires_at) && isAlive(info.expires_at)) sMap[s.test_id] = info;
     });
     setSessionData(sMap);
     const tokenMap: Record<string, string> = {};
@@ -234,46 +258,54 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   const toggleSubfolder = (key: string) =>
     setOpenSubfolders((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
 
-  const publish = async (testId: string) => {
+  // renew=true なら期限切れURLの期限を延長して再発行する
+  const publish = async (testId: string, renew = false) => {
     setPublishing(testId);
     const res = await authFetch("/api/tests/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ test_id: testId }),
+      body: JSON.stringify({ test_id: testId, renew }),
     });
     const data = await res.json();
-    if (data.token) {
-      const url = `${window.location.origin}/test/${data.token}`;
-      setPublishedUrls((prev) => ({ ...prev, [testId]: url }));
-      setSessionTokens((prev) => ({ ...prev, [testId]: data.token }));
-      onRefresh();
-    }
     setPublishing(null);
+    if (data.error) { showToast("エラー: " + data.error, "error"); return null; }
+    if (!data.token) { showToast("受験URLを発行できませんでした", "error"); return null; }
+
+    const url = `${window.location.origin}/test/${data.token}`;
+    setPublishedUrls((prev) => ({ ...prev, [testId]: url }));
+    setSessionTokens((prev) => ({ ...prev, [testId]: data.token }));
+    // セッションIDは割り当てに使うので取り直す
+    const { data: sess } = await supabase
+      .from("test_sessions").select("id").eq("url_token", data.token).maybeSingle();
+    const info: SessionInfo = {
+      token: data.token as string,
+      session_id: sess?.id ?? sessionData[testId]?.session_id ?? "",
+      expires_at: (data.expires_at as string | null) ?? null,
+    };
+    setSessionData((prev) => ({ ...prev, [testId]: info }));
+    if (renew) showToast(`受験URLを再発行しました（${formatExpiry(info.expires_at)}）`, "success");
+    onRefresh();
+    return info;
   };
 
   const assignTest = async () => {
     if (!startModal || !selectedStudent) return;
     setStarting(true);
 
-    // 1. セッション (token) を取得または作成
-    let token = sessionData[startModal.id]?.token;
-    let sessionId = sessionData[startModal.id]?.session_id;
+    // 1. セッション (token) を取得または作成。
+    //    期限切れのまま割り当てると生徒は「テストが見つかりません」になるので、
+    //    無い場合だけでなく「失効している場合」も必ず発行し直す。
+    const cached = sessionData[startModal.id];
+    let token = cached?.token;
+    let sessionId = cached?.session_id;
+    let expiresAt = cached?.expires_at ?? null;
 
-    if (!token) {
-      const res = await authFetch("/api/tests/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ test_id: startModal.id }),
-      });
-      const data = await res.json();
-      if (!data.token) { setStarting(false); return; }
-      token = data.token as string;
-      const { data: sess } = await supabase
-        .from("test_sessions").select("id").eq("url_token", token).maybeSingle();
-      sessionId = sess?.id ?? "";
-      setSessionData((prev) => ({ ...prev, [startModal.id]: { token, session_id: sessionId ?? "" } }));
-      setSessionTokens((prev) => ({ ...prev, [startModal.id]: token }));
-      onRefresh();
+    if (!token || !isAlive(expiresAt)) {
+      const info = await publish(startModal.id, true);
+      if (!info || !info.session_id) { setStarting(false); return; }
+      token = info.token;
+      sessionId = info.session_id;
+      expiresAt = info.expires_at;
     }
 
     // 2. 生徒ID を解決し test_assignments に記録（未登録の場合のみ）
@@ -305,7 +337,7 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
     }
 
     // 3. 成功ステートを表示（新タブは開かない）
-    setAssignSuccess({ studentName: selectedStudent, token: token ?? "" });
+    setAssignSuccess({ studentName: selectedStudent, token: token ?? "", expires_at: expiresAt });
     setStarting(false);
     setSelectedStudent("");
   };
@@ -392,8 +424,12 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                           <div className="divide-y divide-slate-100">
                             {sub.tests.map((test) => {
                               const st = statusLabel[test.status] ?? statusLabel.draft;
-                              const url = publishedUrls[test.id];
-                              const testSessionId = sessionData[test.id]?.session_id;
+                              const session = sessionData[test.id];
+                              const origin = typeof window !== "undefined" ? window.location.origin : "";
+                              // 発行済みなら常にURLを出す（再読み込みで消えないように）
+                              const url = publishedUrls[test.id] ?? (session ? `${origin}/test/${session.token}` : undefined);
+                              const urlAlive = session ? isAlive(session.expires_at) : true;
+                              const testSessionId = session?.session_id;
                               const assignedStudents = testSessionId
                                 ? assignments.filter((a) => a.test_session_id === testSessionId)
                                 : [];
@@ -407,6 +443,17 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                         </svg>
                                         <span className="font-medium text-slate-900 text-sm">{test.title}</span>
                                         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
+                                        {session && (
+                                          urlAlive ? (
+                                            <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-500">
+                                              URL有効期限：{formatExpiry(session.expires_at)}
+                                            </span>
+                                          ) : (
+                                            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
+                                              URL期限切れ（このままでは受験できません）
+                                            </span>
+                                          )
+                                        )}
                                       </div>
                                       <p className="mt-0.5 text-xs text-slate-400 pl-6">{test.grade}</p>
 
@@ -427,14 +474,25 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                       )}
 
                                       {url && (
-                                        <div className="mt-2 flex items-center gap-2 pl-6">
+                                        <div className="mt-2 flex items-center gap-2 pl-6 flex-wrap">
                                           <input readOnly value={url}
-                                            className="flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600" />
+                                            className="flex-1 min-w-48 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600" />
                                           <button onClick={() => { navigator.clipboard.writeText(url); showToast("URLをコピーしました", "success"); }}
                                             className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 whitespace-nowrap">
                                             コピー
                                           </button>
+                                          <button onClick={() => publish(test.id, true)} disabled={publishing === test.id}
+                                            className={`rounded-lg px-2.5 py-1.5 text-xs whitespace-nowrap disabled:opacity-50 ${urlAlive
+                                              ? "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                                              : "bg-red-600 font-semibold text-white hover:bg-red-700"}`}>
+                                            {publishing === test.id ? "発行中..." : "URLを再発行"}
+                                          </button>
                                         </div>
+                                      )}
+                                      {session && !urlAlive && (
+                                        <p className="mt-1 pl-6 text-xs text-red-600">
+                                          「URLを再発行」を押すと、同じURLのまま期限が30日延びます（生徒のダッシュボードのリンクもそのまま使えます）。
+                                        </p>
                                       )}
                                     </div>
                                     <div className="flex gap-1.5 flex-wrap justify-end shrink-0">
@@ -481,6 +539,11 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                 <div className="mb-4 text-6xl">✅</div>
                 <h3 className="text-xl font-bold text-slate-900">割り当て完了！</h3>
                 <p className="mt-3 text-sm text-slate-600">
+                  {assignSuccess.expires_at && (
+                    <span className="mb-2 block text-xs text-slate-500">
+                      受験URLの有効期限：{formatExpiry(assignSuccess.expires_at)}
+                    </span>
+                  )}
                   <strong className="text-indigo-700">{assignSuccess.studentName}</strong>さんのダッシュボードに
                   テストが表示されます。
                 </p>
