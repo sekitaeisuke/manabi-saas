@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import type { AttendanceRecord } from "@/lib/supabase";
 import { FaceCamera } from "@/components/FaceCamera";
-import { findMatch } from "@/lib/faceRecognition";
+import { matchFace, matchMessage } from "@/lib/faceRecognition";
 import { showToast } from "@/lib/toast";
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { Skeleton } from "@/components/Skeleton";
@@ -125,12 +125,27 @@ export default function AttendancePage() {
   };
 
   const onFace = async (descriptor: Float32Array) => {
-    const matchId = await findMatch("teacher", descriptor);
+    const match = await matchFace("teacher", descriptor);
+    const matchId = match.personId;
+
+    // 未登録は何度やっても通らない。すぐ手動へ逃がす。
+    if (match.reason === "no_enrollment" || (match.reason === "not_recognized" && match.enrolled === 0)) {
+      showToast("あなたの顔がまだ登録されていません。顔登録ページで登録してください。", "error", 6000);
+      setMode("select");
+      setFaceRetryCount(0);
+      return;
+    }
+
     if (!matchId || matchId !== teacherId) {
       const newCount = faceRetryCount + 1;
       setFaceRetryCount(newCount);
       if (newCount === 1) {
-        showToast("もう一度カメラを見てください", "info");
+        showToast(
+          matchId && matchId !== teacherId
+            ? "別の人として認識されました。もう一度カメラを見てください"
+            : matchMessage(match, "teacher"),
+          "info"
+        );
       } else if (newCount >= 2) {
         showToast("顔認証できませんでした。手動入力に切り替えてください。", "error");
         setMode("select");

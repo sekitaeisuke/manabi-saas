@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { findMatch } from "@/lib/faceRecognition";
+import { matchFace, matchMessage } from "@/lib/faceRecognition";
 import { FaceCamera } from "@/components/FaceCamera";
 
 type RecognitionResult = {
@@ -39,10 +39,12 @@ export default function KioskPage() {
 
   const handleDescriptor = useCallback(async (descriptor: Float32Array) => {
     setScanning(false);
-    const matchedId = await findMatch("student", descriptor);
+    const match = await matchFace("student", descriptor);
+    const matchedId = match.personId;
     if (!matchedId) {
-      setError("認識できませんでした。もう一度試してください。");
-      scheduleReset(3000);
+      // 「登録が0件」と「登録はあるが認識できない」を言い分ける
+      setError(matchMessage(match, "student"));
+      scheduleReset(match.reason === "no_enrollment" ? 6000 : 3000);
       return;
     }
 

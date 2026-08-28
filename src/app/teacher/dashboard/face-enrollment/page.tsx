@@ -72,15 +72,27 @@ export default function FaceEnrollmentPage() {
             </p>
             <FaceCamera
               label="顔をカメラに向けてください（自動検出）"
+              samples={6}
               onDescriptor={handleDescriptor}
               onError={(msg) => { setResult({ ok: false, msg }); setScanning(false); }}
             />
+            <p className="mt-3 text-center text-xs text-slate-500">
+              明るい場所で、正面を向いたまま数秒お待ちください（6コマの平均を登録します）
+            </p>
             <button onClick={() => setScanning(false)} className="mt-4 w-full rounded-2xl border border-slate-300 py-2 text-sm text-slate-600 hover:bg-slate-50">
               キャンセル
             </button>
           </div>
         ) : (
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+            <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              登録状況：生徒 <b className="text-slate-900">{students.filter(s => enrolled.has(s.id)).length}</b> / {students.length} 人、
+              講師 <b className="text-slate-900">{teachers.filter(t => enrolled.has(t.id)).length}</b> / {teachers.length} 人
+              <span className="block mt-1 text-xs text-slate-500">
+                顔認証（入退室・出退勤）は、ここで登録した人だけが使えます。
+              </span>
+            </div>
+
             <div className="flex gap-2">
               {(["student", "teacher"] as PersonType[]).map((t) => (
                 <button key={t} onClick={() => { setPersonType(t); setSelectedId(""); }}
