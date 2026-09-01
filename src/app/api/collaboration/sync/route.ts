@@ -3,17 +3,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
 import { generateText } from "@/lib/ai";
-// 報告書・学力診断から「気がかりな生徒」を講師連携(collaboration_tasks)へ自動掲載する。
+// 報告書・保護者とのやりとり・学力診断・カルテから「気がかりな生徒」を
+// 講師連携(collaboration_tasks)の【教務タスク】へ自動掲載する。
 //
 // 判定:
-//   報告書 … 正答率 < CONCERN_PERCENT は即「心配あり」。それ以外で講師コメント/お子様への
-//            メッセージに本文がある場合のみ Claude が心配の有無を判定。
-//   診断   … test_percentage / habit_score / method_score / verbal_score / skill_score の
-//            いずれかが CONCERN_PERCENT 未満なら「心配あり」（気になる結果のみ）。
+//   報告書   … 正答率 < CONCERN_PERCENT は即「心配あり」。それ以外で講師コメント/お子様への
+//              メッセージに本文がある場合のみ Claude が心配の有無を判定。
+//   保護者   … 保護者から届いたメッセージ本文を Claude が読み、教室として動く必要が
+//              あるもの（要望・不安・不満・相談・欠席や振替の相談 等）だけを掲載。
+//   診断     … test_percentage / habit_score / method_score / verbal_score / skill_score の
+//              いずれかが CONCERN_PERCENT 未満なら「心配あり」（気になる結果のみ）。
+//
+// 掲示先の教室は生徒の所属教室(students.school_id)。分からなければ全社扱い(NULL)。
 //
 // 処理済みは collaboration_auto_log に記録し、AIの再判定・二重掲載を防ぐ。
 // 「解決済」で completed になった行はそのまま残るため同一報告書は再掲されないが、
-// 新しい報告書/診断は新IDで未処理 → 再び自動掲載される。
+// 新しい報告書/保護者メッセージ/診断は新IDで未処理 → 再び自動掲載される。
 
 const CONCERN_PERCENT = 40;       // 心配と見なすしきい値（%）
 const SCAN_DAYS = 45;             // 走査対象（直近何日分か）
@@ -48,21 +53,35 @@ type DiagRow = {
 
 const DIAG_LAYER_NAME: Record<string, string> = { H1: "下位能力", H2: "学習方法", H3: "学習習慣" };
 
+type ParentRow = {
+  id: string;
+  student_id: string | null;
+  student_name: string | null;
+  parent_name: string | null;
+  subject: string | null;
+  message: string;
+  created_at: string;
+};
+
+type AutoSource = "report" | "diagnosis" | "parent";
+
 type TaskInsert = {
   created_by: null;
   category: "student_guidance";
+  task_kind: "academic";          // 自動掲載は必ず教務タスク
   title: string;
   description: string | null;
   student_id: string | null;
+  school_id: string | null;       // 掲示先の教室。NULL は全社
   is_all_students: false;
   status: "open";
-  source_type: "report" | "diagnosis";
+  source_type: AutoSource;
   source_id: string;
   auto_reason: string;
 };
 
 type LogInsert = {
-  source_type: "report" | "diagnosis";
+  source_type: AutoSource;
   source_id: string;
   is_concern: boolean;
   reason: string | null;
@@ -104,6 +123,55 @@ async function judgeReportsWithAI(
       id: string;
       concern: boolean;
       reason?: string;
+    }>;
+    const out: Record<string, { concern: boolean; reason: string }> = {};
+    for (const a of arr) {
+      if (a && typeof a.id === "string") {
+        out[a.id] = { concern: !!a.concern, reason: (a.reason ?? "").slice(0, 60) };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// 保護者から届いたメッセージを Claude で判定。{ [id]: {concern, reason} } を返す。
+// 「教室として動く必要があるか」だけを見る。挨拶・お礼・受領連絡は落とす。
+async function judgeParentMessagesWithAI(
+  rows: ParentRow[]
+): Promise<Record<string, { concern: boolean; reason: string }>> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey || rows.length === 0) return {};
+
+  const items = rows.map((r) => ({
+    id: r.id,
+    生徒: r.student_name ?? "—",
+    保護者: r.parent_name ?? "—",
+    件名: r.subject ?? "",
+    本文: (r.message ?? "").slice(0, 1200),
+  }));
+
+  const prompt =
+    `あなたは学習塾の主任講師です。以下は保護者から塾に届いたメッセージです。\n` +
+    `それぞれについて「講師チームで共有し、教務として動く必要があるか」を判定してください。\n` +
+    `動く必要がある例: 学習面の要望や相談、成績・進路の不安、指導内容への不満、` +
+    `家庭での様子の心配、欠席や振替の相談、教材や講習についての問い合わせ 等。\n` +
+    `単なる挨拶・お礼・受領しましたの返事・既に完結している事務連絡は false です。\n\n` +
+    `各メッセージについて {"id": "...", "concern": true/false, "reason": "30字以内の日本語で、何をすべきか"} を作り、` +
+    `JSON配列のみを返してください（前後の説明文やコードフェンスは不要）。\n\n` +
+    `メッセージ一覧:\n${JSON.stringify(items, null, 2)}`;
+
+  try {
+    let text = (await generateText({
+      prompt, maxTokens: 2048, feature: "collaboration_sync",
+    })).text;
+    text = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+    const start = text.indexOf("[");
+    const end = text.lastIndexOf("]");
+    if (start === -1 || end === -1) return {};
+    const arr = JSON.parse(text.slice(start, end + 1)) as Array<{
+      id: string; concern: boolean; reason?: string;
     }>;
     const out: Record<string, { concern: boolean; reason: string }> = {};
     for (const a of arr) {
@@ -203,6 +271,14 @@ export async function POST(req: NextRequest) {
 
   const since = new Date(Date.now() - SCAN_DAYS * 86_400_000).toISOString();
 
+  // 生徒 → 所属教室。掲示先の教室を決めるのに使う（分からなければ全社＝NULL）。
+  const { data: studentRows } = await svc.from("students").select("id, school_id");
+  const schoolOf = new Map<string, string | null>(
+    ((studentRows as { id: string; school_id: string | null }[]) ?? []).map((s) => [s.id, s.school_id])
+  );
+  const schoolFor = (studentId: string | null | undefined) =>
+    (studentId ? schoolOf.get(studentId) ?? null : null);
+
   // 処理済みログ
   const { data: logRows } = await svc
     .from("collaboration_auto_log")
@@ -255,9 +331,11 @@ export async function POST(req: NextRequest) {
     return {
       created_by: null,
       category: "student_guidance",
+      task_kind: "academic",
       title: `${r.student_name ?? "生徒"}：${reason}`.slice(0, 120),
       description: desc || null,
       student_id: r.student_id ?? null,
+      school_id: schoolFor(r.student_id),
       is_all_students: false,
       status: "open",
       source_type: "report",
@@ -285,6 +363,51 @@ export async function POST(req: NextRequest) {
   }
   for (const r of noSignal) {
     logsToInsert.push({ source_type: "report", source_id: r.id, is_concern: false, reason: null });
+  }
+
+  // ── 保護者とのやりとり（保護者から届いたもののみ） ──────
+  const { data: parentData } = await svc
+    .from("parent_messages")
+    .select("id, student_id, student_name, parent_name, subject, message, created_at")
+    .eq("direction", "parent_to_teacher")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(BATCH_LIMIT);
+
+  const newParentMsgs = ((parentData as ParentRow[]) ?? []).filter(
+    (m) => !processed.has(`parent:${m.id}`) && (m.message ?? "").trim()
+  );
+  const parentResults = await judgeParentMessagesWithAI(newParentMsgs);
+
+  for (const m of newParentMsgs) {
+    const j = parentResults[m.id];
+    const concern = j?.concern ?? false;
+    const reason = j?.reason?.trim() || "保護者から相談・要望が届いています";
+    if (concern) {
+      const who = m.student_name ?? m.parent_name ?? "保護者";
+      tasksToInsert.push({
+        created_by: null,
+        category: "student_guidance",
+        task_kind: "academic",
+        title: `${who}：${reason}`.slice(0, 120),
+        description:
+          [m.subject ? `件名: ${m.subject}` : null, (m.message ?? "").slice(0, 600)]
+            .filter(Boolean).join("\n") || null,
+        student_id: m.student_id ?? null,
+        school_id: schoolFor(m.student_id),
+        is_all_students: false,
+        status: "open",
+        source_type: "parent",
+        source_id: m.id,
+        auto_reason: reason,
+      });
+    }
+    logsToInsert.push({
+      source_type: "parent",
+      source_id: m.id,
+      is_concern: concern,
+      reason: concern ? reason : null,
+    });
   }
 
   // ── 学力診断テスト（気になる結果のみ） ──────────────────
@@ -325,9 +448,11 @@ export async function POST(req: NextRequest) {
       tasksToInsert.push({
         created_by: null,
         category: "student_guidance",
+        task_kind: "academic",
         title: `${d.student_name ?? "生徒"}：${reason}`.slice(0, 120),
         description: desc,
         student_id: d.student_id ?? null,
+        school_id: schoolFor(d.student_id),
         is_all_students: false,
         status: "open",
         source_type: "diagnosis",
@@ -420,9 +545,11 @@ export async function POST(req: NextRequest) {
           return {
             created_by: null,
             category: "student_guidance" as const,
+            task_kind: "academic" as const,
             title: `${k.student_name ?? "生徒"}：${reason}`.slice(0, 120),
             description: (k.karte_json?.currentStatus ?? null),
             student_id: k.student_id,
+            school_id: schoolFor(k.student_id),
             is_all_students: false,
             status: "open" as const,
             source_type: "karte" as const,
@@ -440,6 +567,11 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     created: created + createdKarte,
-    scanned: { reports: newReports.length, diagnoses: (diagData ?? []).length, kartes: kartes.length },
+    scanned: {
+      reports: newReports.length,
+      parentMessages: newParentMsgs.length,
+      diagnoses: (diagData ?? []).length,
+      kartes: kartes.length,
+    },
   });
 }

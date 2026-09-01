@@ -5,24 +5,34 @@ import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import type { Student, Teacher } from "@/lib/supabase";
 import {
-  Badge, Button, Card, EmptyState, LinkButton, PageHeader, SectionTitle,
+  Badge, Button, Card, EmptyState, LinkButton, PageHeader,
   Spinner, cx, inputClass,
 } from "@/components/ui";
 
 /* ──────────────────────────────────────────────────────────
    講師連携
-     上：生徒について … 生徒ごとに話が積み上がる。開くとその子の事実が横にある。
-     下：教室運営     … 議題。決まったら閉じる。
 
-   タスク管理ではなく「語り合う場所」にしたいので、担当者・期限は前面に出さず
-   詳細の中に畳んである（機能としては残す。完了の権限ルールも従来どおり）。
+     まず教室を選ぶ。教室ごとに「教務」と「事務」を左右に並べる。
+
+       教室名
+         ├ 教務タスク（報告書・保護者とのやりとりをAIが読んで自動掲載＋講師の入力）
+         ├ 事務タスク（講師の入力）
+         ├ 教務タスクの入力
+         └ 事務タスクの入力
+
+     掲示先は「この教室」か「全社」。全社にすると、すべての教室に同じタスクが出る。
+     終わったタスクは各行の「終了」で閉じる（一覧から消えるが記録は残る）。
+     担当・期限・会話はタスクを開いた先にある。
    ────────────────────────────────────────────────────────── */
 
-type SourceType = "manual" | "report" | "diagnosis" | "karte";
+type SourceType = "manual" | "report" | "diagnosis" | "karte" | "parent";
+type TaskKind = "academic" | "admin";
 
 const AUTO_LABEL: Record<string, string> = {
-  report: "報告書から", diagnosis: "診断から", karte: "カルテから",
+  report: "報告書から", diagnosis: "診断から", karte: "カルテから", parent: "保護者から",
 };
+
+const KIND_LABEL: Record<TaskKind, string> = { academic: "教務タスク", admin: "事務タスク" };
 
 type Category = "student_guidance" | "classroom_management" | "school_rules";
 
@@ -30,10 +40,12 @@ type Task = {
   id: string;
   created_by: string | null;
   category: Category;
+  task_kind: TaskKind | null;
   title: string;
   description: string | null;
   status: string;
   student_id: string | null;
+  school_id: string | null;
   is_all_students: boolean;
   due_date: string | null;
   scheduled_date: string | null;
@@ -56,6 +68,8 @@ type Message = {
   created_at: string;
 };
 
+type SchoolRow = { id: string; name: string; group_name: string | null };
+
 /** 会話の隣に置く「その子の事実」。ここがあるから議論が具体になる。 */
 type StudentFacts = {
   progress: { textbook: string; where: string | null; understanding: string | null; date: string } | null;
@@ -64,23 +78,25 @@ type StudentFacts = {
   parent: { message: string; date: string } | null;
 };
 
-// ロール上下: 管理者 > 講師 > 非常勤
+// ロール上下: 管理者 > 講師 > 非常勤（担当を決められる範囲の判定に使う）
 const ROLE_RANK: Record<string, number> = { admin: 3, teacher: 2, "part-time": 1 };
 const ROLE_LABEL: Record<string, string> = { admin: "管理者", teacher: "講師", "part-time": "非常勤" };
 const rankOf = (role: string | null | undefined) => ROLE_RANK[role ?? ""] ?? 1;
 
 const UNDERSTAND: Record<string, string> = { good: "◎手応えあり", normal: "○ふつう", weak: "△不安" };
 
-const EMPTY_FORM = {
-  category: "student_guidance" as Category,
-  title: "",
-  description: "",
-  student_id: "",
-  is_all_students: false,
-  due_date: "",
-  scheduled_date: "",
-  assignee_id: "",
+const LAST_SCHOOL_KEY = "teacher.collaboration.schoolId";
+const ALL_SCHOOLS = "__all__";
+const COMPANY_KEY = "__company__";
+
+type ComposeForm = {
+  title: string;
+  description: string;
+  student_id: string;
+  toCompany: boolean;   // true = 全社（すべての教室に掲示）
 };
+
+const EMPTY_COMPOSE: ComposeForm = { title: "", description: "", student_id: "", toCompany: false };
 
 function relTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -99,6 +115,8 @@ export default function CollaborationPage() {
   const [myRole, setMyRole] = useState<string>("part-time");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [schools, setSchools] = useState<SchoolRow[]>([]);
+  const [view, setView] = useState<string>(ALL_SCHOOLS);   // ALL_SCHOOLS または school.id
   const [tasks, setTasks] = useState<Task[]>([]);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [lastMsg, setLastMsg] = useState<Map<string, Message>>(new Map());
@@ -107,41 +125,58 @@ export default function CollaborationPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [facts, setFacts] = useState<StudentFacts | null>(null);
   const [showDetails, setShowDetails] = useState(false); // 担当・期限の畳み
-  const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [composeAt, setComposeAt] = useState<string | null>(null); // "<blockKey>:<kind>"
+  const [form, setForm] = useState<ComposeForm>(EMPTY_COMPOSE);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [newMessage, setNewMessage] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [picked, setPicked] = useState<Set<string>>(new Set());   // 削除のために選んだ話題
+  const [syncing, setSyncing] = useState(true);
+  const [finishing, setFinishing] = useState<string | null>(null);
+  const [tidying, setTidying] = useState(false);                  // 整理モード（削除の選択）
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  /* ── 自分・名簿 ─────────────────────────────────── */
+  /* ── 自分・名簿・教室 ───────────────────────────────── */
   useEffect(() => {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const { data: t } = await supabase.from("teachers").select("id, role").eq("email", session.user.email!).maybeSingle();
-      if (t) { setMyTeacherId(t.id); setMyRole(t.role); }
-    })();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      const [{ data: ts }, { data: ss }] = await Promise.all([
+      const [{ data: ts }, { data: ss }, { data: sc }] = await Promise.all([
         supabase.from("teachers").select("*").order("name"),
         supabase.from("students").select("*").order("name"),
+        supabase.from("schools").select("id, name, group_name").order("name"),
       ]);
-      setTeachers(ts ?? []);
-      setStudents(ss ?? []);
+      setTeachers((ts as Teacher[]) ?? []);
+      setStudents((ss as Student[]) ?? []);
+      const schoolList = (sc as SchoolRow[]) ?? [];
+      setSchools(schoolList);
+
+      const me = session?.user?.email
+        ? ((ts as Teacher[]) ?? []).find((t) => t.email === session.user.email) ?? null
+        : null;
+      if (me) { setMyTeacherId(me.id); setMyRole(me.role); }
+
+      // 最後に見ていた教室 → 自分の所属教室 → 全教室
+      const stored = typeof window !== "undefined" ? localStorage.getItem(LAST_SCHOOL_KEY) : null;
+      const initial =
+        (stored === ALL_SCHOOLS && ALL_SCHOOLS) ||
+        (stored && schoolList.some((s) => s.id === stored) && stored) ||
+        (me?.school_id && schoolList.some((s) => s.id === me.school_id) && me.school_id) ||
+        ALL_SCHOOLS;
+      setView(initial);
     })();
   }, []);
 
-  /* ── 話題と、その最後の一言 ───────────────────────── */
+  const selectView = (next: string) => {
+    setView(next);
+    setComposeAt(null);
+    try { localStorage.setItem(LAST_SCHOOL_KEY, next); } catch { /* 保存できなくても動く */ }
+  };
+
+  /* ── タスクと、その最後の一言 ─────────────────────── */
   const fetchTasks = useCallback(async () => {
-    setLoading(true);
     const { data } = await supabase
       .from("collaboration_tasks").select("*").eq("status", "open")
       .order("created_at", { ascending: false });
@@ -180,10 +215,11 @@ export default function CollaborationPage() {
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
   useEffect(() => { if (myTeacherId) fetchReadIds(); }, [myTeacherId, fetchReadIds]);
 
-  // 開いたら報告書・診断から「気がかりな生徒」を自動掲載して再取得
+  // 開いたら報告書・保護者メッセージ・診断から教務タスクを自動掲載して再取得
   useEffect(() => {
     (async () => {
       try { await authFetch("/api/collaboration/sync", { method: "POST" }); } catch { /* 同期失敗は無視 */ }
+      setSyncing(false);
       fetchTasks();
     })();
   }, [fetchTasks]);
@@ -254,28 +290,52 @@ export default function CollaborationPage() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-  /* ── 書き込み系（従来の権限ルールをそのまま保持） ──── */
-  const saveTask = async () => {
-    if (!form.title.trim()) { setFormError("ひとことを入力してください"); return; }
-    if (!myTeacherId) return;
+  /* ── 種別・掲示先の読み取り ─────────────────────────
+     task_kind / school_id は collaboration-kind-school-setup.sql で足す列。
+     未適用でも画面が壊れないよう、無ければ category から教務/事務を推定し、
+     掲示先不明は全社として扱う。
+     ────────────────────────────────────────────── */
+  const schoolIds = useMemo(() => new Set(schools.map((s) => s.id)), [schools]);
+  const kindOf = (t: Task): TaskKind =>
+    t.task_kind ?? (t.category === "student_guidance" ? "academic" : "admin");
+  const isCompanyWide = (t: Task) => !t.school_id || !schoolIds.has(t.school_id);
+
+  /* ── 書き込み系 ──────────────────────────────────── */
+  const openCompose = (blockKey: string, kind: TaskKind, schoolId: string | null) => {
+    const key = `${blockKey}:${kind}`;
+    if (composeAt === key) { setComposeAt(null); return; }
+    setForm({ ...EMPTY_COMPOSE, toCompany: schoolId === null });
+    setFormError("");
+    setComposeAt(key);
+  };
+
+  const saveTask = async (kind: TaskKind, schoolId: string | null) => {
+    if (!form.title.trim()) { setFormError("やることを一行で入力してください"); return; }
+    if (!myTeacherId) { setFormError("講師として認識できませんでした。再ログインしてください"); return; }
     setSaving(true); setFormError("");
     const { error } = await supabase.from("collaboration_tasks").insert({
       created_by: myTeacherId,
-      category: form.category,
+      // category は従来のまま残す（教務=生徒の話 / 事務=教室運営）
+      category: kind === "academic" ? "student_guidance" : "classroom_management",
+      task_kind: kind,
       title: form.title.trim(),
       description: form.description.trim() || null,
-      student_id: form.category === "student_guidance" && !form.is_all_students && form.student_id ? form.student_id : null,
-      is_all_students: form.category === "student_guidance" ? form.is_all_students : false,
-      due_date: form.due_date || null,
-      scheduled_date: form.category === "student_guidance" && form.scheduled_date ? form.scheduled_date : null,
-      assignee_id: form.assignee_id || null,
-      assigned_by: form.assignee_id ? myTeacherId : null,
-      assigned_at: form.assignee_id ? new Date().toISOString() : null,
+      student_id: kind === "academic" && form.student_id ? form.student_id : null,
+      school_id: form.toCompany ? null : schoolId,
+      is_all_students: false,
       status: "open",
     });
     setSaving(false);
-    if (error) { setFormError(error.message); return; }
-    setCreating(false); setForm(EMPTY_FORM); fetchTasks();
+    if (error) {
+      // 列が無い＝collaboration-kind-school-setup.sql をまだ流していない
+      setFormError(
+        /task_kind|school_id/.test(error.message)
+          ? "collaboration-kind-school-setup.sql をSupabaseで実行してください（教務/事務・教室の列がまだありません）"
+          : error.message
+      );
+      return;
+    }
+    setComposeAt(null); setForm(EMPTY_COMPOSE); fetchTasks();
   };
 
   const assignTask = async (taskId: string, assigneeId: string) => {
@@ -287,12 +347,15 @@ export default function CollaborationPage() {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
   };
 
-  const finishTask = async (taskId: string, auto: boolean) => {
+  /** 終了。誰でも押せる（誰が終わらせたかは completed_by に残る）。 */
+  const finishTask = async (taskId: string, title: string) => {
     if (!myTeacherId) return;
-    if (!auto && !confirm("この話を終わりにしますか？（一覧から消えます）")) return;
+    if (!confirm(`「${title}」を終了しますか？\n一覧から消えますが、記録は残ります。`)) return;
+    setFinishing(taskId);
     await supabase.from("collaboration_tasks")
       .update({ status: "completed", completed_by: myTeacherId, completed_at: new Date().toISOString() })
       .eq("id", taskId);
+    setFinishing(null);
     if (selectedTaskId === taskId) closeDetail();
     fetchTasks();
   };
@@ -308,30 +371,24 @@ export default function CollaborationPage() {
 
   const teacherName = (id: string | null) => (id ? teachers.find((t) => t.id === id)?.name ?? "—" : "—");
   const studentOf = (id: string | null) => (id ? students.find((s) => s.id === id) ?? null : null);
+  const schoolName = (id: string | null) => (id ? schools.find((s) => s.id === id)?.name ?? null : null);
   const assignCandidates = teachers.filter((t) => rankOf(t.role) <= rankOf(myRole));
 
   const canAssign = (task: Task) => {
     if (!task.assignee_id) return true;
     return rankOf(myRole) >= rankOf(teachers.find((t) => t.id === task.assignee_id)?.role);
   };
-  // 完了できるか＝担当者本人 or 担当者より上位ロール。未割当は完了不可。
-  const canComplete = (task: Task) => {
-    if (!task.assignee_id) return false;
-    if (task.assignee_id === myTeacherId) return true;
-    return rankOf(myRole) > rankOf(teachers.find((t) => t.id === task.assignee_id)?.role);
-  };
 
-  const isAuto = (t: Task) =>
-    t.source_type === "report" || t.source_type === "diagnosis" || t.source_type === "karte";
+  const isAuto = (t: Task) => !!t.source_type && t.source_type !== "manual";
   const isUnread = (t: Task) => !readIds.has(t.id) && t.created_by !== myTeacherId;
 
   /* ── 削除 ──────────────────────────────────────────
-     「終わりにする」(completed) とは意味が違う。
-       終わりにする … 話がついた
-       削除         … そもそも要らなかった（自動掲載のノイズ・誤投稿）
+     「終了」(completed) とは意味が違う。
+       終了 … やり終えた
+       削除 … そもそも要らなかった（自動掲載のノイズ・誤投稿）
      どちらも行は消さず status を変えるだけなので、あとから戻せる。
 
-     人が書いたものを他人が消せると議論の場として成立しないので、
+     人が書いたものを他人が消せると連携の場として成立しないので、
      手動投稿は「書いた本人か管理者」だけが消せる。自動掲載は誰でも消せる。
      ────────────────────────────────────────────── */
   const canDelete = (t: Task) => {
@@ -368,135 +425,302 @@ export default function CollaborationPage() {
     fetchTasks();
   };
 
-  /* ── 上：生徒ごとにまとめる ───────────────────────── */
-  const studentGroups = useMemo(() => {
-    const g = new Map<string, { key: string; name: string; grade: string; tasks: Task[] }>();
-    for (const t of tasks) {
-      if (t.category !== "student_guidance") continue;
-      const key = t.is_all_students ? "__all__" : t.student_id ?? "__none__";
-      if (!g.has(key)) {
-        const s = studentOf(t.student_id);
-        g.set(key, {
-          key,
-          name: t.is_all_students ? "生徒全体" : s?.name ?? "（生徒未指定）",
-          grade: t.is_all_students ? "" : s?.grade ?? "",
-          tasks: [],
-        });
-      }
-      g.get(key)!.tasks.push(t);
+  const stopTidying = () => { setTidying(false); setPicked(new Set()); };
+
+  /* ── 教室のかたまり ───────────────────────────────
+       全教室ビュー … ①全社ブロック（全教室に掲示されているもの）②教室ごと
+       教室ビュー   … その教室ぶん＋全社ぶんを混ぜて1ブロック
+     ────────────────────────────────────────────── */
+  type Block = { key: string; schoolId: string | null; name: string; withCompany: boolean };
+
+  const blocks: Block[] = useMemo(() => {
+    if (view === ALL_SCHOOLS) {
+      return [
+        { key: COMPANY_KEY, schoolId: null, name: "全社（すべての教室に掲示）", withCompany: true },
+        ...schools.map((s) => ({ key: s.id, schoolId: s.id, name: s.name, withCompany: false })),
+      ];
     }
-    // 動きが新しい順。未読を含むグループを上に。
-    return [...g.values()].sort((a, b) => {
-      const au = a.tasks.some(isUnread) ? 1 : 0;
-      const bu = b.tasks.some(isUnread) ? 1 : 0;
+    const s = schools.find((x) => x.id === view);
+    if (!s) return [];
+    return [{ key: s.id, schoolId: s.id, name: s.name, withCompany: true }];
+  }, [view, schools]);
+
+  const sortTasks = useCallback((list: Task[]) => {
+    return [...list].sort((a, b) => {
+      const au = isUnread(a) ? 1 : 0;
+      const bu = isUnread(b) ? 1 : 0;
       if (au !== bu) return bu - au;
-      const at = Math.max(...a.tasks.map((t) => new Date(lastMsg.get(t.id)?.created_at ?? t.created_at).getTime()));
-      const bt = Math.max(...b.tasks.map((t) => new Date(lastMsg.get(t.id)?.created_at ?? t.created_at).getTime()));
+      const at = new Date(lastMsg.get(a.id)?.created_at ?? a.created_at).getTime();
+      const bt = new Date(lastMsg.get(b.id)?.created_at ?? b.created_at).getTime();
       return bt - at;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tasks, students, readIds, lastMsg, myTeacherId]);
+  }, [lastMsg, readIds, myTeacherId]);
 
-  const roomTasks = useMemo(
-    () => tasks.filter((t) => t.category === "classroom_management" || t.category === "school_rules"),
-    [tasks],
-  );
+  const tasksIn = useCallback((b: Block, kind: TaskKind) => {
+    return sortTasks(tasks.filter((t) => {
+      if (kindOf(t) !== kind) return false;
+      if (b.schoolId === null) return isCompanyWide(t);
+      if (t.school_id === b.schoolId) return true;
+      return b.withCompany && isCompanyWide(t);
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, sortTasks, schoolIds]);
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
   const selectedStudent = selectedTask ? studentOf(selectedTask.student_id) : null;
 
-  const openCompose = (category: Category, studentId?: string) => {
-    setForm({ ...EMPTY_FORM, category, student_id: studentId ?? "" });
-    setFormError("");
-    setCreating(true);
-  };
-
-  /* ── 1件の話題の行 ──────────────────────────────── */
-  const ThreadRow = ({ t, showStudent = false }: { t: Task; showStudent?: boolean }) => {
+  /* ── 1件のタスク行 ──────────────────────────────── */
+  const renderRow = (t: Task, blockSchoolId: string | null) => {
     const last = lastMsg.get(t.id);
     const n = msgCount.get(t.id) ?? 0;
     const unread = isUnread(t);
     const deletable = canDelete(t);
+    const s = studentOf(t.student_id);
+    // その教室のブロックに全社タスクが混ざっているときだけ「全社」と分かるようにする
+    const showCompanyBadge = blockSchoolId !== null && isCompanyWide(t);
+
     return (
       <div
+        key={t.id}
         className={cx(
-          "flex items-start gap-2 rounded-field transition duration-150",
+          "flex items-start gap-1 rounded-field transition duration-150",
           picked.has(t.id) ? "bg-critical-50" : unread ? "bg-brand-50/60 hover:bg-brand-50" : "hover:bg-canvas-sunken",
         )}
       >
-        {/* 削除のための選択。押しても会話は開かない */}
-        <label
-          className={cx(
-            "flex shrink-0 cursor-pointer items-center self-stretch py-3 pl-3",
-            !deletable && "cursor-not-allowed opacity-30",
-          )}
-          title={deletable ? "選んで削除できます" : "書いた本人か管理者だけが削除できます"}
-        >
-          <input
-            type="checkbox"
-            checked={picked.has(t.id)}
-            disabled={!deletable}
-            onChange={() => togglePick(t.id)}
-            className="h-4 w-4 rounded accent-[var(--color-critical-600)]"
-          />
-        </label>
-
-      <button
-        onClick={() => selectTask(t.id)}
-        className="flex min-w-0 flex-1 items-start gap-3 rounded-field py-3 pr-3 text-left"
-      >
-        <span
-          aria-hidden
-          className={cx("mt-2 h-1.5 w-1.5 shrink-0 rounded-pill", unread ? "bg-brand-600" : "bg-transparent")}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-baseline gap-x-2">
-            {showStudent && (
-              <span className="text-xs font-bold text-ink-faint">
-                {t.is_all_students ? "生徒全体" : studentOf(t.student_id)?.name ?? "—"}
-              </span>
+        {tidying && (
+          <label
+            className={cx(
+              "flex shrink-0 cursor-pointer items-center self-stretch py-3 pl-3",
+              !deletable && "cursor-not-allowed opacity-30",
             )}
-            <span className={cx("text-sm", unread ? "font-bold text-ink" : "font-semibold text-ink")}>{t.title}</span>
-            {isAuto(t) && <Badge tone="caution">{AUTO_LABEL[t.source_type ?? ""] ?? "自動"}</Badge>}
-          </span>
+            title={deletable ? "選んで削除できます" : "書いた本人か管理者だけが削除できます"}
+          >
+            <input
+              type="checkbox"
+              checked={picked.has(t.id)}
+              disabled={!deletable}
+              onChange={() => togglePick(t.id)}
+              className="h-4 w-4 rounded accent-[var(--color-critical-600)]"
+            />
+          </label>
+        )}
 
-          {/* 最後の一言。これが「いま何が語られているか」 */}
-          <span className="mt-1 block truncate text-sm leading-6 text-ink-muted">
-            {last ? last.body : t.auto_reason ? t.auto_reason : t.description || "—"}
-          </span>
+        <button
+          onClick={() => selectTask(t.id)}
+          className="flex min-w-0 flex-1 items-start gap-2.5 rounded-field py-3 pl-3 text-left"
+        >
+          <span
+            aria-hidden
+            className={cx("mt-2 h-1.5 w-1.5 shrink-0 rounded-pill", unread ? "bg-brand-600" : "bg-transparent")}
+          />
+          <span className="min-w-0 flex-1">
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {s && <span className="text-xs font-bold text-ink-faint">{s.name}</span>}
+              <span className={cx("text-sm", unread ? "font-bold text-ink" : "font-semibold text-ink")}>{t.title}</span>
+              {isAuto(t) && <Badge tone="caution">{AUTO_LABEL[t.source_type ?? ""] ?? "自動"}</Badge>}
+              {showCompanyBadge && <Badge tone="brand">全社</Badge>}
+            </span>
 
-          <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-faint">
-            <span>{last ? teacherName(last.teacher_id) : isAuto(t) ? "自動" : teacherName(t.created_by)}</span>
-            <span>·</span>
-            <time>{relTime(last?.created_at ?? t.created_at)}</time>
-            {n > 0 && <><span>·</span><span data-numeric>{n}件の声</span></>}
-            {n === 0 && <><span>·</span><span className="font-medium text-brand-600">まだ誰も答えていない</span></>}
+            {/* 最後の一言。これが「いま何が語られているか」 */}
+            <span className="mt-1 block truncate text-sm leading-6 text-ink-muted">
+              {last ? last.body : t.auto_reason ? t.auto_reason : t.description || "—"}
+            </span>
+
+            <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-faint">
+              <span>{last ? teacherName(last.teacher_id) : isAuto(t) ? "自動" : teacherName(t.created_by)}</span>
+              <span>·</span>
+              <time>{relTime(last?.created_at ?? t.created_at)}</time>
+              {t.assignee_id && <><span>·</span><span>担当 {teacherName(t.assignee_id)}</span></>}
+              {t.due_date && <><span>·</span><span data-numeric>期限 {t.due_date}</span></>}
+              {n > 0 && <><span>·</span><span data-numeric>{n}件の声</span></>}
+            </span>
           </span>
-        </span>
-      </button>
+        </button>
+
+        {/* 終了ボタン。行から直接押せる */}
+        <div className="shrink-0 self-center py-2 pr-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => finishTask(t.id, t.title)}
+            disabled={finishing === t.id}
+          >
+            {finishing === t.id ? <Spinner className="h-3 w-3" /> : "終了"}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  /* ── 教務／事務の1列（タスク一覧＋入力） ─────────── */
+  const renderColumn = (b: Block, kind: TaskKind) => {
+    const list = tasksIn(b, kind);
+    const composeKey = `${b.key}:${kind}`;
+    const open = composeAt === composeKey;
+    // 教務は生徒を選べる。その教室の生徒を出す（未所属しかいなければ全員）。
+    const schoolStudents = b.schoolId
+      ? students.filter((s) => s.school_id === b.schoolId)
+      : students;
+    const studentOptions = schoolStudents.length > 0 ? schoolStudents : students;
+
+    return (
+      <div className="flex min-w-0 flex-col">
+        <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+          <p className="flex items-baseline gap-2">
+            <span className={cx("text-sm font-bold", kind === "academic" ? "text-brand-700" : "text-ink")}>
+              {KIND_LABEL[kind]}
+            </span>
+            <span data-numeric className="text-xs text-ink-faint">{list.length}件</span>
+          </p>
+          {kind === "academic" && (
+            <span className="text-[0.6875rem] text-ink-faint">報告書・保護者から自動掲載</span>
+          )}
+        </div>
+
+        <div className="flex-1 p-1.5">
+          {list.length === 0 ? (
+            <p className="px-3 py-6 text-center text-xs leading-5 text-ink-faint">
+              {kind === "academic"
+                ? "いま気がかりな生徒はいません。"
+                : "事務のやることはありません。"}
+            </p>
+          ) : (
+            list.map((t) => renderRow(t, b.schoolId))
+          )}
+        </div>
+
+        {/* 入力 */}
+        <div className="border-t border-line px-3 py-2.5">
+          {!open ? (
+            <button
+              onClick={() => openCompose(b.key, kind, b.schoolId)}
+              className="w-full rounded-field border border-dashed border-line-strong py-2 text-xs font-semibold text-ink-muted transition hover:border-brand-400 hover:text-brand-700"
+            >
+              ＋ {KIND_LABEL[kind]}を追加
+            </button>
+          ) : (
+            <div className="space-y-2.5">
+              <input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder={kind === "academic" ? "例：長文の読み方を来週から変える" : "例：プリンターのトナーを発注する"}
+                className={inputClass}
+                autoFocus
+              />
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={2}
+                placeholder="詳しく（任意）"
+                className={cx(inputClass, "resize-none")}
+              />
+
+              {kind === "academic" && (
+                <select
+                  value={form.student_id}
+                  onChange={(e) => setForm({ ...form, student_id: e.target.value })}
+                  className={inputClass}
+                >
+                  <option value="">— 生徒を選ぶ（任意）—</option>
+                  {studentOptions.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>
+                  ))}
+                </select>
+              )}
+
+              {b.schoolId !== null && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setForm({ ...form, toCompany: false })}
+                    className={cx("flex-1 rounded-field border py-1.5 text-xs font-semibold transition",
+                      !form.toCompany ? "border-brand-400 bg-brand-50 text-brand-700" : "border-line-strong text-ink-muted hover:bg-canvas-sunken")}
+                  >
+                    この教室だけ
+                  </button>
+                  <button
+                    onClick={() => setForm({ ...form, toCompany: true })}
+                    className={cx("flex-1 rounded-field border py-1.5 text-xs font-semibold transition",
+                      form.toCompany ? "border-brand-400 bg-brand-50 text-brand-700" : "border-line-strong text-ink-muted hover:bg-canvas-sunken")}
+                  >
+                    全社（全教室に掲示）
+                  </button>
+                </div>
+              )}
+
+              {formError && <p className="text-xs font-medium text-critical-600">{formError}</p>}
+
+              <div className="flex justify-end gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setComposeAt(null)}>やめる</Button>
+                <Button size="sm" onClick={() => saveTask(kind, b.schoolId)} disabled={saving}>
+                  {saving ? <><Spinner className="h-3 w-3 border-white/40 border-t-white" />追加中…</> : "追加する"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-6 sm:px-8 sm:py-9">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-8 sm:py-9">
       <PageHeader
         title="講師連携"
-        description="気になること、うまくいったこと。ここで話しましょう。"
+        description="教室ごとに、教務と事務のやることを並べています。終わったら「終了」を押してください。"
         actions={
-          tasks.length > 0 && picked.size === 0 ? (
-            <button
-              onClick={() => setPicked(new Set(tasks.filter(canDelete).map((t) => t.id)))}
-              className="text-xs font-medium text-ink-faint transition hover:text-ink"
-            >
-              まとめて削除する
-            </button>
+          tasks.length > 0 ? (
+            tidying ? (
+              <button onClick={stopTidying} className="text-xs font-medium text-ink-faint transition hover:text-ink">
+                整理をやめる
+              </button>
+            ) : (
+              <button onClick={() => setTidying(true)} className="text-xs font-medium text-ink-faint transition hover:text-ink">
+                いらないものを整理する
+              </button>
+            )
           ) : null
         }
       />
 
-      {/* 選択中だけ出る操作バー。ふだんは画面に出さない */}
-      {picked.size > 0 && (
+      {/* ══ 教室を選ぶ ════════════════════════════════ */}
+      <div className="mb-6 flex flex-wrap gap-2">
+        <button
+          onClick={() => selectView(ALL_SCHOOLS)}
+          aria-pressed={view === ALL_SCHOOLS}
+          className={cx(
+            "rounded-pill border px-4 py-1.5 text-sm font-semibold transition",
+            view === ALL_SCHOOLS
+              ? "border-brand-600 bg-brand-50 text-brand-800 ring-1 ring-brand-600"
+              : "border-line-strong bg-surface text-ink-muted hover:border-brand-200 hover:text-ink",
+          )}
+        >
+          全教室
+        </button>
+        {schools.map((s) => {
+          const active = view === s.id;
+          const open = tasks.filter((t) => t.school_id === s.id || isCompanyWide(t)).length;
+          return (
+            <button
+              key={s.id}
+              onClick={() => selectView(s.id)}
+              aria-pressed={active}
+              className={cx(
+                "rounded-pill border px-4 py-1.5 text-sm font-semibold transition",
+                active
+                  ? "border-brand-600 bg-brand-50 text-brand-800 ring-1 ring-brand-600"
+                  : "border-line-strong bg-surface text-ink-muted hover:border-brand-200 hover:text-ink",
+              )}
+            >
+              {s.name}
+              <span data-numeric className="ml-1.5 text-xs font-normal text-ink-faint">{open}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 整理モードの操作バー */}
+      {tidying && (
         <div className="sticky top-2 z-20 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-card border border-critical-200 bg-critical-50 px-4 py-3 shadow-card">
           <p className="text-sm font-semibold text-critical-700">
             <span data-numeric>{picked.size}</span> 件を選択中
@@ -511,95 +735,61 @@ export default function CollaborationPage() {
             >
               すべて選択
             </button>
-            <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>
-              やめる
-            </Button>
-            <Button size="sm" variant="danger" onClick={deletePicked} disabled={deleting}>
+            <Button size="sm" variant="ghost" onClick={stopTidying}>やめる</Button>
+            <Button size="sm" variant="danger" onClick={deletePicked} disabled={deleting || picked.size === 0}>
               {deleting ? <><Spinner className="h-3 w-3" />削除中…</> : `${picked.size}件を削除`}
             </Button>
           </div>
         </div>
       )}
 
-      {/* ══ 上：生徒について ══════════════════════════ */}
-      <section className="mb-10">
-        <SectionTitle
-          action={
-            <Button size="sm" variant="secondary" onClick={() => openCompose("student_guidance")}>
-              生徒のことを話す
-            </Button>
-          }
-        >
-          生徒について
-        </SectionTitle>
+      {/* ══ 教室ごと：教務／事務を並べる ═══════════════ */}
+      {loading ? (
+        <Card><div className="flex justify-center py-10"><Spinner className="h-5 w-5" /></div></Card>
+      ) : schools.length === 0 ? (
+        <EmptyState
+          icon="🏫"
+          title="教室が登録されていません"
+          description="先に「教室・名簿」で教室を登録してください。"
+          action={<LinkButton href="/teacher/dashboard/schools">教室・名簿へ</LinkButton>}
+        />
+      ) : (
+        <div className="space-y-6">
+          {syncing && (
+            <p className="flex items-center gap-2 text-xs text-ink-faint">
+              <Spinner className="h-3 w-3" />
+              報告書と保護者とのやりとりを読んでいます…
+            </p>
+          )}
 
-        {loading ? (
-          <Card><div className="flex justify-center py-8"><Spinner className="h-5 w-5" /></div></Card>
-        ) : studentGroups.length === 0 ? (
-          <EmptyState
-            icon="🧑‍🎓"
-            title="まだ誰の話も出ていません"
-            description="気になった子のことを、ひとことでいいので書いてみてください。ほかの先生が続けてくれます。"
-            action={<Button onClick={() => openCompose("student_guidance")}>生徒のことを話す</Button>}
-          />
-        ) : (
-          <div className="space-y-2.5">
-            {studentGroups.map((g) => (
-              <Card key={g.key} padding="none" className="overflow-hidden">
-                <div className="flex items-center justify-between gap-3 border-b border-line bg-canvas/60 px-4 py-2.5">
-                  <p className="flex items-baseline gap-2">
-                    <span className="font-bold text-ink">{g.name}</span>
-                    {g.grade && <span className="text-xs text-ink-faint">{g.grade}</span>}
-                  </p>
-                  {g.key !== "__all__" && g.key !== "__none__" && (
-                    <button
-                      onClick={() => openCompose("student_guidance", g.key)}
-                      className="text-xs font-semibold text-brand-600 transition hover:underline"
-                    >
-                      この子について書く
-                    </button>
+          {blocks.map((b) => (
+            <Card key={b.key} padding="none" className="overflow-hidden">
+              {/* 教室名 */}
+              <div className="flex items-center justify-between gap-3 border-b border-line bg-canvas/60 px-4 py-3">
+                <p className="flex items-baseline gap-2">
+                  <span className="text-base font-bold text-ink">{b.name}</span>
+                  {b.schoolId && schools.find((s) => s.id === b.schoolId)?.group_name && (
+                    <span className="text-xs text-ink-faint">
+                      {schools.find((s) => s.id === b.schoolId)?.group_name}
+                    </span>
                   )}
-                </div>
-                <div className="divide-line p-1.5">
-                  {g.tasks.map((t) => <ThreadRow key={t.id} t={t} />)}
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
+                </p>
+                <span data-numeric className="text-xs text-ink-faint">
+                  教務 {tasksIn(b, "academic").length} ／ 事務 {tasksIn(b, "admin").length}
+                </span>
+              </div>
 
-      {/* ══ 下：教室運営 ══════════════════════════════ */}
-      <section>
-        <SectionTitle
-          action={
-            <Button size="sm" variant="secondary" onClick={() => openCompose("classroom_management")}>
-              議題を立てる
-            </Button>
-          }
-        >
-          教室運営
-        </SectionTitle>
+              {/* 教務タスク ｜ 事務タスク */}
+              <div className="grid grid-cols-1 divide-y divide-line md:grid-cols-2 md:divide-x md:divide-y-0">
+                {renderColumn(b, "academic")}
+                {renderColumn(b, "admin")}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
-        {loading ? (
-          <Card><div className="flex justify-center py-8"><Spinner className="h-5 w-5" /></div></Card>
-        ) : roomTasks.length === 0 ? (
-          <EmptyState
-            icon="🏫"
-            title="いま議論中の議題はありません"
-            description="備品・掲示・保護者対応・ルールなど、みんなで決めたいことを書いてください。"
-            action={<Button onClick={() => openCompose("classroom_management")}>議題を立てる</Button>}
-          />
-        ) : (
-          <Card padding="none" className="overflow-hidden">
-            <div className="divide-line p-1.5">
-              {roomTasks.map((t) => <ThreadRow key={t.id} t={t} />)}
-            </div>
-          </Card>
-        )}
-      </section>
-
-      {/* ══ 詳細（会話） ══════════════════════════════ */}
+      {/* ══ 詳細（会話・担当・期限） ═══════════════════ */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink/45 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
           onClick={closeDetail}>
@@ -612,10 +802,16 @@ export default function CollaborationPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {selectedTask.category === "student_guidance" && (
+                    <Badge tone={kindOf(selectedTask) === "academic" ? "brand" : "neutral"}>
+                      {KIND_LABEL[kindOf(selectedTask)]}
+                    </Badge>
+                    <span className="text-xs font-semibold text-ink-faint">
+                      {isCompanyWide(selectedTask) ? "全社" : schoolName(selectedTask.school_id) ?? "教室未設定"}
+                    </span>
+                    {selectedStudent && (
                       <span className="text-sm font-bold text-brand-700">
-                        {selectedTask.is_all_students ? "生徒全体" : selectedStudent?.name ?? "—"}
-                        {selectedStudent?.grade && <span className="ml-1 text-xs font-medium text-ink-faint">{selectedStudent.grade}</span>}
+                        {selectedStudent.name}
+                        {selectedStudent.grade && <span className="ml-1 text-xs font-medium text-ink-faint">{selectedStudent.grade}</span>}
                       </span>
                     )}
                     {isAuto(selectedTask) && (
@@ -636,7 +832,7 @@ export default function CollaborationPage() {
             </div>
 
             {/* その子の事実。会話の材料が同じ画面にある */}
-            {selectedTask.category === "student_guidance" && !selectedTask.is_all_students && (
+            {selectedTask.student_id && (
               <div className="shrink-0 border-b border-line bg-canvas px-5 py-3">
                 <p className="mb-2 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
                   いまの{selectedStudent?.name ?? "この子"}
@@ -688,13 +884,11 @@ export default function CollaborationPage() {
                     )}
                   </dl>
                 )}
-                {selectedTask.student_id && (
-                  <div className="mt-2">
-                    <LinkButton href={`/teacher/dashboard/students/${selectedTask.student_id}`} variant="ghost" size="sm">
-                      この子の全部を見る →
-                    </LinkButton>
-                  </div>
-                )}
+                <div className="mt-2">
+                  <LinkButton href={`/teacher/dashboard/students/${selectedTask.student_id}`} variant="ghost" size="sm">
+                    この子の全部を見る →
+                  </LinkButton>
+                </div>
               </div>
             )}
 
@@ -746,121 +940,50 @@ export default function CollaborationPage() {
                 </Button>
               </div>
 
-              {/* 担当・期限・終了は前に出さない。必要な人だけ開く */}
-              <div className="mt-2">
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                 <button
                   onClick={() => setShowDetails((v) => !v)}
                   className="text-xs font-medium text-ink-faint transition hover:text-ink"
                 >
-                  {showDetails ? "▲ 担当・期限をとじる" : "▼ 担当・期限・この話を終わりにする"}
+                  {showDetails ? "▲ 担当・期限をとじる" : "▼ 担当・期限を決める"}
                 </button>
-
-                {showDetails && (
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3 rounded-field bg-canvas px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-ink-faint">担当</span>
-                      {canAssign(selectedTask) ? (
-                        <select
-                          value={selectedTask.assignee_id ?? ""}
-                          onChange={(e) => assignTask(selectedTask.id, e.target.value)}
-                          className="rounded-field border border-line-strong bg-surface px-2 py-1 text-xs"
-                        >
-                          <option value="">— 未割当 —</option>
-                          {assignCandidates.map((t) => (
-                            <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="text-xs font-semibold text-ink">{teacherName(selectedTask.assignee_id)}</span>
-                      )}
-                      {selectedTask.due_date && (
-                        <span data-numeric className="text-xs text-ink-faint">期限 {selectedTask.due_date}</span>
-                      )}
-                    </div>
-
-                    {canComplete(selectedTask) ? (
-                      <Button size="sm" variant="secondary" onClick={() => finishTask(selectedTask.id, isAuto(selectedTask))}>
-                        {isAuto(selectedTask) ? "対応した" : "この話を終わりにする"}
-                      </Button>
-                    ) : (
-                      <span className="text-xs text-ink-faint">
-                        {selectedTask.assignee_id ? "担当者か上位の先生が終了できます" : "先に担当を決めてください"}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <Button size="sm" variant="secondary"
+                  onClick={() => finishTask(selectedTask.id, selectedTask.title)}
+                  disabled={finishing === selectedTask.id}>
+                  {finishing === selectedTask.id ? <Spinner className="h-3 w-3" /> : "終了"}
+                </Button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ══ 書く ══════════════════════════════════════ */}
-      {creating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4 backdrop-blur-[2px]"
-          onClick={() => setCreating(false)}>
-          <div className="w-full max-w-lg rounded-card bg-surface p-6 shadow-pop" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-ink">
-              {form.category === "student_guidance" ? "生徒のことを話す" : "議題を立てる"}
-            </h3>
-            <p className="mt-1 text-sm text-ink-muted">
-              {form.category === "student_guidance"
-                ? "完璧に書かなくて大丈夫です。気づいたことを一行で。"
-                : "みんなで決めたいことを書いてください。"}
-            </p>
-
-            <div className="mt-5 space-y-4">
-              {form.category === "student_guidance" && (
-                <div>
-                  <p className="mb-1.5 text-sm font-semibold text-ink">誰のこと？</p>
-                  <div className="mb-2 flex gap-2">
-                    <button onClick={() => setForm({ ...form, is_all_students: false })}
-                      className={cx("flex-1 rounded-field border py-2 text-xs font-semibold transition",
-                        !form.is_all_students ? "border-brand-400 bg-brand-50 text-brand-700" : "border-line-strong text-ink-muted hover:bg-canvas-sunken")}>
-                      ひとりの生徒
-                    </button>
-                    <button onClick={() => setForm({ ...form, is_all_students: true, student_id: "" })}
-                      className={cx("flex-1 rounded-field border py-2 text-xs font-semibold transition",
-                        form.is_all_students ? "border-brand-400 bg-brand-50 text-brand-700" : "border-line-strong text-ink-muted hover:bg-canvas-sunken")}>
-                      生徒全体
-                    </button>
-                  </div>
-                  {!form.is_all_students && (
-                    <select value={form.student_id} onChange={(e) => setForm({ ...form, student_id: e.target.value })}
-                      className={inputClass}>
-                      <option value="">— 生徒を選ぶ —</option>
-                      {students.map((s) => <option key={s.id} value={s.id}>{s.name}（{s.grade}）</option>)}
+              {showDetails && (
+                <div className="mt-2 flex flex-wrap items-center gap-3 rounded-field bg-canvas px-3 py-2.5">
+                  <span className="text-xs font-semibold text-ink-faint">担当</span>
+                  {canAssign(selectedTask) ? (
+                    <select
+                      value={selectedTask.assignee_id ?? ""}
+                      onChange={(e) => assignTask(selectedTask.id, e.target.value)}
+                      className="rounded-field border border-line-strong bg-surface px-2 py-1 text-xs"
+                    >
+                      <option value="">— 未割当 —</option>
+                      {assignCandidates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}（{ROLE_LABEL[t.role] ?? t.role}）</option>
+                      ))}
                     </select>
+                  ) : (
+                    <span className="text-xs font-semibold text-ink">{teacherName(selectedTask.assignee_id)}</span>
                   )}
+                  <span className="text-xs font-semibold text-ink-faint">期限</span>
+                  <input
+                    type="date"
+                    value={selectedTask.due_date ?? ""}
+                    onChange={async (e) => {
+                      const due = e.target.value || null;
+                      await supabase.from("collaboration_tasks").update({ due_date: due }).eq("id", selectedTask.id);
+                      setTasks((prev) => prev.map((t) => (t.id === selectedTask.id ? { ...t, due_date: due } : t)));
+                    }}
+                    className="rounded-field border border-line-strong bg-surface px-2 py-1 text-xs"
+                  />
                 </div>
               )}
-
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-ink">ひとこと</span>
-                <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  placeholder={form.category === "student_guidance"
-                    ? "例：宿題が続けて出ていない"
-                    : "例：自習室の私語、どこまで許すか"}
-                  className={inputClass} autoFocus />
-              </label>
-
-              <label className="block">
-                <span className="mb-1.5 block text-sm font-semibold text-ink">
-                  もう少し詳しく <span className="font-normal text-ink-faint">（任意）</span>
-                </span>
-                <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  rows={3} placeholder="見えたこと・気になったこと"
-                  className={cx(inputClass, "resize-none")} />
-              </label>
-
-              {formError && <p className="text-sm font-medium text-critical-600">{formError}</p>}
-            </div>
-
-            <div className="mt-6 flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCreating(false)}>やめる</Button>
-              <Button onClick={saveTask} disabled={saving}>
-                {saving ? <><Spinner className="h-4 w-4 border-white/40 border-t-white" />投稿中…</> : "投稿する"}
-              </Button>
             </div>
           </div>
         </div>
