@@ -145,10 +145,16 @@ export default function BillingPage() {
                 : `${Number(ym.split("-")[1]) - 1}月27日`}</b> に口座振替です。
             </p>
           </div>
-          <select value={ym} onChange={(e) => { setYm(e.target.value); setOpen(null); }}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400">
-            {monthOptions().map((m) => <option key={m} value={m}>{m.replace("-", "年")}月分</option>)}
-          </select>
+          <div className="flex items-center gap-2">
+            <Link href="/teacher/dashboard/billing/plans"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              料金プラン
+            </Link>
+            <select value={ym} onChange={(e) => { setYm(e.target.value); setOpen(null); }}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-400">
+              {monthOptions().map((m) => <option key={m} value={m}>{m.replace("-", "年")}月分</option>)}
+            </select>
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-4">

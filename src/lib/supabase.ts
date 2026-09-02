@@ -104,8 +104,12 @@ export type BillingPlan = {
   price_excl: number | null;
   price_incl: number | null;
   revised_at: string | null;
-  retired: boolean;
+  retired: boolean;          // true=もう使わない。過去の明細が参照するので行は消さない
+  source: string;            // tsunagu=同期で更新 / manual=まなびで作った・直した
+  note: string | null;
+  sort_order: number;
   synced_at: string;
+  updated_at: string;
 };
 
 export type BillingItem = {
