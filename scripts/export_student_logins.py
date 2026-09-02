@@ -15,6 +15,7 @@ import html
 import io
 import json
 import os
+import re
 import sys
 import urllib.request
 from collections import defaultdict
@@ -25,6 +26,12 @@ ENV_PATH = r"C:\Users\user\Desktop\manabi-saas\.env.local"
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", "student_logins")
 LOGIN_URL = "https://manabi-saas.vercel.app/student/login"
 GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3", "高1", "高2", "高3"]
+
+# issue_student_logins.py が発行したIDの形（教室コード3文字＋連番3桁）。
+# これ以外（講師ダッシュボードで手動発行した s-xxxxx など）は作成時に
+# 講師が打ったパスワードなので、共通の初期パスワードではない。
+ISSUED_ID = re.compile(r"^[a-z]+\d{3}$")
+MANUAL_PW = "個別設定（不明なら講師画面でリセット）"
 
 
 def load_env():
@@ -62,6 +69,7 @@ table { width: 100%; border-collapse: collapse; font-size: 10pt; }
 th, td { border: 1px solid #d1d5db; padding: 2.2mm 3mm; text-align: left; }
 th { background: #eef2ff; font-weight: 700; }
 td.id { font-family: Consolas, monospace; font-weight: 700; letter-spacing: .4px; }
+td.manual { font-size: 8.5pt; color: #b45309; }
 tr:nth-child(even) td { background: #fafafa; }
 .school { page-break-before: always; }
 .school:first-of-type { page-break-before: auto; }
@@ -91,22 +99,34 @@ def main():
     for school in sorted(by):
         arr = sorted(by[school], key=lambda s: (grade_key(s.get("grade")), s["name"]))
 
+        def pw_of(s):
+            """この子のパスワード欄。一括発行ぶんだけ共通の初期パスワードが効く。"""
+            if not args.password:
+                return ""
+            return args.password if ISSUED_ID.match(s.get("login_id") or "") else MANUAL_PW
+
         csv_path = os.path.join(OUT_DIR, f"{school}.csv")
         with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-            f.write("学年,氏名,ログインID,状態\n")
+            f.write("学年,氏名,ログインID,パスワード,状態\n")
             for s in arr:
                 state = "利用可" if s.get("auth_user_id") else "未発行"
-                f.write(f"{s.get('grade') or ''},{s['name']},{s.get('login_id') or ''},{state}\n")
+                f.write(f"{s.get('grade') or ''},{s['name']},{s.get('login_id') or ''},{pw_of(s)},{state}\n")
 
         rows = "\n".join(
             f"<tr><td>{html.escape(s.get('grade') or '')}</td>"
             f"<td>{html.escape(s['name'])}</td>"
             f"<td class='id'>{html.escape(s.get('login_id') or '—')}</td>"
+            f"<td class='{'id' if ISSUED_ID.match(s.get('login_id') or '') else 'manual'}'>"
+            f"{html.escape(pw_of(s))}</td>"
             f"<td>{'利用可' if s.get('auth_user_id') else '未発行'}</td></tr>"
             for s in arr
         )
+        n_manual = sum(1 for s in arr if not ISSUED_ID.match(s.get("login_id") or ""))
         pw = (f"<br>初期パスワード（全員共通）：<b>{html.escape(args.password)}</b>"
               "　初回ログイン後、講師画面から個別に変更できます。") if args.password else ""
+        if args.password and n_manual:
+            pw += (f"<br>ただし<b>{n_manual}名</b>は登録のしかたが違うため、この共通パスワードでは入れません"
+                   "（表に「個別設定」と書いてある子）。分からなければ講師画面からリセットしてください。")
         parts.append(f"""
 <section class="school">
   <h1>{html.escape(school)}　生徒ログイン一覧</h1>
@@ -116,8 +136,9 @@ def main():
     <br>この紙にはログイン情報が載っています。配り終えたら手元に残さないでください。
   </div>
   <table>
-    <tr><th style="width:12%">学年</th><th style="width:42%">氏名</th>
-        <th style="width:26%">ログインID</th><th style="width:20%">状態</th></tr>
+    <tr><th style="width:9%">学年</th><th style="width:29%">氏名</th>
+        <th style="width:17%">ログインID</th><th style="width:30%">パスワード</th>
+        <th style="width:15%">状態</th></tr>
     {rows}
   </table>
 </section>""")
