@@ -953,7 +953,9 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   const sorted = [...filtered].sort((a, b) => {
     const dir = sortAsc ? 1 : -1;
     if (sortKey === "grade") {
-      const d = GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade);
+      // GRADE_ORDER に無い学年（「その他」など）は末尾に寄せる
+      const rank = (g: string) => { const i = GRADE_ORDER.indexOf(g); return i === -1 ? 999 : i; };
+      const d = rank(a.grade) - rank(b.grade);
       if (d !== 0) return d * dir;
       return (a.furigana ?? a.name).localeCompare(b.furigana ?? b.name, "ja");
     }
@@ -1034,16 +1036,33 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
             条件をリセット（{filterCount}）
           </button>
         )}
-        <span className="ml-auto text-xs text-slate-500">{sorted.length} / {students.length}名</span>
-        <div className="flex overflow-hidden rounded-xl border border-slate-200">
-          <button onClick={() => setView("list")}
-            className={`px-3 py-1.5 text-xs font-semibold ${view === "list" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-            一覧
+        {/* 並び替えと表示切替は右側にひとかたまりで置く。
+            条件が増えて折り返しても、バラバラに散らないようにするため。 */}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* 学年は列に出していないので、並び替えはここから選ぶ。
+              氏名・学校は表の見出しクリックでも変えられて、状態は共通。 */}
+          <span className="text-xs font-semibold text-slate-400">並び替え</span>
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400">
+            <option value="name">氏名（五十音）</option>
+            <option value="grade">学年</option>
+            <option value="school_name">学校</option>
+          </select>
+          <button onClick={() => setSortAsc(!sortAsc)}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-white">
+            {sortAsc ? "昇順 ↑" : "降順 ↓"}
           </button>
-          <button onClick={() => setView("card")}
-            className={`px-3 py-1.5 text-xs font-semibold ${view === "card" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
-            カード
-          </button>
+          <span className="whitespace-nowrap text-xs text-slate-500">{sorted.length} / {students.length}名</span>
+          <div className="flex overflow-hidden rounded-xl border border-slate-200">
+            <button onClick={() => setView("list")}
+              className={`px-3 py-1.5 text-xs font-semibold ${view === "list" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+              一覧
+            </button>
+            <button onClick={() => setView("card")}
+              className={`px-3 py-1.5 text-xs font-semibold ${view === "card" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+              カード
+            </button>
+          </div>
         </div>
       </div>
 
