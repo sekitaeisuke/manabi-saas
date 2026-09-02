@@ -4,7 +4,7 @@ import { toDisplayId } from "@/lib/teacherLogin";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Fragment, Suspense, useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import type { School, Teacher, Student } from "@/lib/supabase";
@@ -213,6 +213,8 @@ function SchoolsTab({ schools, isAdmin, onRefresh }: {
   const [saving, setSaving] = useState(false);
   const [editGroupId, setEditGroupId] = useState<string | null>(null);
   const [editGroupName, setEditGroupName] = useState("");
+  // 住所・電話は普段は畳んでおく。並べると行が伸びて一覧が崩れるため。
+  const [openSchool, setOpenSchool] = useState<string | null>(null);
 
   const save = async () => {
     if (!form.name) return;
@@ -320,8 +322,19 @@ function SchoolsTab({ schools, isAdmin, onRefresh }: {
                           )
                         )}
                         {s.admin_name && <p className="mt-1 text-sm text-slate-500">管理者：{s.admin_name}</p>}
-                        {s.address && <p className="text-sm text-slate-500">{s.address}</p>}
-                        {s.phone && <p className="text-sm text-slate-500">{s.phone}</p>}
+                        {(s.address || s.phone) && (
+                          <button
+                            onClick={() => setOpenSchool(openSchool === s.id ? null : s.id)}
+                            className="mt-1.5 text-xs font-semibold text-indigo-500 hover:underline">
+                            {openSchool === s.id ? "住所・電話を隠す \u25b2" : "住所・電話を見る \u25bc"}
+                          </button>
+                        )}
+                        {openSchool === s.id && (
+                          <dl className="mt-2 rounded-xl bg-slate-50 p-3">
+                            <RowDetail label="住所">{s.address || <Dash />}</RowDetail>
+                            <RowDetail label="電話番号">{s.phone || <Dash />}</RowDetail>
+                          </dl>
+                        )}
                         <p className="mt-2 text-xs text-slate-400">登録：{s.created_at.slice(0, 10)}</p>
                       </div>
                       {isAdmin && (
@@ -360,6 +373,8 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
   // ログインできる講師（＝Supabase Auth ユーザがあるメール）の一覧
   const [accountEmails, setAccountEmails] = useState<Set<string>>(new Set());
   const [pwModal, setPwModal] = useState<TeacherPwModal>(null);
+  // ログインIDは普段は伏せておく（見せる相手が限られるため）。
+  const [openTeacher, setOpenTeacher] = useState<string | null>(null);
   const [issuing, setIssuing] = useState(false);
   const [issued, setIssued] = useState<{ email: string; password: string } | null>(null);
 
@@ -526,8 +541,19 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
                         : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">ログイン未発行</span>
                     )}
                   </div>
-                  {t.email && <p className="mt-1 text-sm text-slate-500">{toDisplayId(t.email)}</p>}
                   <p className="mt-1 text-sm text-slate-500">所属：{schoolName(t.school_id)}</p>
+                  {t.email && (
+                    <button
+                      onClick={() => setOpenTeacher(openTeacher === t.id ? null : t.id)}
+                      className="mt-1.5 text-xs font-semibold text-indigo-500 hover:underline">
+                      {openTeacher === t.id ? "ログインIDを隠す \u25b2" : "ログインIDを見る \u25bc"}
+                    </button>
+                  )}
+                  {openTeacher === t.id && t.email && (
+                    <p className="mt-1.5 rounded-xl bg-slate-50 px-3 py-2 font-mono text-sm text-slate-700">
+                      {toDisplayId(t.email)}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-slate-400">登録：{t.created_at.slice(0, 10)}</p>
                   {isAdmin && (
                     t.email ? (
@@ -711,6 +737,8 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   const [fMissing, setFMissing] = useState(false);      // 住所か電話が空の子だけ
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
+  // 一覧で開いている行。ログインIDと住所は普段は畳んでおく。
+  const [openRow, setOpenRow] = useState<string | null>(null);
 
   const openEdit = (s: Student) => {
     setEditModal({
@@ -1156,68 +1184,96 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
           条件に一致する生徒が見つかりません
         </div>
       ) : view === "list" ? (
-        /* 一覧（表）：氏名・学年・在籍学校を柱に、上から縦に並べる */
+        /* 一覧（表）：普段は氏名・在籍学校・校舎・電話だけ。
+           ログインIDや住所は行をクリックすると下に開く。 */
         <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full min-w-[52rem] text-sm">
+          <table className="w-full min-w-[40rem] text-sm">
             <thead className="bg-slate-50 text-xs text-slate-500">
               <tr>
                 <SortTh label="氏名" active={sortKey === "name"} asc={sortAsc} onClick={() => toggleSort("name")} />
-                <SortTh label="学年" active={sortKey === "grade"} asc={sortAsc} onClick={() => toggleSort("grade")} />
-                <SortTh label="在籍学校" active={sortKey === "school_name"} asc={sortAsc} onClick={() => toggleSort("school_name")} />
+                <SortTh label="学校" active={sortKey === "school_name"} asc={sortAsc} onClick={() => toggleSort("school_name")} />
                 <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">校舎</th>
                 <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">電話番号</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">住所</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">ログインID</th>
-                <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">操作</th>
+                <th className="w-10 px-2 py-2.5" />
               </tr>
             </thead>
             <tbody>
-              {sorted.map((s) => (
-                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/70">
-                  <td className="whitespace-nowrap px-4 py-2.5">
-                    {s.furigana && <div className="text-[11px] leading-tight text-slate-400">{s.furigana}</div>}
-                    <Link href={`/teacher/dashboard/students/${s.id}`}
-                      className="font-semibold text-slate-900 hover:text-indigo-600 hover:underline">
-                      {s.name}
-                    </Link>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{s.grade}</td>
-                  <td className="px-4 py-2.5 text-slate-600">{s.school_name || <span className="text-slate-300">—</span>}</td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{schoolName(s.school_id)}</td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{s.phone || <span className="text-slate-300">—</span>}</td>
-                  <td className="max-w-72 px-4 py-2.5 text-xs text-slate-500">
-                    {s.address
-                      ? <span title={s.address}>{s.postal_code ? `〒${s.postal_code} ` : ""}{s.address}</span>
-                      : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5">
-                    {s.login_id
-                      ? <span className="font-mono text-xs text-slate-600">{s.login_id}</span>
-                      : <span className="text-xs text-amber-600">未発行</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                    <button onClick={() => openEdit(s)}
-                      className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs text-indigo-600 hover:bg-indigo-50">
-                      編集
-                    </button>
-                    {s.login_id ? (
-                      <button onClick={() => openResetModal(s)}
-                        className="ml-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-50">
-                        🔑
-                      </button>
-                    ) : (
-                      <button onClick={() => openAccountModal(s)}
-                        className="ml-1.5 rounded-lg border border-indigo-300 bg-white px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-50">
-                        発行
-                      </button>
+              {sorted.map((s) => {
+                const open = openRow === s.id;
+                return (
+                  <Fragment key={s.id}>
+                    <tr
+                      onClick={() => setOpenRow(open ? null : s.id)}
+                      className={`cursor-pointer border-t border-slate-100 ${open ? "bg-indigo-50/50" : "hover:bg-slate-50/70"}`}
+                    >
+                      <td className="whitespace-nowrap px-4 py-2.5">
+                        {s.furigana && <div className="text-[11px] leading-tight text-slate-400">{s.furigana}</div>}
+                        <span className="font-semibold text-slate-900">{s.name}</span>
+                        <span className="ml-1.5 text-xs text-slate-400">{s.grade}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600">{s.school_name || <span className="text-slate-300">—</span>}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{schoolName(s.school_id)}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{s.phone || <span className="text-slate-300">—</span>}</td>
+                      <td className="px-2 py-2.5 text-center text-slate-400">{open ? "\u25b2" : "\u25bc"}</td>
+                    </tr>
+                    {open && (
+                      <tr className="border-t border-indigo-100 bg-indigo-50/30">
+                        {/* クリックで畳まないよう、中身側でクリックを止める */}
+                        <td colSpan={5} className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+                          <dl className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                            <RowDetail label="ログインID">
+                              {s.login_id
+                                ? <span className="font-mono">{s.login_id}</span>
+                                : <span className="text-amber-600">未発行</span>}
+                            </RowDetail>
+                            <RowDetail label="生年月日">{s.birthday || <Dash />}</RowDetail>
+                            <RowDetail label="住所">
+                              {s.address
+                                ? <>{s.postal_code ? `〒${s.postal_code} ` : ""}{s.address}</>
+                                : <Dash />}
+                            </RowDetail>
+                            <RowDetail label="通塾曜日">
+                              {s.attendance_days && s.attendance_days.length > 0
+                                ? s.attendance_days.join("・")
+                                : <Dash />}
+                            </RowDetail>
+                            {s.note && (
+                              <div className="sm:col-span-2">
+                                <RowDetail label="備考">{s.note}</RowDetail>
+                              </div>
+                            )}
+                          </dl>
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            <Link href={`/teacher/dashboard/students/${s.id}`}
+                              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50">
+                              カルテを見る
+                            </Link>
+                            <button onClick={() => openEdit(s)}
+                              className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs text-indigo-600 hover:bg-indigo-50">
+                              編集
+                            </button>
+                            {s.login_id ? (
+                              <button onClick={() => openResetModal(s)}
+                                className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-50">
+                                🔑 パスワードを再設定
+                              </button>
+                            ) : (
+                              <button onClick={() => openAccountModal(s)}
+                                className="rounded-lg border border-indigo-300 bg-white px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-50">
+                                アカウント発行
+                              </button>
+                            )}
+                            <button onClick={() => del(s.id)}
+                              className="rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs text-red-600 hover:bg-red-50">
+                              削除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
                     )}
-                    <button onClick={() => del(s.id)}
-                      className="ml-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs text-red-600 hover:bg-red-50">
-                      削除
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1692,6 +1748,19 @@ type StudentRow = {
   student_school: string; furigana: string; postal_code: string; address: string; phone: string; note: string;
   error?: string;
 };
+
+function Dash() {
+  return <span className="text-slate-300">—</span>;
+}
+
+function RowDetail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 text-sm">
+      <dt className="w-20 shrink-0 text-xs text-slate-400">{label}</dt>
+      <dd className="min-w-0 flex-1 break-words text-slate-700">{children}</dd>
+    </div>
+  );
+}
 
 function SortTh({ label, active, asc, onClick }: {
   label: string; active: boolean; asc: boolean; onClick: () => void;
