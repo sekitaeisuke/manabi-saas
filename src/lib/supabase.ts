@@ -77,7 +77,14 @@ export type Student = {
   id: string;
   name: string;
   grade: string;
-  school_id: string | null;
+  school_id: string | null;          // 自社の教室
+  school_name: string | null;        // 在籍している小中高（つなぐから同期）
+  furigana: string | null;
+  birthday: string | null;
+  postal_code: string | null;
+  address: string | null;
+  phone: string | null;              // 家庭・生徒の連絡先
+  note: string | null;
   login_id: string | null;
   auth_user_id: string | null;
   attendance_days: string[] | null;

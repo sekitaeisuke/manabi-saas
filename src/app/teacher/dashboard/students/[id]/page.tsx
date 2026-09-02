@@ -340,6 +340,27 @@ export default function StudentDetailPage() {
         {/* ── 概要 ── */}
         {tab === "overview" && (
           <div className="space-y-6">
+            <Card title="基本情報">
+              <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                <Detail label="ふりがな" value={student.furigana} />
+                <Detail label="生年月日" value={student.birthday} />
+                <Detail label="在籍学校" value={student.school_name} />
+                <Detail label="電話番号" value={student.phone} />
+                <Detail label="住所" value={[student.postal_code ? `〒${student.postal_code}` : "", student.address].filter(Boolean).join(" ")} />
+                <Detail label="所属校舎" value={schoolName} />
+                <Detail label="学年" value={student.grade} />
+                {student.note && (
+                  <div className="sm:col-span-2">
+                    <Detail label="備考" value={student.note} />
+                  </div>
+                )}
+              </dl>
+              <p className="mt-3 text-xs text-slate-400">
+                在籍学校はつなぐから自動同期しています。住所・電話はつなぐに項目が無いため、
+                <Link href="/teacher/dashboard/schools" className="underline">生徒管理</Link>の編集画面から入力してください。
+              </p>
+            </Card>
+
             <section className="grid gap-4 md:grid-cols-2">
               <Card title="保護者">
                 {parents.length === 0 ? (
@@ -637,6 +658,15 @@ export default function StudentDetailPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div className="flex gap-3 border-b border-slate-100 py-1.5 last:border-0">
+      <dt className="w-20 shrink-0 text-xs text-slate-400">{label}</dt>
+      <dd className="min-w-0 flex-1 break-words text-sm text-slate-800">{value?.trim() ? value : <span className="text-slate-300">未登録</span>}</dd>
     </div>
   );
 }

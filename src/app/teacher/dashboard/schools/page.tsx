@@ -641,11 +641,20 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
 type AccountModal = { studentId: string; studentName: string; loginId: string; password: string; mode: "issue" | "reset" } | null;
 type EditModal = {
   id: string; name: string; grade: string; school_id: string;
+  furigana: string;
+  birthday: string;
+  school_name: string;   // 在籍している小中高（school_id＝自社の教室とは別）
+  postal_code: string;
+  address: string;
+  phone: string;
+  note: string;
   attendance_days: string[];
   lesson_start_time: string;
   lesson_duration: number | null; // null = 無制限
   lesson_teacher_id: string;
 } | null;
+
+type SortKey = "name" | "grade" | "school_name";
 
 const DURATION_OPTIONS: { label: string; value: number | null }[] = [
   { label: "30分", value: 30 },
@@ -672,12 +681,13 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   const [showForm, setShowForm] = useState(false);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [form, setForm] = useState({
-    name: "", grade: "中1", school_id: "",
+    name: "", furigana: "", birthday: "", grade: "中1", school_id: "",
+    school_name: "", postal_code: "", address: "", phone: "", note: "",
     attendance_days: [] as string[],
     lesson_start_time: "17:00",
     lesson_duration: 60 as number | null,
     lesson_teacher_id: "",
-    parent_name: "", parent_email: "",
+    parent_name: "", parent_email: "", parent_phone: "",
   });
   const [saving, setSaving] = useState(false);
   const [tsunaguLookup, setTsunaguLookup] = useState(false);
@@ -692,6 +702,15 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
   const [editModal, setEditModal] = useState<EditModal>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [search, setSearch] = useState("");
+  // 一覧（表）と カード の切り替え。既定は一覧。
+  const [view, setView] = useState<"list" | "card">("list");
+  // 複数条件の絞り込み。空文字＝指定なし。
+  const [fSchoolId, setFSchoolId] = useState("");       // 所属校舎
+  const [fGrade, setFGrade] = useState("");             // 学年
+  const [fStudentSchool, setFStudentSchool] = useState(""); // 在籍学校
+  const [fMissing, setFMissing] = useState(false);      // 住所か電話が空の子だけ
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortAsc, setSortAsc] = useState(true);
 
   const openEdit = (s: Student) => {
     setEditModal({
@@ -699,6 +718,13 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
       name: s.name,
       grade: s.grade,
       school_id: s.school_id ?? "",
+      furigana: s.furigana ?? "",
+      birthday: s.birthday ?? "",
+      school_name: s.school_name ?? "",
+      postal_code: s.postal_code ?? "",
+      address: s.address ?? "",
+      phone: s.phone ?? "",
+      note: s.note ?? "",
       attendance_days: s.attendance_days ?? [],
       lesson_start_time: "17:00",
       lesson_duration: 60,
@@ -713,6 +739,13 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
       name: editModal.name,
       grade: editModal.grade,
       school_id: editModal.school_id || null,
+      furigana: editModal.furigana.trim() || null,
+      birthday: editModal.birthday || null,
+      school_name: editModal.school_name.trim() || null,
+      postal_code: editModal.postal_code.trim() || null,
+      address: editModal.address.trim() || null,
+      phone: editModal.phone.trim() || null,
+      note: editModal.note.trim() || null,
       attendance_days: editModal.attendance_days.length > 0 ? editModal.attendance_days : null,
     }).eq("id", editModal.id);
     if (editModal.attendance_days.length > 0) {
@@ -731,22 +764,27 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
     setTsunaguHint(null);
     const { data } = await supabase
       .from("tsunagu_parent_directory")
-      .select("parent_name, parent_email, student_name")
+      .select("parent_name, parent_email, student_name, grade, school")
       .eq("name_key", key)
       .order("synced_at", { ascending: false })
       .limit(1);
     setTsunaguLookup(false);
     const hit = data?.[0];
     if (hit && (hit.parent_email || hit.parent_name)) {
+      // つなぐが持っているのは 保護者名・メール・学年・在籍学校の4つ（住所と電話は項目が無い）
       setForm((f) => ({
         ...f,
         parent_name: hit.parent_name ?? f.parent_name,
         parent_email: hit.parent_email ?? f.parent_email,
+        grade: hit.grade || f.grade,
+        school_name: hit.school || f.school_name,
       }));
       setTsunaguHint(
-        hit.parent_email
+        (hit.parent_email
           ? `つなぐ一致：${hit.parent_name ?? "保護者"}様 <${hit.parent_email}>`
-          : `つなぐ一致：${hit.parent_name ?? "保護者"}様（メール未登録・手入力で作成可）`
+          : `つなぐ一致：${hit.parent_name ?? "保護者"}様（メール未登録・手入力で作成可）`)
+        + (hit.school ? ` ／ 在籍校 ${hit.school}` : "")
+        + "（住所・電話はつなぐに無いため手入力）"
       );
     } else {
       setTsunaguHint("つなぐ未登録。手入力で保護者を作成できます（メール空欄なら生徒のみ登録）");
@@ -755,9 +793,11 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
 
   const resetForm = () =>
     setForm({
-      name: "", grade: "中1", school_id: "", attendance_days: [],
+      name: "", furigana: "", birthday: "", grade: "中1", school_id: "",
+      school_name: "", postal_code: "", address: "", phone: "", note: "",
+      attendance_days: [],
       lesson_start_time: "17:00", lesson_duration: 60, lesson_teacher_id: "",
-      parent_name: "", parent_email: "",
+      parent_name: "", parent_email: "", parent_phone: "",
     });
 
   const save = async () => {
@@ -767,6 +807,13 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
       name: form.name,
       grade: form.grade,
       school_id: form.school_id || null,
+      furigana: form.furigana.trim() || null,
+      birthday: form.birthday || null,
+      school_name: form.school_name.trim() || null,
+      postal_code: form.postal_code.trim() || null,
+      address: form.address.trim() || null,
+      phone: form.phone.trim() || null,
+      note: form.note.trim() || null,
       attendance_days: form.attendance_days.length > 0 ? form.attendance_days : null,
     }).select("id").single();
     if (!inserted) { setSaving(false); showToast("生徒の登録に失敗しました", "error"); return; }
@@ -786,7 +833,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
           email: parentEmail,
           password,
           name: form.parent_name.trim() || `${form.name}保護者`,
-          phone: null,
+          phone: form.parent_phone.trim() || null,
           student_ids: [inserted.id],
         }),
       });
@@ -851,15 +898,57 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
     onRefresh();
   };
 
+  // 在籍学校の候補は、いま登録されている値から作る（表記ゆれもそのまま出す）
+  const studentSchools = Array.from(
+    new Set(students.map((s) => s.school_name).filter((v): v is string => !!v))
+  ).sort((a, b) => a.localeCompare(b, "ja"));
+
+  // 条件はすべて AND。キーワードだけは氏名・ふりがな・学校・住所・電話を横断する。
   const filtered = students.filter((s) => {
+    if (fSchoolId && (s.school_id ?? "") !== fSchoolId) return false;
+    if (fGrade && s.grade !== fGrade) return false;
+    if (fStudentSchool && (s.school_name ?? "") !== fStudentSchool) return false;
+    if (fMissing && s.address && s.phone) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
       s.name.toLowerCase().includes(q) ||
+      (s.furigana ?? "").toLowerCase().includes(q) ||
       s.grade.toLowerCase().includes(q) ||
+      (s.school_name ?? "").toLowerCase().includes(q) ||
+      (s.phone ?? "").includes(q) ||
+      (s.address ?? "").toLowerCase().includes(q) ||
       schoolName(s.school_id).toLowerCase().includes(q)
     );
   });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortAsc ? 1 : -1;
+    if (sortKey === "grade") {
+      const d = GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade);
+      if (d !== 0) return d * dir;
+      return (a.furigana ?? a.name).localeCompare(b.furigana ?? b.name, "ja");
+    }
+    if (sortKey === "school_name") {
+      const d = (a.school_name ?? "").localeCompare(b.school_name ?? "", "ja");
+      if (d !== 0) return d * dir;
+      return (a.furigana ?? a.name).localeCompare(b.furigana ?? b.name, "ja");
+    }
+    // 氏名はふりがなを優先して五十音で並べる
+    return (a.furigana ?? a.name).localeCompare(b.furigana ?? b.name, "ja") * dir;
+  });
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortAsc(!sortAsc);
+    else { setSortKey(key); setSortAsc(true); }
+  };
+
+  const clearFilters = () => {
+    setSearch(""); setFSchoolId(""); setFGrade(""); setFStudentSchool(""); setFMissing(false);
+  };
+  const filterCount =
+    (search.trim() ? 1 : 0) + (fSchoolId ? 1 : 0) + (fGrade ? 1 : 0) +
+    (fStudentSchool ? 1 : 0) + (fMissing ? 1 : 0);
 
   return (
     <div className="space-y-4">
@@ -871,7 +960,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="氏名・学年・校舎で検索"
+            placeholder="氏名・ふりがな・学年・学校・住所・電話で検索"
             className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400"
           />
           {search && (
@@ -886,6 +975,48 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
           className="rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
           {showForm ? "キャンセル" : "+ 生徒を追加"}
         </button>
+      </div>
+
+      {/* 絞り込み：条件はすべて重ねがけ（AND）できる */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+        <span className="text-xs font-semibold text-slate-400">絞り込み</span>
+        <select value={fSchoolId} onChange={(e) => setFSchoolId(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400">
+          <option value="">校舎（すべて）</option>
+          {schools.map((sc) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+        </select>
+        <select value={fGrade} onChange={(e) => setFGrade(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400">
+          <option value="">学年（すべて）</option>
+          {GRADE_ORDER.map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <select value={fStudentSchool} onChange={(e) => setFStudentSchool(e.target.value)}
+          className="max-w-52 rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400">
+          <option value="">在籍学校（すべて）</option>
+          {studentSchools.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <label className={`flex cursor-pointer items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold transition ${fMissing ? "border-amber-400 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+          <input type="checkbox" className="sr-only" checked={fMissing}
+            onChange={() => setFMissing(!fMissing)} />
+          住所か電話が空
+        </label>
+        {filterCount > 0 && (
+          <button onClick={clearFilters}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+            条件をリセット（{filterCount}）
+          </button>
+        )}
+        <span className="ml-auto text-xs text-slate-500">{sorted.length} / {students.length}名</span>
+        <div className="flex overflow-hidden rounded-xl border border-slate-200">
+          <button onClick={() => setView("list")}
+            className={`px-3 py-1.5 text-xs font-semibold ${view === "list" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+            一覧
+          </button>
+          <button onClick={() => setView("card")}
+            className={`px-3 py-1.5 text-xs font-semibold ${view === "card" ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+            カード
+          </button>
+        </div>
       </div>
 
       <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs leading-6 text-amber-900">
@@ -917,6 +1048,23 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
                 {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <Field label="ふりがな" value={form.furigana} onChange={(v) => setForm({ ...form, furigana: v })} placeholder="やまだ たろう" />
+            <Field label="在籍学校" value={form.school_name} onChange={(v) => setForm({ ...form, school_name: v })} placeholder="例：柏の葉中学校" />
+            <Field label="電話番号" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} placeholder="090-1234-5678" />
+          </div>
+          <div className="mt-3 grid gap-1 text-sm text-slate-700 sm:max-w-56">
+            生年月日
+            <input type="date" value={form.birthday} onChange={(e) => setForm({ ...form, birthday: e.target.value })}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400" />
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-[10rem_1fr]">
+            <Field label="郵便番号" value={form.postal_code} onChange={(v) => setForm({ ...form, postal_code: v })} placeholder="277-0000" />
+            <Field label="住所" value={form.address} onChange={(v) => setForm({ ...form, address: v })} placeholder="千葉県柏市…" />
+          </div>
+          <div className="mt-3">
+            <Field label="備考（アレルギー・送迎など）" value={form.note} onChange={(v) => setForm({ ...form, note: v })} placeholder="任意" />
           </div>
           <div className="mt-3 grid gap-1 text-sm text-slate-700">
             通塾曜日
@@ -985,6 +1133,8 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
                 onChange={(v) => setForm({ ...form, parent_name: v })} placeholder="例：山田花子" />
               <Field label="保護者メール（ログインID）" value={form.parent_email}
                 onChange={(v) => setForm({ ...form, parent_email: v })} placeholder="parent@example.com" />
+              <Field label="保護者の電話番号" value={form.parent_phone}
+                onChange={(v) => setForm({ ...form, parent_phone: v })} placeholder="090-1234-5678" />
             </div>
             {tsunaguHint && <p className="mt-2 text-xs text-slate-500">{tsunaguHint}</p>}
             <p className="mt-2 text-xs text-slate-400">
@@ -1001,19 +1151,94 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
 
       {students.length === 0 ? (
         <Empty text="生徒が登録されていません" />
-      ) : filtered.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-12 text-center text-slate-500">
-          「{search}」に一致する生徒が見つかりません
+          条件に一致する生徒が見つかりません
+        </div>
+      ) : view === "list" ? (
+        /* 一覧（表）：氏名・学年・在籍学校を柱に、上から縦に並べる */
+        <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full min-w-[52rem] text-sm">
+            <thead className="bg-slate-50 text-xs text-slate-500">
+              <tr>
+                <SortTh label="氏名" active={sortKey === "name"} asc={sortAsc} onClick={() => toggleSort("name")} />
+                <SortTh label="学年" active={sortKey === "grade"} asc={sortAsc} onClick={() => toggleSort("grade")} />
+                <SortTh label="在籍学校" active={sortKey === "school_name"} asc={sortAsc} onClick={() => toggleSort("school_name")} />
+                <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">校舎</th>
+                <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">電話番号</th>
+                <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">住所</th>
+                <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">ログインID</th>
+                <th className="whitespace-nowrap px-4 py-2.5 text-right font-semibold">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((s) => (
+                <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                  <td className="whitespace-nowrap px-4 py-2.5">
+                    {s.furigana && <div className="text-[11px] leading-tight text-slate-400">{s.furigana}</div>}
+                    <Link href={`/teacher/dashboard/students/${s.id}`}
+                      className="font-semibold text-slate-900 hover:text-indigo-600 hover:underline">
+                      {s.name}
+                    </Link>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{s.grade}</td>
+                  <td className="px-4 py-2.5 text-slate-600">{s.school_name || <span className="text-slate-300">—</span>}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-500">{schoolName(s.school_id)}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">{s.phone || <span className="text-slate-300">—</span>}</td>
+                  <td className="max-w-72 px-4 py-2.5 text-xs text-slate-500">
+                    {s.address
+                      ? <span title={s.address}>{s.postal_code ? `〒${s.postal_code} ` : ""}{s.address}</span>
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5">
+                    {s.login_id
+                      ? <span className="font-mono text-xs text-slate-600">{s.login_id}</span>
+                      : <span className="text-xs text-amber-600">未発行</span>}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-right">
+                    <button onClick={() => openEdit(s)}
+                      className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-xs text-indigo-600 hover:bg-indigo-50">
+                      編集
+                    </button>
+                    {s.login_id ? (
+                      <button onClick={() => openResetModal(s)}
+                        className="ml-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-50">
+                        🔑
+                      </button>
+                    ) : (
+                      <button onClick={() => openAccountModal(s)}
+                        className="ml-1.5 rounded-lg border border-indigo-300 bg-white px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-50">
+                        発行
+                      </button>
+                    )}
+                    <button onClick={() => del(s.id)}
+                      className="ml-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs text-red-600 hover:bg-red-50">
+                      削除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((s) => (
+          {sorted.map((s) => (
             <div key={s.id} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   <p className="font-bold text-slate-900">{s.name}</p>
-                  <p className="mt-1 text-sm text-slate-500">{s.grade}</p>
+                  {s.furigana && <p className="text-xs text-slate-400">{s.furigana}</p>}
+                  <p className="mt-1 text-sm text-slate-500">
+                    {s.grade}{s.school_name ? ` ・ ${s.school_name}` : ""}
+                  </p>
                   {s.school_id && <p className="text-xs text-slate-400">{schoolName(s.school_id)}</p>}
+                  {(s.phone || s.address) && (
+                    <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
+                      {s.phone && <p>☎ {s.phone}</p>}
+                      {s.address && <p className="break-words">📍 {s.postal_code ? `〒${s.postal_code} ` : ""}{s.address}</p>}
+                    </div>
+                  )}
                   {s.attendance_days && s.attendance_days.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {DAYS.filter((d) => s.attendance_days!.includes(d)).map((d) => (
@@ -1066,7 +1291,7 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
       {/* 生徒編集モーダル */}
       {editModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
+          <div className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-3xl bg-white p-8 shadow-xl">
             <div className="mb-6 flex items-center justify-between">
               <h3 className="text-lg font-bold text-slate-900">生徒情報を編集</h3>
               <button onClick={() => setEditModal(null)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
@@ -1088,6 +1313,19 @@ function StudentsTab({ students, schools, teachers, schoolName, onRefresh }: {
                   {schools.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
+              <Field label="ふりがな" value={editModal.furigana} onChange={(v) => setEditModal({ ...editModal, furigana: v })} placeholder="やまだ たろう" />
+              <div className="grid gap-1 text-sm text-slate-700">
+                生年月日
+                <input type="date" value={editModal.birthday} onChange={(e) => setEditModal({ ...editModal, birthday: e.target.value })}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-400" />
+              </div>
+              <Field label="在籍学校" value={editModal.school_name} onChange={(v) => setEditModal({ ...editModal, school_name: v })} placeholder="例：柏の葉中学校" />
+              <Field label="電話番号" value={editModal.phone} onChange={(v) => setEditModal({ ...editModal, phone: v })} placeholder="090-1234-5678" />
+              <div className="grid gap-4 sm:grid-cols-[9rem_1fr]">
+                <Field label="郵便番号" value={editModal.postal_code} onChange={(v) => setEditModal({ ...editModal, postal_code: v })} placeholder="277-0000" />
+                <Field label="住所" value={editModal.address} onChange={(v) => setEditModal({ ...editModal, address: v })} placeholder="千葉県柏市…" />
+              </div>
+              <Field label="備考（アレルギー・送迎など）" value={editModal.note} onChange={(v) => setEditModal({ ...editModal, note: v })} placeholder="任意" />
               <div className="grid gap-1 text-sm text-slate-700">
                 通塾曜日
                 <div className="flex flex-wrap gap-2">
@@ -1448,7 +1686,25 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
 }
 
 // ─── 生徒CSVインポートモーダル ─────────────────────────
-type StudentRow = { name: string; grade: string; school_id: string; schoolName: string; attendance_days: string[]; error?: string };
+type StudentRow = {
+  name: string; grade: string; school_id: string; schoolName: string; attendance_days: string[];
+  // 5列目以降は任意。無くても従来どおり取り込める
+  student_school: string; furigana: string; postal_code: string; address: string; phone: string; note: string;
+  error?: string;
+};
+
+function SortTh({ label, active, asc, onClick }: {
+  label: string; active: boolean; asc: boolean; onClick: () => void;
+}) {
+  return (
+    <th className="whitespace-nowrap px-4 py-2.5 text-left font-semibold">
+      <button onClick={onClick} className="inline-flex items-center gap-1 hover:text-slate-800">
+        {label}
+        <span className={active ? "text-slate-700" : "text-slate-300"}>{active && !asc ? "\u25b2" : "\u25bc"}</span>
+      </button>
+    </th>
+  );
+}
 
 function StudentCsvModal({ schools, onClose, onRefresh }: {
   schools: School[]; onClose: () => void; onRefresh: () => void;
@@ -1468,14 +1724,19 @@ function StudentCsvModal({ schools, onClose, onRefresh }: {
       const parsed: StudentRow[] = lines
         .filter((cols) => cols.length >= 1 && cols[0])
         .map((cols) => {
-          const [name = "", grade = "", schoolRaw = "", daysRaw = ""] = cols;
+          const [name = "", grade = "", schoolRaw = "", daysRaw = "",
+                 studentSchool = "", furigana = "", postal = "", address = "", phone = "", note = ""] = cols;
           const school = schools.find((s) => s.name === schoolRaw.trim());
           const validGrade = GRADE_ORDER.includes(grade) ? grade : "";
           const attendance_days = [...daysRaw].filter((c) => (DAYS as readonly string[]).includes(c));
           let error: string | undefined;
           if (!name) error = "氏名が空";
           else if (!validGrade) error = `学年「${grade}」が不正`;
-          return { name, grade: validGrade || grade, school_id: school?.id ?? "", schoolName: schoolRaw, attendance_days, error };
+          return {
+            name, grade: validGrade || grade, school_id: school?.id ?? "", schoolName: schoolRaw, attendance_days,
+            student_school: studentSchool.trim(), furigana: furigana.trim(), postal_code: postal.trim(),
+            address: address.trim(), phone: phone.trim(), note: note.trim(), error,
+          };
         });
       setRows(parsed);
     };
@@ -1491,6 +1752,12 @@ function StudentCsvModal({ schools, onClose, onRefresh }: {
         name: r.name,
         grade: r.grade,
         school_id: r.school_id || null,
+        school_name: r.student_school || null,
+        furigana: r.furigana || null,
+        postal_code: r.postal_code || null,
+        address: r.address || null,
+        phone: r.phone || null,
+        note: r.note || null,
         attendance_days: r.attendance_days.length > 0 ? r.attendance_days : null,
       }))
     );
@@ -1499,7 +1766,10 @@ function StudentCsvModal({ schools, onClose, onRefresh }: {
     onRefresh();
   };
 
-  const sampleCsv = "氏名,学年,校舎名,通塾曜日\n山田太郎,中1,本校,月水金\n佐藤花子,小5,東校,火木";
+  const sampleCsv =
+    "氏名,学年,校舎名,通塾曜日,在籍学校,ふりがな,郵便番号,住所,電話番号,備考\n" +
+    "山田太郎,中1,本校,月水金,柏の葉中学校,やまだ たろう,277-0000,千葉県柏市若柴1-2-3,090-1234-5678,\n" +
+    "佐藤花子,小5,東校,火木,西原小学校,さとう はなこ,,,,";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -1519,8 +1789,9 @@ function StudentCsvModal({ schools, onClose, onRefresh }: {
           <>
             <div className="mb-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-semibold mb-1">CSV形式（1行目はヘッダー行として自動スキップ）</p>
-              <p className="font-mono text-xs">氏名,学年,校舎名,通塾曜日</p>
+              <p className="font-mono text-xs">氏名,学年,校舎名,通塾曜日,在籍学校,ふりがな,郵便番号,住所,電話番号,備考</p>
               <p className="mt-1 text-xs text-slate-400">学年：小1〜小6, 中1〜中3, 高1〜高3　通塾曜日：月火水木金土日（例：月水金）</p>
+              <p className="mt-1 text-xs text-slate-400">5列目以降は任意です。「校舎名」は自社の教室、「在籍学校」は通っている小中高です。</p>
               <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsv)}`} download="students_sample.csv"
                 className="mt-2 inline-block text-xs text-indigo-600 underline">サンプルCSVをダウンロード</a>
             </div>
@@ -1537,6 +1808,8 @@ function StudentCsvModal({ schools, onClose, onRefresh }: {
                       <th className="px-3 py-2 text-left">学年</th>
                       <th className="px-3 py-2 text-left">校舎</th>
                       <th className="px-3 py-2 text-left">通塾曜日</th>
+                      <th className="px-3 py-2 text-left">在籍学校</th>
+                      <th className="px-3 py-2 text-left">住所・電話</th>
                       <th className="px-3 py-2 text-left">状態</th>
                     </tr>
                   </thead>
@@ -1547,6 +1820,8 @@ function StudentCsvModal({ schools, onClose, onRefresh }: {
                         <td className="px-3 py-2">{r.grade}</td>
                         <td className="px-3 py-2 text-slate-500">{r.schoolName || "未所属"}</td>
                         <td className="px-3 py-2 text-slate-500">{r.attendance_days.length > 0 ? r.attendance_days.join("・") : "—"}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.student_school || "—"}</td>
+                        <td className="px-3 py-2 text-slate-500">{[r.phone, r.address].filter(Boolean).join(" / ") || "—"}</td>
                         <td className="px-3 py-2">{r.error ? <span className="text-red-600 text-xs">{r.error}</span> : <span className="text-green-600 text-xs">OK</span>}</td>
                       </tr>
                     ))}
