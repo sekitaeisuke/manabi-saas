@@ -121,6 +121,9 @@ export type BillingItem = {
   state: string | null;
   tsunagu_price_id: string | null;
   sort_order: number;
+  source: string;            // tsunagu=つなぐ由来 / manual=まなびで入力
+  note: string | null;
+  updated_at: string;
 };
 
 export type BillingMonth = {
@@ -134,8 +137,10 @@ export type BillingMonth = {
   published: boolean;        // true のときだけ保護者に見える
   published_at: string | null;
   note: string | null;
-  source: string;
+  source: string;            // tsunagu=同期で上書き / manual=まなびが正
   synced_at: string | null;
+  edited_at: string | null;
+  edited_by: string | null;
   updated_at: string;
 };
 
