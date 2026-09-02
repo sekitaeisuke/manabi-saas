@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { authFetch } from "@/lib/authFetch";
 import type { Student, Teacher } from "@/lib/supabase";
 import {
-  Badge, Button, Card, EmptyState, LinkButton, PageHeader,
+  Badge, Button, Callout, Card, LinkButton, PageHeader,
   Spinner, cx, inputClass,
 } from "@/components/ui";
 
@@ -434,6 +434,10 @@ export default function CollaborationPage() {
   type Block = { key: string; schoolId: string | null; name: string; withCompany: boolean };
 
   const blocks: Block[] = useMemo(() => {
+    // 教室が引けないときでも行き止まりにしない。1つのかたまりに全部出す。
+    if (schools.length === 0) {
+      return [{ key: COMPANY_KEY, schoolId: null, name: "すべて", withCompany: true }];
+    }
     if (view === ALL_SCHOOLS) {
       return [
         { key: COMPANY_KEY, schoolId: null, name: "全社（すべての教室に掲示）", withCompany: true },
@@ -441,7 +445,13 @@ export default function CollaborationPage() {
       ];
     }
     const s = schools.find((x) => x.id === view);
-    if (!s) return [];
+    // 選択が消えた教室を指していたら全教室に戻す（空画面にしない）
+    if (!s) {
+      return [
+        { key: COMPANY_KEY, schoolId: null, name: "全社（すべての教室に掲示）", withCompany: true },
+        ...schools.map((x) => ({ key: x.id, schoolId: x.id, name: x.name, withCompany: false })),
+      ];
+    }
     return [{ key: s.id, schoolId: s.id, name: s.name, withCompany: true }];
   }, [view, schools]);
 
@@ -466,6 +476,12 @@ export default function CollaborationPage() {
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, sortTasks, schoolIds]);
+
+  // いま画面に出ている総数。0なら「ほかの教室にある」と案内する。
+  const shownCount = useMemo(
+    () => blocks.reduce((n, b) => n + tasksIn(b, "academic").length + tasksIn(b, "admin").length, 0),
+    [blocks, tasksIn],
+  );
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId) ?? null;
   const selectedStudent = selectedTask ? studentOf(selectedTask.student_id) : null;
@@ -696,6 +712,7 @@ export default function CollaborationPage() {
           )}
         >
           全教室
+          <span data-numeric className="ml-1.5 text-xs font-normal text-ink-faint">{tasks.length}</span>
         </button>
         {schools.map((s) => {
           const active = view === s.id;
@@ -746,15 +763,18 @@ export default function CollaborationPage() {
       {/* ══ 教室ごと：教務／事務を並べる ═══════════════ */}
       {loading ? (
         <Card><div className="flex justify-center py-10"><Spinner className="h-5 w-5" /></div></Card>
-      ) : schools.length === 0 ? (
-        <EmptyState
-          icon="🏫"
-          title="教室が登録されていません"
-          description="先に「教室・名簿」で教室を登録してください。"
-          action={<LinkButton href="/teacher/dashboard/schools">教室・名簿へ</LinkButton>}
-        />
       ) : (
         <div className="space-y-6">
+          {/* 選んだ教室が空でも、ほかにタスクがあるなら行き止まりにしない */}
+          {view !== ALL_SCHOOLS && shownCount === 0 && tasks.length > 0 && (
+            <Callout tone="brand" title="この教室には、いま出ているタスクがありません">
+              ほかの教室に <span data-numeric>{tasks.length}</span> 件あります。
+              <button onClick={() => selectView(ALL_SCHOOLS)} className="ml-1 font-semibold underline">
+                全教室で見る
+              </button>
+            </Callout>
+          )}
+
           {syncing && (
             <p className="flex items-center gap-2 text-xs text-ink-faint">
               <Spinner className="h-3 w-3" />
