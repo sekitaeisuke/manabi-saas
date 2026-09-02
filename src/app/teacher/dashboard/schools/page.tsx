@@ -1,5 +1,6 @@
 "use client";
 import { showToast } from "@/lib/toast";
+import { toDisplayId } from "@/lib/teacherLogin";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -379,7 +380,7 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
   const save = async () => {
     if (!form.name) return;
     if (form.password && !form.email) {
-      showToast("パスワードを設定するにはメールアドレスが必要です", "error"); return;
+      showToast("パスワードを設定するにはログインIDかメールアドレスが必要です", "error"); return;
     }
     if (form.password && form.password.length < 6) {
       showToast("パスワードは6文字以上にしてください", "error"); return;
@@ -462,7 +463,7 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
           <h3 className="mb-4 font-semibold text-slate-900">新規講師登録</h3>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="氏名 *" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="例：田中花子" />
-            <Field label="メールアドレス（ログインID）" value={form.email} onChange={(v) => setForm({ ...form, email: v })} placeholder="例：tanaka@school.jp" type="email" />
+            <Field label="ログインID または メールアドレス" value={form.email} onChange={(v) => setForm({ ...form, email: v })} placeholder="例：t017（メールが無い講師）／tanaka@school.jp" />
             <div className="grid gap-1 text-sm text-slate-700">
               役職
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Teacher["role"] })}
@@ -495,7 +496,7 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
                 </div>
               </label>
               <p className="mt-1 text-xs text-slate-400">
-                メールアドレスとこのパスワードで講師ログイン（/login）ができるようになります。
+                このログインID（またはメールアドレス）とパスワードで講師ログイン（/login）ができるようになります。
               </p>
             </div>
           </div>
@@ -525,7 +526,7 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
                         : <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">ログイン未発行</span>
                     )}
                   </div>
-                  {t.email && <p className="mt-1 text-sm text-slate-500">{t.email}</p>}
+                  {t.email && <p className="mt-1 text-sm text-slate-500">{toDisplayId(t.email)}</p>}
                   <p className="mt-1 text-sm text-slate-500">所属：{schoolName(t.school_id)}</p>
                   <p className="mt-2 text-xs text-slate-400">登録：{t.created_at.slice(0, 10)}</p>
                   {isAdmin && (
@@ -570,8 +571,8 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500">ログインID（メールアドレス）</p>
-                    <p className="font-mono text-sm font-bold break-all text-slate-900">{issued.email}</p>
+                    <p className="text-xs text-slate-500">ログインID</p>
+                    <p className="font-mono text-sm font-bold break-all text-slate-900">{toDisplayId(issued.email)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">パスワード</p>
@@ -596,8 +597,8 @@ function TeachersTab({ teachers, schools, schoolName, isAdmin, onRefresh }: {
                 </p>
                 <div className="space-y-4">
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">ログインID（メールアドレス）</label>
-                    <input value={pwModal.email} readOnly
+                    <label className="mb-1.5 block text-sm font-medium text-slate-700">ログインID</label>
+                    <input value={toDisplayId(pwModal.email)} readOnly
                       className="w-full rounded-xl border border-slate-200 bg-slate-100 px-3 py-2.5 font-mono text-sm text-slate-500 outline-none" />
                     <p className="mt-1 text-xs text-slate-400">変更するには講師の登録メールを編集してください</p>
                   </div>
@@ -1346,7 +1347,7 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
     onRefresh();
   };
 
-  const sampleCsv = "氏名,メールアドレス,役職,校舎名\n田中花子,tanaka@school.jp,講師,本校\n山田一郎,yamada@school.jp,管理者,東校";
+  const sampleCsv = "氏名,ログインIDかメール,役職,校舎名\n田中花子,tanaka@school.jp,講師,本校\n山田一郎,t018,管理者,東校";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -1382,7 +1383,7 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
           <>
             <div className="mb-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-semibold mb-1">CSV形式（1行目はヘッダー行として自動スキップ）</p>
-              <p className="font-mono text-xs">氏名,メールアドレス,役職,校舎名</p>
+              <p className="font-mono text-xs">氏名,ログインIDかメール,役職,校舎名</p>
               <p className="mt-1 text-xs text-slate-400">役職：管理者 / 講師 / 非常勤</p>
               <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(sampleCsv)}`} download="teachers_sample.csv"
                 className="mt-2 inline-block text-xs text-indigo-600 underline">サンプルCSVをダウンロード</a>
@@ -1421,7 +1422,7 @@ function TeacherCsvModal({ schools, onClose, onRefresh }: {
                     {rows.map((r, i) => (
                       <tr key={i} className={`border-t border-slate-100 ${r.error ? "bg-red-50" : ""}`}>
                         <td className="px-3 py-2 font-medium">{r.name}</td>
-                        <td className="px-3 py-2 text-slate-500">{r.email || "—"}</td>
+                        <td className="px-3 py-2 text-slate-500">{toDisplayId(r.email) || "—"}</td>
                         <td className="px-3 py-2">{ROLE_LABEL[r.role]}</td>
                         <td className="px-3 py-2 text-slate-500">{r.schoolName || "未所属"}</td>
                         <td className="px-3 py-2">{r.error ? <span className="text-red-600 text-xs">{r.error}</span> : <span className="text-green-600 text-xs">OK</span>}</td>

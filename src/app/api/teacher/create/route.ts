@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/apiAuth";
 import { serviceClient, findAuthUserByEmail, SERVICE_KEY_MISSING } from "@/lib/authAdmin";
+import { toLoginEmail, TEACHER_ID_PATTERN } from "@/lib/teacherLogin";
 
 /**
  * 講師の新規登録（管理者のみ）。
@@ -14,7 +15,9 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const name: string = (body.name ?? "").trim();
-  const email: string = (body.email ?? "").trim().toLowerCase();
+  // メールでもログインIDでも受ける。ID（@なし）は内部のメール形式に直して保存する。
+  const rawAccount: string = (body.email ?? "").trim();
+  const email: string = rawAccount ? toLoginEmail(rawAccount) : "";
   const password: string = body.password ?? "";
   const role: string = body.role ?? "teacher";
   const school_id: string | null = body.school_id || null;
@@ -26,7 +29,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "役職の値が不正です" }, { status: 400 });
   }
   if (password && !email) {
-    return NextResponse.json({ error: "パスワードを設定するにはメールアドレスが必要です" }, { status: 400 });
+    return NextResponse.json({ error: "パスワードを設定するにはメールアドレスかログインIDが必要です" }, { status: 400 });
+  }
+  if (rawAccount && !rawAccount.includes("@") && !TEACHER_ID_PATTERN.test(rawAccount.toLowerCase())) {
+    return NextResponse.json(
+      { error: "ログインIDは英小文字で始まる2〜16文字の英数字にしてください（例: t017）" },
+      { status: 400 },
+    );
   }
   if (password && password.length < 6) {
     return NextResponse.json({ error: "パスワードは6文字以上にしてください" }, { status: 400 });

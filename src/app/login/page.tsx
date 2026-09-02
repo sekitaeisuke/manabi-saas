@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { toLoginEmail } from "@/lib/teacherLogin";
 import { Logo } from "@/components/Logo";
 import { Button, Field, inputClass, Spinner } from "@/components/ui";
 
@@ -14,22 +15,25 @@ const POINTS = [
 ];
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const login = async () => {
-    if (!email || !password) return;
+    if (!account || !password) return;
     setLoading(true);
     setError("");
+    // メールを持たない講師には短いログインID（t001 など）を発行している。
+    // 「@」が無い入力はそのIDとみなし、内部のメール形式に組み立て直す。
+    const email = toLoginEmail(account);
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
     if (err) {
       setError(
         err.message.includes("Email not confirmed")
           ? "メールの確認が完了していません"
-          : "メールアドレスまたはパスワードが正しくありません"
+          : "ログインIDまたはパスワードが正しくありません"
       );
       setLoading(false);
       return;
@@ -93,7 +97,7 @@ export default function LoginPage() {
 
           <div className="rounded-card border border-line bg-surface p-7 shadow-card sm:p-8">
             <h2 className="text-2xl font-bold tracking-tight text-ink">講師ログイン</h2>
-            <p className="mt-1 text-sm text-ink-muted">アカウント情報を入力してください</p>
+            <p className="mt-1 text-sm text-ink-muted">配布されたログインID（例: t001）でも、メールアドレスでも入れます</p>
 
             {error && (
               <p
@@ -106,14 +110,16 @@ export default function LoginPage() {
             )}
 
             <div className="mt-6 space-y-4">
-              <Field label="メールアドレス">
+              <Field label="ログインID または メールアドレス">
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="text"
+                  value={account}
+                  onChange={(e) => setAccount(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && login()}
-                  placeholder="example@school.jp"
-                  autoComplete="email"
+                  placeholder="t001 または example@school.jp"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   className={inputClass}
                   autoFocus
                 />
@@ -133,7 +139,7 @@ export default function LoginPage() {
 
             <Button
               onClick={login}
-              disabled={!email || !password || loading}
+              disabled={!account || !password || loading}
               size="lg"
               className="mt-6 w-full"
             >
