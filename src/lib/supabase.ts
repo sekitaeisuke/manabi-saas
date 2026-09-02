@@ -91,6 +91,65 @@ export type Student = {
   created_at: string;
 };
 
+// ── お月謝 ──────────────────────────────────────────────
+// つなぐの「契約内容確認・変更」をそのまま受ける。◯月分を前月27日に引き落とす。
+
+export type BillingPlan = {
+  id: string;
+  tsunagu_plan_id: string | null;
+  price_revision_id: string | null;
+  kind: string;              // 基本 / オプション / 設備費 / パック / その他
+  name: string;
+  grades: string[] | null;
+  price_excl: number | null;
+  price_incl: number | null;
+  revised_at: string | null;
+  retired: boolean;
+  synced_at: string;
+};
+
+export type BillingItem = {
+  id: string;
+  billing_month_id: string;
+  kind: string;
+  label: string;             // 保護者に見せる名前（プラン名・テキスト代など）
+  plan_id: string | null;
+  price_revision_id: string | null;
+  lesson_count: number | null;
+  amount_incl: number;
+  amount_excl: number;
+  state: string | null;
+  tsunagu_price_id: string | null;
+  sort_order: number;
+};
+
+export type BillingMonth = {
+  id: string;
+  student_id: string;
+  year_month: string;        // 対象月 'YYYY-MM'
+  debit_date: string | null; // 引き落とし日（前月27日）
+  total_incl: number;
+  total_excl: number;
+  status: string;            // 未確定 / 確定 / 領収済み
+  published: boolean;        // true のときだけ保護者に見える
+  published_at: string | null;
+  note: string | null;
+  source: string;
+  synced_at: string | null;
+  updated_at: string;
+};
+
+// 「2026-10」→「10月分」
+export function ymLabel(ym: string): string {
+  const m = ym.match(/^(\d{4})-(\d{2})$/);
+  return m ? `${Number(m[2])}月分` : ym;
+}
+
+export function yen(n: number | null | undefined): string {
+  const v = Number(n ?? 0);
+  return (v < 0 ? "-¥" : "¥") + Math.abs(v).toLocaleString("ja-JP");
+}
+
 export type DiagnosisRating = 1 | 2 | 3 | 4; // ×=1 △=2 ○=3 ◎=4
 
 export type VolumeRatings = {

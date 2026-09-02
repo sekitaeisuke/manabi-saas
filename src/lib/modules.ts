@@ -13,6 +13,7 @@ export type ModuleKey =
   | "shift"
   | "attendance"
   | "parent_portal"
+  | "billing"
   | "class_stock";
 
 export type ModuleDef = {
@@ -47,6 +48,9 @@ export const MODULES: ModuleDef[] = [
   { key: "parent_portal", label: "保護者ポータル・振替",
     description: "保護者からの振替リクエスト等", defaultEnabled: true,
     paths: ["/teacher/dashboard/reschedules"] },
+  { key: "billing", label: "お月謝",
+    description: "つなぐの契約から月謝を取り込み、保護者へ公開する", defaultEnabled: true,
+    paths: ["/teacher/dashboard/billing"] },
   { key: "class_stock", label: "塾内経済（AC・自塾株）",
     description: "アカデミーコイン付与・貢献記録・報酬承認・自塾株の株価", defaultEnabled: false,
     paths: ["/teacher/dashboard/economy"] },

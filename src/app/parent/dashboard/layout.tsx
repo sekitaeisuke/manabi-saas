@@ -19,6 +19,7 @@ const NAV = [
   // 振替リクエストは授業カレンダーに統合（false=独立ページを隠す）。
   ...(FEATURES.separateParentReschedulePage ? [{ href: "/parent/dashboard/reschedule", label: "振替リクエスト" }] : []),
   { href: "/parent/dashboard/reports",    label: "報告書" },
+  { href: "/parent/dashboard/billing",    label: "お月謝" },
   { href: "/parent/dashboard/economy",    label: "ポイント・商店" },
   { href: "/parent/dashboard/karte",      label: "3か月ビジョン" },
   { href: "/parent/dashboard/diagnosis",  label: "多層診断" },
