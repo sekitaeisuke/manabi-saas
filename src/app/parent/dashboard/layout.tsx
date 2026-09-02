@@ -19,7 +19,6 @@ const NAV = [
   // 振替リクエストは授業カレンダーに統合（false=独立ページを隠す）。
   ...(FEATURES.separateParentReschedulePage ? [{ href: "/parent/dashboard/reschedule", label: "振替リクエスト" }] : []),
   { href: "/parent/dashboard/reports",    label: "報告書" },
-  { href: "/parent/dashboard/billing",    label: "お月謝" },
   { href: "/parent/dashboard/economy",    label: "ポイント・商店" },
   { href: "/parent/dashboard/karte",      label: "3か月ビジョン" },
   { href: "/parent/dashboard/diagnosis",  label: "多層診断" },
@@ -34,6 +33,9 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
   const [students, setStudents] = useState<Student[]>([]);
   const [selectedId, selectStudent] = useSelectedStudentId();
   const [unreadCount, setUnreadCount] = useState(0);
+  // お月謝は、公開された月がひとつも無いうちはメニューに出さない。
+  // 空の画面を見せて「まだ何も無いのか」と思わせないため。
+  const [hasBilling, setHasBilling] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
@@ -101,6 +103,13 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
     return () => clearInterval(t);
   }, [parent]);
 
+  useEffect(() => {
+    if (!parent) return;
+    // RLS で「公開済みの自分の子ぶん」しか返らないので、1件でもあれば見せてよい。
+    supabase.from("billing_months").select("id", { count: "exact", head: true })
+      .then(({ count }) => setHasBilling((count ?? 0) > 0));
+  }, [parent]);
+
   const logout = async () => {
     await supabase.auth.signOut();
     router.replace("/login/parent");
@@ -155,7 +164,11 @@ export default function ParentDashboardLayout({ children }: { children: React.Re
         <p className="mb-2 px-3 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-faint">
           メニュー
         </p>
-        {NAV.map((item) => {
+        {[
+          ...NAV.slice(0, NAV.findIndex((n) => n.href === "/parent/dashboard/reports") + 1),
+          ...(hasBilling ? [{ href: "/parent/dashboard/billing", label: "お月謝" }] : []),
+          ...NAV.slice(NAV.findIndex((n) => n.href === "/parent/dashboard/reports") + 1),
+        ].map((item) => {
           const active = isActive(item.href);
           const showBadge = item.href === "/parent/dashboard/messages" && unreadCount > 0;
           return (
