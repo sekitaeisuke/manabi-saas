@@ -3,7 +3,8 @@ import { requireTeacher } from "@/lib/apiAuth";
 
 import { generateText, extractJson } from "@/lib/ai";
 import {
-  renderTestHtml, sortByDifficulty, normalizePoints, renumber, type TestQuestion,
+  renderTestHtml, sortByDifficulty, normalizePoints, renumber, shuffleAllChoices,
+  type TestQuestion,
 } from "@/lib/testHtml";
 import { normalizeQuestionMath } from "@/lib/mathText";
 
@@ -84,11 +85,16 @@ ${JSON.stringify(chunk)}
     }
   }
 
-  // ── 表記そろえ → 並べ替え → 採番 → 配点を100点に正規化 → 用紙を組む ──
+  // ── 表記そろえ → 選択肢シャッフル → 並べ替え → 採番 → 配点100点 → 用紙を組む ──
   // 問題文はここから先、解答画面・生徒の受験画面でもそのまま文字として出るので、
-  // タグやLaTeXが残らないよう最後に必ず通す
+  // タグやLaTeXが残らないよう最後に必ず通す。
+  //
+  // 選択肢のシャッフルはここでしか行わない。「正解を1番目に偏らせないで」とAIに
+  // 頼んでも守られない（実際に1番目へ寄る）ので、位置の分散はコードで確定させる。
   const ordered = renumber(
-    normalizePoints(sortByDifficulty(checked.map((q) => normalizeQuestionMath(q)))),
+    normalizePoints(
+      sortByDifficulty(shuffleAllChoices(checked.map((q) => normalizeQuestionMath(q)))),
+    ),
   );
   const html = renderTestHtml({ title, grade, subject, questions: ordered });
 

@@ -1,5 +1,7 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { TEST_PAPER_CSS } from "@/lib/testPaperStyle";
+import type { VerifyStatus } from "@/lib/testHtml";
 import { mathText } from "@/lib/mathText";
 import { authFetch } from "@/lib/authFetch";
 import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
@@ -31,6 +33,14 @@ type GeneratedQuestion = {
   options: string[] | null;
   correct_answer: string;
   points: number;
+  /** なぜその答えになるかの短い説明（解答つき用紙・報告書で使う） */
+  explanation?: string;
+  /** 国語の読解：同じ本文にぶら下がる設問は同じ passage_id を持つ */
+  passage?: string;
+  passage_id?: string;
+  /** 検算（別のAIに正解を伏せて解かせる工程）の結果 */
+  verify_status?: VerifyStatus;
+  verify_note?: string;
 };
 
 type ScoredAnswer = { isCorrect: boolean; points: number };
@@ -896,6 +906,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       .select()
       .single();
     if (error || !test) { showToast("保存に失敗しました", "error"); setSaving(false); return; }
+    // difficulty / section / explanation / 本文 は以前は保存しておらず、保存したテストを
+    // 開き直すと基礎・標準・応用のまとまりも解説も復元できなかった。
+    // test-quality-setup.sql で列を足したので、作ったものをそのまま残す。
     const { error: qErr } = await supabase.from("questions").insert(
       questions.map((q, i) => ({
         test_id: test.id,
@@ -905,6 +918,13 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         options: q.options ?? null,
         correct_answer: q.correct_answer ?? null,
         points: q.points ?? 1,
+        difficulty: q.difficulty ?? null,
+        section: q.section ?? null,
+        explanation: q.explanation ?? null,
+        passage: q.passage ?? null,
+        passage_id: q.passage_id ?? null,
+        verify_status: q.verify_status ?? null,
+        verify_note: q.verify_note ?? null,
       }))
     );
     if (qErr) { showToast("問題の保存に失敗しました: " + qErr.message, "error"); setSaving(false); return; }
@@ -996,18 +1016,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
           </div>
         </div>
         <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <style>{`
-            #test-body { font-family: sans-serif; line-height: 1.8; }
-            #test-body h1 { font-size: 1.4rem; font-weight: bold; text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 16px; }
-            #test-body h2 { font-size: 1.1rem; font-weight: bold; background: #f1f5f9; padding: 6px 12px; margin: 24px 0 12px; border-left: 4px solid #6366f1; }
-            #test-body .question { margin: 16px 0; }
-            #test-body ol { padding-left: 1.8rem; margin: 6px 0; }
-            #test-body .answer-hint { font-size: 0.8rem; color: #64748b; margin: 2px 0; }
-            #test-body .answer-box { border-bottom: 1px solid #94a3b8; min-height: 40px; margin: 8px 0 16px; }
-            #test-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-            #test-body td, #test-body th { border: 1px solid #cbd5e1; padding: 6px 10px; }
-            #test-body th { background: #f8fafc; font-weight: bold; }
-          `}</style>
+          <style>{TEST_PAPER_CSS}</style>
           <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(generatedHtml) }} />
         </div>
       </div>
