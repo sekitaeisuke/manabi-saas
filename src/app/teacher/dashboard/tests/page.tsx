@@ -49,6 +49,8 @@ type GeneratedQuestion = {
   /** 検算（別のAIに正解を伏せて解かせる工程）の結果 */
   verify_status?: VerifyStatus;
   verify_note?: string;
+  /** 講師が1問ずつ中身を見て確認したか */
+  teacher_checked?: boolean;
 };
 
 type ScoredAnswer = { isCorrect: boolean; points: number };
@@ -220,8 +222,41 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [starting, setStarting] = useState(false);
   const [assignSuccess, setAssignSuccess] = useState<{ studentName: string; token: string; expires_at: string | null } | null>(null);
+  // テストごとの「確認の進み具合」。未確認・要確認が残っているテストは配信させない。
+  // AIの検算は最後の砦ではないので、人が全問に目を通した印を配信の条件にする。
+  const [checkState, setCheckState] = useState<Record<string, { total: number; checked: number; flagged: number }>>({});
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [openSubfolders, setOpenSubfolders] = useState<Set<string>>(new Set());
+
+  const loadCheckState = async () => {
+    const { data } = await supabase
+      .from("questions").select("test_id, teacher_checked, verify_status");
+    const map: Record<string, { total: number; checked: number; flagged: number }> = {};
+    for (const r of (data ?? []) as { test_id: string; teacher_checked: boolean | null; verify_status: string | null }[]) {
+      const cur = map[r.test_id] ?? { total: 0, checked: 0, flagged: 0 };
+      cur.total++;
+      if (r.teacher_checked) cur.checked++;
+      if (r.verify_status === "needs_review") cur.flagged++;
+      map[r.test_id] = cur;
+    }
+    setCheckState(map);
+  };
+
+  /** 配信・割り当てしてよいテストか（全問を講師が確認済みで、要確認が残っていない） */
+  const isReady = (testId: string) => {
+    const c = checkState[testId];
+    if (!c || c.total === 0) return false;
+    return c.checked >= c.total && c.flagged === 0;
+  };
+
+  const notReadyMessage = (testId: string) => {
+    const c = checkState[testId];
+    if (!c || c.total === 0) return "問題がありません";
+    const parts: string[] = [];
+    if (c.checked < c.total) parts.push(`未確認${c.total - c.checked}問`);
+    if (c.flagged > 0) parts.push(`要確認${c.flagged}問`);
+    return `${parts.join("・")}。「開く・印刷」から1問ずつ確認してください`;
+  };
 
   const loadSessionsAndAssignments = async () => {
     const [{ data: sessions }, { data: assigns }] = await Promise.all([
@@ -255,6 +290,7 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   useEffect(() => {
     supabase.from("students").select("*").order("name").then(({ data }) => setStudents(data ?? []));
     loadSessionsAndAssignments();
+    loadCheckState();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -461,6 +497,12 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                         </svg>
                                         <span className="font-medium text-slate-900 text-sm">{test.title}</span>
                                         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
+                                        {!isReady(test.id) && (
+                                          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800"
+                                            title={notReadyMessage(test.id)}>
+                                            確認待ち（{checkState[test.id]?.checked ?? 0}/{checkState[test.id]?.total ?? 0}問）
+                                          </span>
+                                        )}
                                         {session && (
                                           urlAlive ? (
                                             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-500">
@@ -507,6 +549,11 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                           </button>
                                         </div>
                                       )}
+                                      {!isReady(test.id) && (
+                                        <p className="mt-1 pl-6 text-xs text-amber-700">
+                                          {notReadyMessage(test.id)}
+                                        </p>
+                                      )}
                                       {session && !urlAlive && (
                                         <p className="mt-1 pl-6 text-xs text-red-600">
                                           「URLを再発行」を押すと、同じURLのまま期限が30日延びます（生徒のダッシュボードのリンクもそのまま使えます）。
@@ -518,13 +565,18 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                         className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
                                         開く・印刷
                                       </Link>
-                                      <button onClick={() => { setStartModal(test); setSelectedStudent(""); setAssignSuccess(null); }}
-                                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                                      <button
+                                        onClick={() => { setStartModal(test); setSelectedStudent(""); setAssignSuccess(null); }}
+                                        disabled={!isReady(test.id)}
+                                        title={isReady(test.id) ? "" : notReadyMessage(test.id)}
+                                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
                                         生徒に割り当てる
                                       </button>
                                       {test.status === "draft" && (
-                                        <button onClick={() => publish(test.id)} disabled={publishing === test.id}
-                                          className="rounded-lg border border-green-400 bg-green-50 px-3 py-1.5 text-xs text-green-700 hover:bg-green-100 disabled:opacity-50">
+                                        <button onClick={() => publish(test.id)}
+                                          disabled={publishing === test.id || !isReady(test.id)}
+                                          title={isReady(test.id) ? "" : notReadyMessage(test.id)}
+                                          className="rounded-lg border border-green-400 bg-green-50 px-3 py-1.5 text-xs text-green-700 hover:bg-green-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400">
                                           {publishing === test.id ? "発行中..." : "配信する"}
                                         </button>
                                       )}
@@ -682,7 +734,6 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   // AI生成
   const [aiStep, setAiStep] = useState<AiStep>("idle");
   const [generating, setGenerating] = useState(false);
-  const [generatedHtml, setGeneratedHtml] = useState("");
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([]);
   // 途中で失敗したときに「どの段からやり直せばよいか」を覚えておく
   const [failedStage, setFailedStage] = useState<PipeStage | null>(null);
@@ -815,42 +866,73 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
 
   // ②検算。correct_answer を伏せて別のAIに実際に解かせ、答えが食い違う問題を洗い出す。
   // ここまでの段はどれも「推敲」で、誰も問題を解いていなかった。
+  //
+  // **1問ずつ**呼ぶ。まとめて聞くと、応答が1つ壊れただけで束ごと未検算になり、
+  // 1リクエストの時間上限に当たって残りが検算されないまま通ってしまう。
+  // 1問ずつなら全問を必ず検算でき、結果もその場で1問ずつ画面に出る。
   const runVerify = async (q: GeneratedQuestion[]): Promise<GeneratedQuestion[] | null> => {
-    setProgressText(`検算中… 全${q.length}問を別のAIが解いています`);
-    const res = await callGen("verify", { testType, title, subject, grade, instructions, questions: q });
-    if (!res.ok) { showFailure("refine", "verify", res.data, "テスト作成（検算）"); return null; }
-    const sum = res.data?.summary as { ok?: number; flagged?: number; unverified?: number } | undefined;
-    if (sum) {
-      setVerifySummary({
-        ok: sum.ok ?? 0,
-        flagged: sum.flagged ?? 0,
-        unverified: sum.unverified ?? 0,
-        solver: (res.data?.solver as string | null) ?? null,
-      });
+    const out = [...q];
+    let solver: string | null = null;
+    for (let i = 0; i < out.length; i++) {
+      // 途中で失敗して入れ直したとき、済んだ分はやり直さない（検算はAIを1問1回使う）
+      const done = out[i].verify_status;
+      if (done === "ok" || done === "fixed" || done === "needs_review") continue;
+      setProgressText(`検算中… ${i + 1}/${out.length}問目を別のAIが解いています`);
+      const res = await callGen("verify", { subject, grade, questions: [out[i]] });
+      if (!res.ok) {
+        // 途中まで検算できていれば、その分は残したうえで知らせる
+        setQuestions([...out]);
+        showFailure("refine", "verify", res.data, "テスト作成（検算）");
+        return null;
+      }
+      const got = (res.data?.questions as GeneratedQuestion[] | undefined)?.[0];
+      if (got) out[i] = got;
+      if (!solver && res.data?.solver) solver = String(res.data.solver);
+      setQuestions([...out]);
+      setVerifySummary(countVerify(out, solver));
     }
-    const verified = res.data?.questions as GeneratedQuestion[] | undefined;
-    return Array.isArray(verified) && verified.length > 0 ? verified : q;
+    return out;
   };
 
-  // ③最終チェック＋用紙化
-  const runFinalize = async (q: GeneratedQuestion[]): Promise<boolean> => {
-    setProgressText(`最終チェック中… 全${q.length}問`);
-    const res = await callGen("claude", { testType, title, subject, grade, instructions, questions: q });
-    if (!res.ok) { showFailure("finalize", "claude", res.data, "テスト作成（仕上げ）"); return false; }
-    if (res.data?.warning) setWarnMsg(String(res.data.warning));
-    if (res.data?.html) setGeneratedHtml(res.data.html as string);
-    if (res.data?.questions) setQuestions(res.data.questions as GeneratedQuestion[]);
-    // 仕上げで直った分・直らなかった分を検算の集計に反映する
-    const sum = res.data?.summary as { flagged?: number; total?: number } | undefined;
-    if (sum && typeof sum.flagged === "number") {
-      setVerifySummary((prev) => ({
-        ok: (sum.total ?? 0) - sum.flagged! - (prev?.unverified ?? 0),
-        flagged: sum.flagged!,
-        unverified: prev?.unverified ?? 0,
-        solver: prev?.solver ?? null,
-      }));
+  /** 検算の集計 */
+  const countVerify = (list: GeneratedQuestion[], solver: string | null) => ({
+    ok: list.filter((x) => x.verify_status === "ok" || x.verify_status === "fixed").length,
+    flagged: list.filter((x) => x.verify_status === "needs_review").length,
+    unverified: list.filter((x) => !x.verify_status || x.verify_status === "unverified").length,
+    solver,
+  });
+
+  // ③直し。検算で引っかかった問題**だけ**を1問ずつ直し、直すたびに解き直して確かめる。
+  // 直っていない問題を黙って通さないために、1問ずつにしている。
+  const runRepair = async (q: GeneratedQuestion[]): Promise<GeneratedQuestion[]> => {
+    const out = [...q];
+    const targets = out
+      .map((x, i) => (x.verify_status === "needs_review" ? i : -1))
+      .filter((i) => i >= 0);
+    for (let n = 0; n < targets.length; n++) {
+      const i = targets[n];
+      setProgressText(`直し中… ${n + 1}/${targets.length}問目（直したら解き直して確かめます）`);
+      const res = await authFetch("/api/generate/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: out[i], subject, grade, title, instructions }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.question) {
+        out[i] = { ...(data.question as GeneratedQuestion), id: out[i].id };
+        setQuestions([...out]);
+        setVerifySummary((prev) => countVerify(out, prev?.solver ?? null));
+      }
+      // 直せなくても止めない。要確認のまま講師に見てもらう
     }
-    return true;
+    const flagged = out.filter((x) => x.verify_status === "needs_review").length;
+    if (flagged > 0) {
+      setWarnMsg(
+        `${flagged}問は正解を確認できませんでした。「問題を直す」で中身をご確認いただくか、` +
+        `その問題だけ作り直してください。確認が済むまで配信できません。`,
+      );
+    }
+    return out;
   };
 
   // ①作成 →②推敲 →③最終チェック を1ボタンで一気通貫（手数削減）。
@@ -878,7 +960,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         setQuestions(q);
         setAiStep("verify");
       }
-      if (!(await runFinalize(q))) return;
+      // ③直し。用紙はブラウザ側で組むのでAIには頼まない（載せ落としが起きない）
+      q = await runRepair(q);
+      setQuestions(q);
       setAiStep("claude");
       setPhase("preview");
     } catch (e) {
@@ -913,7 +997,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         const verified = await runVerify(questions);
         if (verified) { setQuestions(verified); setAiStep("verify"); }
       } else {
-        if (await runFinalize(questions)) setAiStep("claude");
+        const repaired = await runRepair(questions);
+        setQuestions(repaired);
+        setAiStep("claude");
       }
     } catch (e) {
       setErrorMsg(`[${step}] エラー: ${String(e)}`);
@@ -1029,6 +1115,15 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
 
   const saveTest = async () => {
     if (!title || questions.length === 0) { showToast("テスト名と問題が必要です", "info"); return; }
+    // 下書き保存自体は止めない。ただし未確認のまま配信できないことは先に伝える
+    const unchecked = questions.filter((q) => !q.teacher_checked).length;
+    if (unchecked > 0 &&
+        !confirm(`${unchecked}問がまだ「確認しました」になっていません。
+
+下書きとして保存はできますが、`
+                 + `全問の確認が済むまで生徒には配信できません。このまま保存しますか？`)) {
+      return;
+    }
     setSaving(true);
     const { data: test, error } = await supabase
       .from("tests")
@@ -1057,6 +1152,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         passage_id: q.passage_id ?? null,
         verify_status: q.verify_status ?? null,
         verify_note: q.verify_note ?? null,
+        teacher_checked: q.teacher_checked ?? false,
       }))
     );
     if (qErr) { showToast("問題の保存に失敗しました: " + qErr.message, "error"); setSaving(false); return; }
@@ -1500,8 +1596,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
           <h2 className="mb-2 text-xl font-semibold">AIで作成</h2>
           <p className="mb-5 text-sm text-slate-500">
-            ボタン1つで3段のAIが自動実行（作成 → <strong>検算</strong> → 仕上げ）。
-            検算では、正解を伏せて別のAIに実際に解かせ、答えが食い違う問題を洗い出して直します。
+            ボタン1つで3段が自動実行されます（作成 → <strong>検算</strong> → 直し）。
+            検算は<strong>1問ずつ</strong>行い、正解を伏せて別のAIに実際に解かせます。
+            「正しいと言える選択肢を全部挙げさせる」ので、正解が2つある問題も見つかります。
+            食い違った問題は1問ずつ直し、直すたびにもう一度解かせて確かめます。
           </p>
           <button onClick={generateAll}
             disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
@@ -1509,7 +1607,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             {generating
               ? (aiStep === "idle"
                   ? `① ${progressText || "作成中…"}（ChatGPT）`
-                  : aiStep === "chatgpt" ? "② 検算中…（別のAIが解いています）" : "③ 仕上げ中…")
+                  : aiStep === "chatgpt" ? `② ${progressText || "検算中…"}` : `③ ${progressText || "直し中…"}`)
               : failedStage ? "🔄 もう一度AIでテストを作成" : "🤖 AIでテストを作成"}
           </button>
           <details className="mt-3">
@@ -1525,7 +1623,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
                 disabled={generating || !stepDone("chatgpt")}
                 loading={generating && aiStep === "chatgpt"}
                 onClick={() => generate("verify")} />
-              <AiStepButton step="claude" label="③ 仕上げ" desc="検算で引っかかった問題を直し、選択肢を並べ替えて用紙にする"
+              <AiStepButton step="claude" label="③ 直し" desc="検算で引っかかった問題を1問ずつ直し、直すたびに解き直して確かめる"
                 color="purple" done={stepDone("claude")} num="3"
                 disabled={generating || !stepDone("verify")}
                 loading={generating && aiStep === "verify"}
@@ -1630,10 +1728,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               )}
             </div>
           )}
-          {generatedHtml && (
+          {!generating && questions.length > 0 && (
             <button onClick={() => setPhase("preview")}
               className="mt-5 w-full rounded-2xl bg-indigo-600 px-6 py-4 font-semibold text-white transition hover:bg-indigo-700">
-              プレビューを表示する
+              問題を1問ずつ確認する（{questions.length}問）
             </button>
           )}
         </section>
@@ -1648,8 +1746,8 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             <li className="flex gap-2"><span className="text-slate-400">2.</span>テスト名・科目・学年を入力</li>
             <li className="flex gap-2"><span className="text-slate-400">3.</span>出題単元をチェック</li>
             <li className="flex gap-2"><span className="text-slate-400">4.</span>難易度を選択</li>
-            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す（作成→検算→仕上げの3段）</li>
-            <li className="flex gap-2"><span className="text-slate-400">6.</span>HTMLプレビューで確認</li>
+            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す（作成→検算→直し）</li>
+            <li className="flex gap-2"><span className="text-slate-400">6.</span><strong>1問ずつ中身を確認して「確認しました」を付ける</strong></li>
             <li className="flex gap-2"><span className="text-slate-400">7.</span>解答を入力して分析</li>
             <li className="flex gap-2"><span className="text-slate-400">8.</span>レポートを印刷・保存</li>
           </ol>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { mathText } from "@/lib/mathText";
 import { CHOICE_MARKS, type TestQuestion, type VerifyStatus } from "@/lib/testHtml";
 
@@ -55,6 +55,10 @@ export type EditorHandlers<T extends TestQuestion> = {
 export function TestQuestionEditor<T extends TestQuestion>({
   questions, onChange, onRegenerate, onAdd, busyIndex = null, adding = false,
 }: EditorHandlers<T>) {
+  // 「1問ずつ」は、目の前の1問だけを出して確認していくモード。
+  // 一覧で流し読みすると見落とすので、既定はこちらにしてある。
+  const [mode, setMode] = useState<"one" | "list">("one");
+  const [cursor, setCursor] = useState(0);
   // 本文（国語の読解）は複数の設問で共有している。1か所で直したら全部に反映する
   const passageGroups = useMemo(() => {
     const m = new Map<string, number[]>();
@@ -102,26 +106,78 @@ export function TestQuestionEditor<T extends TestQuestion>({
 
   const totalPoints = questions.reduce((s, q) => s + (q.points ?? 0), 0);
   const flagged = questions.filter((q) => q.verify_status === "needs_review").length;
+  const checkedCount = questions.filter((q) => q.teacher_checked).length;
+
+  const at = Math.min(cursor, Math.max(0, questions.length - 1));
+  const visible = mode === "one"
+    ? questions.map((_, i) => i).filter((i) => i === at)
+    : questions.map((_, i) => i);
+
+  /** 次の未確認の問題へ飛ぶ。無ければ何もしない */
+  const goNextUnchecked = () => {
+    const next = questions.findIndex((q, i) => i > at && !q.teacher_checked);
+    const wrap = next === -1 ? questions.findIndex((q) => !q.teacher_checked) : next;
+    if (wrap !== -1) setCursor(wrap);
+  };
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm">
-        <span className="font-semibold text-slate-800">全{questions.length}問</span>
-        <span className="text-slate-500">合計{totalPoints}点</span>
-        {flagged > 0 && (
-          <span className="rounded-full bg-red-100 px-3 py-1 font-semibold text-red-700">
-            🔴 要確認 {flagged}問
+      <div className="rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-semibold text-slate-800">全{questions.length}問</span>
+          <span className="text-slate-500">合計{totalPoints}点</span>
+          <span className={`rounded-full px-3 py-1 font-semibold ${
+            checkedCount === questions.length
+              ? "bg-green-100 text-green-800"
+              : "bg-amber-100 text-amber-800"
+          }`}>
+            確認済み {checkedCount}/{questions.length}問
           </span>
-        )}
-        <span className="ml-auto text-xs text-slate-400">
-          配点は保存・印刷のときに合計100点へ自動でそろえます
-        </span>
+          {flagged > 0 && (
+            <span className="rounded-full bg-red-100 px-3 py-1 font-semibold text-red-700">
+              🔴 要確認 {flagged}問
+            </span>
+          )}
+          <div className="ml-auto flex rounded-xl border border-slate-200 p-0.5 text-xs">
+            <button onClick={() => setMode("one")}
+              className={`rounded-lg px-3 py-1.5 ${mode === "one" ? "bg-slate-800 font-semibold text-white" : "text-slate-600"}`}>
+              1問ずつ
+            </button>
+            <button onClick={() => setMode("list")}
+              className={`rounded-lg px-3 py-1.5 ${mode === "list" ? "bg-slate-800 font-semibold text-white" : "text-slate-600"}`}>
+              一覧
+            </button>
+          </div>
+        </div>
+        {/* 1問ずつの進み具合。押すとその問題へ飛ぶ */}
+        <div className="mt-3 flex flex-wrap gap-1">
+          {questions.map((q, i) => (
+            <button key={q.id ?? i}
+              onClick={() => { setMode("one"); setCursor(i); }}
+              title={`問${i + 1}`}
+              className={`h-7 w-7 rounded-lg text-xs font-semibold transition ${
+                q.verify_status === "needs_review"
+                  ? "bg-red-100 text-red-700 hover:bg-red-200"
+                  : q.teacher_checked
+                    ? "bg-green-600 text-white"
+                    : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              } ${mode === "one" && cursor === i ? "ring-2 ring-slate-800 ring-offset-1" : ""}`}>
+              {i + 1}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-400">
+          配点は保存・印刷のときに合計100点へ自動でそろえます。
+          未確認の問題が残っているテストは配信できません。
+        </p>
       </div>
 
-      {questions.map((q, i) => {
+      {visible.map((i) => {
+        const q = questions[i];
         const pid = q.passage_id ? String(q.passage_id) : "";
         const group = pid ? passageGroups.get(pid) ?? [] : [];
-        const isPassageHead = pid !== "" && group[0] === i;
+        // 一覧では本文はかたまりの先頭で1回だけ。1問ずつのときは常に出す（無いと読めない）
+        const isPassageHead = pid !== "" && (mode === "one" || group[0] === i);
         const badge = q.verify_status ? VERIFY_BADGE[q.verify_status] : null;
         const busy = busyIndex === i;
         const optionCount = (q.options ?? []).length;
@@ -283,6 +339,39 @@ export function TestQuestionEditor<T extends TestQuestion>({
                   用紙での見え方：{mathText(q.text)}
                 </p>
               )}
+
+              {/* 確認の確定。AIの検算は最後の砦ではないので、人が目を通した印を必ず取る */}
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                <button
+                  onClick={() => patch(i, { teacher_checked: !q.teacher_checked })}
+                  disabled={busy}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition disabled:opacity-40 ${
+                    q.teacher_checked
+                      ? "bg-green-600 text-white hover:bg-green-700"
+                      : "border-2 border-green-300 bg-white text-green-700 hover:bg-green-50"
+                  }`}>
+                  {q.teacher_checked ? "✓ 確認しました" : "確認しました"}
+                </button>
+                {mode === "one" && (
+                  <>
+                    <button onClick={() => setCursor(Math.max(0, at - 1))} disabled={at === 0}
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-30">
+                      ← 前の問題
+                    </button>
+                    <button onClick={() => setCursor(Math.min(questions.length - 1, at + 1))}
+                      disabled={at >= questions.length - 1}
+                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-30">
+                      次の問題 →
+                    </button>
+                    <button onClick={goNextUnchecked}
+                      disabled={checkedCount >= questions.length}
+                      className="rounded-xl bg-slate-800 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-30">
+                      次の未確認へ
+                    </button>
+                    <span className="ml-auto text-sm text-slate-400">{i + 1} / {questions.length}問目</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );

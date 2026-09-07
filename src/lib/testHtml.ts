@@ -31,6 +31,8 @@ export type TestQuestion = {
   passage_id?: string;
   verify_status?: VerifyStatus;
   verify_note?: string;
+  /** 講師が1問ずつ中身を見て確認したか。AIの検算は最後の砦ではない */
+  teacher_checked?: boolean;
 };
 
 const DIFF_ORDER = ["basic", "standard", "advanced"];

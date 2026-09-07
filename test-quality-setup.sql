@@ -34,6 +34,9 @@ ALTER TABLE questions ADD COLUMN IF NOT EXISTS passage_id   text;
 --   ok / fixed / needs_review / unverified
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS verify_status text;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS verify_note   text;
+-- 講師が1問ずつ中身を見て「確認しました」を付けたか。
+-- 未確認の問題が残っているテストは配信・割り当てをさせない（AIの検算は最後の砦ではない）。
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS teacher_checked boolean NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_questions_passage ON questions (test_id, passage_id);
 

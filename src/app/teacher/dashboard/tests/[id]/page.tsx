@@ -41,6 +41,7 @@ type Row = {
   passage_id: string | null;
   verify_status: string | null;
   verify_note: string | null;
+  teacher_checked: boolean | null;
 };
 
 export default function SavedTestPage({ params }: { params: Promise<{ id: string }> }) {
@@ -81,6 +82,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
         passage_id: r.passage_id ?? undefined,
         verify_status: (r.verify_status as TestQuestion["verify_status"]) ?? undefined,
         verify_note: r.verify_note ?? undefined,
+        teacher_checked: r.teacher_checked ?? false,
       })),
     );
     setOriginalIds(rows.map((r) => r.id));
@@ -212,6 +214,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
       passage_id: q.passage_id ?? null,
       verify_status: q.verify_status ?? null,
       verify_note: q.verify_note ?? null,
+      teacher_checked: q.teacher_checked ?? false,
     });
 
     let failed = "";
