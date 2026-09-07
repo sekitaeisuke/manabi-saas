@@ -80,7 +80,8 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
     // correct_answer は生徒に送らない（採点はサーバ側がDBの正解で行う）
     const { data: questionsData } = await supabase
       .from("questions")
-      .select("id, test_id, type, text, options, order_index, points")
+      // correct_answer は生徒に送らないが、国語の読解は本文が無いと解けないので passage は取る
+      .select("id, test_id, type, text, options, order_index, points, passage, passage_id")
       .eq("test_id", sessionData.test_id).order("order_index");
     setQuestions((questionsData ?? []) as Question[]);
     setLoading(false);
@@ -255,8 +256,22 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
             <p className="text-xs text-slate-400 mt-1">全{questions.length}問・{total}点満点</p>
           </header>
           <div className="space-y-6">
-            {questions.map((q, i) => (
-              <div key={q.id} className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
+            {questions.map((q, i) => {
+              // 国語の読解：同じ本文にぶら下がる設問は、かたまりの先頭で本文を1回だけ出す
+              const pid = q.passage_id ?? "";
+              const showPassage = pid !== "" && q.passage && questions[i - 1]?.passage_id !== pid;
+              const groupSize = pid ? questions.filter((x) => x.passage_id === pid).length : 0;
+              return (
+              <div key={q.id}>
+              {showPassage && (
+                <div className="mb-3 rounded-3xl border border-indigo-200 bg-indigo-50/60 p-6">
+                  <p className="mb-2 text-sm font-bold text-indigo-900">
+                    次の文章を読んで、あとの{groupSize}問に答えなさい。
+                  </p>
+                  <p className="whitespace-pre-line leading-8 text-slate-800">{q.passage}</p>
+                </div>
+              )}
+              <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-semibold text-slate-400">第{i + 1}問</p>
                   <span className="text-xs text-slate-400">{q.points}点</span>
@@ -284,7 +299,9 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
                   </div>
                 )}
               </div>
-            ))}
+              </div>
+              );
+            })}
           </div>
           <div className="mt-8 space-y-3">
             <button

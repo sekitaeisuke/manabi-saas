@@ -55,6 +55,8 @@ type RawQuestion = {
   options: string[] | null;
   correct_answer: string | null;
   points: number;
+  /** なぜその答えになるかの説明。間違えた問題の表に添えて、家庭で振り返れるようにする */
+  explanation?: string | null;
 };
 
 function buildLessonReportHtml(p: {
@@ -69,8 +71,11 @@ function buildLessonReportHtml(p: {
 
   const wrongRows = wrongQs.map((q, i) => {
     const a = p.answers.find((a) => a.question_id === q.id);
+    const why = q.explanation
+      ? `<div style="margin-top:4px;font-size:0.8125rem;color:#64748b">${q.explanation}</div>`
+      : "";
     return `<tr>
-      <td style="padding:6px 10px;border:1px solid #e2e8f0">${i + 1}. ${q.text}</td>
+      <td style="padding:6px 10px;border:1px solid #e2e8f0">${i + 1}. ${q.text}${why}</td>
       <td style="padding:6px 10px;border:1px solid #e2e8f0;color:#dc2626">${a?.answer ?? "未回答"}</td>
       <td style="padding:6px 10px;border:1px solid #e2e8f0;color:#059669;font-weight:600">${q.correct_answer ?? "—"}</td>
     </tr>`;
@@ -137,7 +142,7 @@ export async function POST(req: NextRequest) {
   }
   const { data: dbQuestions, error: qErr } = await supabase
     .from("questions")
-    .select("id, type, text, options, correct_answer, points")
+    .select("id, type, text, options, correct_answer, points, explanation")
     .eq("test_id", ts.test_id)
     .order("order_index");
   if (qErr || !dbQuestions) {

@@ -1,5 +1,13 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
+import { TEST_PAPER_CSS } from "@/lib/testPaperStyle";
+import {
+  renderTestHtml, renderAnswerSheetHtml, normalizePoints, renumber, sortByDifficulty,
+  type VerifyStatus,
+} from "@/lib/testHtml";
+import { TestQuestionEditor } from "@/components/TestQuestionEditor";
+import { printPaper } from "@/lib/printPaper";
+import { toBankRows, saveToBank } from "@/lib/questionBank";
 import { mathText } from "@/lib/mathText";
 import { authFetch } from "@/lib/authFetch";
 import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
@@ -18,7 +26,7 @@ import {
 // ─── 型 ──────────────────────────────────────────────
 type Difficulty = "basic" | "standard" | "advanced";
 type TestType = "diagnostic" | "lesson";
-type AiStep = "idle" | "chatgpt" | "gemini" | "claude";
+type AiStep = "idle" | "chatgpt" | "verify" | "claude";
 /** 生成の3段。失敗した段からやり直せるようにするための識別子 */
 type PipeStage = "draft" | "refine" | "finalize";
 
@@ -31,6 +39,18 @@ type GeneratedQuestion = {
   options: string[] | null;
   correct_answer: string;
   points: number;
+  /** なぜその答えになるかの短い説明（解答つき用紙・報告書で使う） */
+  explanation?: string;
+  /** どの単元の問題か（問題バンクから引き当てるのに使う） */
+  unit?: string;
+  /** 国語の読解：同じ本文にぶら下がる設問は同じ passage_id を持つ */
+  passage?: string;
+  passage_id?: string;
+  /** 検算（別のAIに正解を伏せて解かせる工程）の結果 */
+  verify_status?: VerifyStatus;
+  verify_note?: string;
+  /** 講師が1問ずつ中身を見て確認したか */
+  teacher_checked?: boolean;
 };
 
 type ScoredAnswer = { isCorrect: boolean; points: number };
@@ -202,8 +222,41 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   const [selectedStudent, setSelectedStudent] = useState("");
   const [starting, setStarting] = useState(false);
   const [assignSuccess, setAssignSuccess] = useState<{ studentName: string; token: string; expires_at: string | null } | null>(null);
+  // テストごとの「確認の進み具合」。未確認・要確認が残っているテストは配信させない。
+  // AIの検算は最後の砦ではないので、人が全問に目を通した印を配信の条件にする。
+  const [checkState, setCheckState] = useState<Record<string, { total: number; checked: number; flagged: number }>>({});
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set());
   const [openSubfolders, setOpenSubfolders] = useState<Set<string>>(new Set());
+
+  const loadCheckState = async () => {
+    const { data } = await supabase
+      .from("questions").select("test_id, teacher_checked, verify_status");
+    const map: Record<string, { total: number; checked: number; flagged: number }> = {};
+    for (const r of (data ?? []) as { test_id: string; teacher_checked: boolean | null; verify_status: string | null }[]) {
+      const cur = map[r.test_id] ?? { total: 0, checked: 0, flagged: 0 };
+      cur.total++;
+      if (r.teacher_checked) cur.checked++;
+      if (r.verify_status === "needs_review") cur.flagged++;
+      map[r.test_id] = cur;
+    }
+    setCheckState(map);
+  };
+
+  /** 配信・割り当てしてよいテストか（全問を講師が確認済みで、要確認が残っていない） */
+  const isReady = (testId: string) => {
+    const c = checkState[testId];
+    if (!c || c.total === 0) return false;
+    return c.checked >= c.total && c.flagged === 0;
+  };
+
+  const notReadyMessage = (testId: string) => {
+    const c = checkState[testId];
+    if (!c || c.total === 0) return "問題がありません";
+    const parts: string[] = [];
+    if (c.checked < c.total) parts.push(`未確認${c.total - c.checked}問`);
+    if (c.flagged > 0) parts.push(`要確認${c.flagged}問`);
+    return `${parts.join("・")}。「開く・印刷」から1問ずつ確認してください`;
+  };
 
   const loadSessionsAndAssignments = async () => {
     const [{ data: sessions }, { data: assigns }] = await Promise.all([
@@ -237,6 +290,7 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
   useEffect(() => {
     supabase.from("students").select("*").order("name").then(({ data }) => setStudents(data ?? []));
     loadSessionsAndAssignments();
+    loadCheckState();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -443,6 +497,12 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                         </svg>
                                         <span className="font-medium text-slate-900 text-sm">{test.title}</span>
                                         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${st.color}`}>{st.label}</span>
+                                        {!isReady(test.id) && (
+                                          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800"
+                                            title={notReadyMessage(test.id)}>
+                                            確認待ち（{checkState[test.id]?.checked ?? 0}/{checkState[test.id]?.total ?? 0}問）
+                                          </span>
+                                        )}
                                         {session && (
                                           urlAlive ? (
                                             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-500">
@@ -489,6 +549,11 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                           </button>
                                         </div>
                                       )}
+                                      {!isReady(test.id) && (
+                                        <p className="mt-1 pl-6 text-xs text-amber-700">
+                                          {notReadyMessage(test.id)}
+                                        </p>
+                                      )}
                                       {session && !urlAlive && (
                                         <p className="mt-1 pl-6 text-xs text-red-600">
                                           「URLを再発行」を押すと、同じURLのまま期限が30日延びます（生徒のダッシュボードのリンクもそのまま使えます）。
@@ -496,13 +561,22 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                       )}
                                     </div>
                                     <div className="flex gap-1.5 flex-wrap justify-end shrink-0">
-                                      <button onClick={() => { setStartModal(test); setSelectedStudent(""); setAssignSuccess(null); }}
-                                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                                      <Link href={`/teacher/dashboard/tests/${test.id}`}
+                                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                                        開く・印刷
+                                      </Link>
+                                      <button
+                                        onClick={() => { setStartModal(test); setSelectedStudent(""); setAssignSuccess(null); }}
+                                        disabled={!isReady(test.id)}
+                                        title={isReady(test.id) ? "" : notReadyMessage(test.id)}
+                                        className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
                                         生徒に割り当てる
                                       </button>
                                       {test.status === "draft" && (
-                                        <button onClick={() => publish(test.id)} disabled={publishing === test.id}
-                                          className="rounded-lg border border-green-400 bg-green-50 px-3 py-1.5 text-xs text-green-700 hover:bg-green-100 disabled:opacity-50">
+                                        <button onClick={() => publish(test.id)}
+                                          disabled={publishing === test.id || !isReady(test.id)}
+                                          title={isReady(test.id) ? "" : notReadyMessage(test.id)}
+                                          className="rounded-lg border border-green-400 bg-green-50 px-3 py-1.5 text-xs text-green-700 hover:bg-green-100 disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400">
                                           {publishing === test.id ? "発行中..." : "配信する"}
                                         </button>
                                       )}
@@ -653,16 +727,27 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [difficulties, setDifficulties] = useState<Difficulty[]>(["basic"]);
   const [count, setCount] = useState(10);
   const [instructions, setInstructions] = useState("");
+  // 問題バンク（過去に作って検算を通った問題）を使うか。切ると毎回すべて作り直す
+  const [useBank, setUseBank] = useState(true);
+  const [bankCount, setBankCount] = useState<{ fromBank: number; generated: number } | null>(null);
 
   // AI生成
   const [aiStep, setAiStep] = useState<AiStep>("idle");
   const [generating, setGenerating] = useState(false);
-  const [generatedHtml, setGeneratedHtml] = useState("");
   const [questions, setQuestions] = useState<GeneratedQuestion[]>([]);
   // 途中で失敗したときに「どの段からやり直せばよいか」を覚えておく
   const [failedStage, setFailedStage] = useState<PipeStage | null>(null);
   const [progressText, setProgressText] = useState("");
+  // 検算（②段）の結果。何問が確認できて、何問が要確認で残ったか
+  const [verifySummary, setVerifySummary] = useState<
+    { ok: number; flagged: number; unverified: number; solver: string | null } | null
+  >(null);
   const [warnMsg, setWarnMsg] = useState("");
+
+  // プレビュー（問題を直す／用紙を見る）
+  const [previewTab, setPreviewTab] = useState<"edit" | "paper">("edit");
+  const [regenIndex, setRegenIndex] = useState<number | null>(null);
+  const [addingOne, setAddingOne] = useState(false);
 
   // 解答・分析
   const [phase, setPhase] = useState<"form" | "preview" | "answers" | "report">("form");
@@ -692,8 +777,8 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     );
   };
 
-  const stepDone = (step: "chatgpt" | "gemini" | "claude") => {
-    const order: AiStep[] = ["chatgpt", "gemini", "claude"];
+  const stepDone = (step: "chatgpt" | "verify" | "claude") => {
+    const order: AiStep[] = ["chatgpt", "verify", "claude"];
     const cur = order.indexOf(aiStep);
     return cur >= order.indexOf(step);
   };
@@ -701,7 +786,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   // AIの各段を叩く。混雑（busy）や一時的な通信断は1回だけ自動で入れ直す
   type GenResponse = Record<string, unknown> & { error?: string; aiKind?: string };
   const callGen = async (
-    step: "chatgpt" | "gemini" | "claude",
+    step: "chatgpt" | "verify" | "claude",
     body: Record<string, unknown>,
     retried = false,
   ): Promise<{ ok: boolean; data: GenResponse | null; status: number }> => {
@@ -746,6 +831,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       const before = q.length;
       const res = await callGen("chatgpt", {
         testType, title, subject, grade, selectedUnits, difficulties, count, instructions,
+        useBank,
         existingQuestions: q.map((x) => ({ text: x.text, difficulty: x.difficulty })),
       });
       if (!res.ok) {
@@ -755,6 +841,12 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         return null;
       }
       const got = (res.data?.questions as GeneratedQuestion[]) ?? [];
+      if (typeof res.data?.fromBank === "number") {
+        setBankCount({
+          fromBank: res.data.fromBank as number,
+          generated: (res.data.generated as number) ?? 0,
+        });
+      }
       if (got.length === 0) break;
       q = got;
       setQuestions(q);
@@ -772,25 +864,75 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     return q;
   };
 
-  // ②推敲
-  const runRefine = async (q: GeneratedQuestion[]): Promise<GeneratedQuestion[] | null> => {
-    setProgressText(`推敲中… 全${q.length}問`);
-    const res = await callGen("gemini", { testType, title, subject, grade, instructions, questions: q });
-    if (!res.ok) { showFailure("refine", "gemini", res.data, "テスト作成（推敲）"); return null; }
-    if (res.data?.warning) setWarnMsg(String(res.data.warning));
-    const improved = res.data?.questions as GeneratedQuestion[] | undefined;
-    return Array.isArray(improved) && improved.length > 0 ? improved : q;
+  // ②検算。correct_answer を伏せて別のAIに実際に解かせ、答えが食い違う問題を洗い出す。
+  // ここまでの段はどれも「推敲」で、誰も問題を解いていなかった。
+  //
+  // **1問ずつ**呼ぶ。まとめて聞くと、応答が1つ壊れただけで束ごと未検算になり、
+  // 1リクエストの時間上限に当たって残りが検算されないまま通ってしまう。
+  // 1問ずつなら全問を必ず検算でき、結果もその場で1問ずつ画面に出る。
+  const runVerify = async (q: GeneratedQuestion[]): Promise<GeneratedQuestion[] | null> => {
+    const out = [...q];
+    let solver: string | null = null;
+    for (let i = 0; i < out.length; i++) {
+      // 途中で失敗して入れ直したとき、済んだ分はやり直さない（検算はAIを1問1回使う）
+      const done = out[i].verify_status;
+      if (done === "ok" || done === "fixed" || done === "needs_review") continue;
+      setProgressText(`検算中… ${i + 1}/${out.length}問目を別のAIが解いています`);
+      const res = await callGen("verify", { subject, grade, questions: [out[i]] });
+      if (!res.ok) {
+        // 途中まで検算できていれば、その分は残したうえで知らせる
+        setQuestions([...out]);
+        showFailure("refine", "verify", res.data, "テスト作成（検算）");
+        return null;
+      }
+      const got = (res.data?.questions as GeneratedQuestion[] | undefined)?.[0];
+      if (got) out[i] = got;
+      if (!solver && res.data?.solver) solver = String(res.data.solver);
+      setQuestions([...out]);
+      setVerifySummary(countVerify(out, solver));
+    }
+    return out;
   };
 
-  // ③最終チェック＋用紙化
-  const runFinalize = async (q: GeneratedQuestion[]): Promise<boolean> => {
-    setProgressText(`最終チェック中… 全${q.length}問`);
-    const res = await callGen("claude", { testType, title, subject, grade, instructions, questions: q });
-    if (!res.ok) { showFailure("finalize", "claude", res.data, "テスト作成（仕上げ）"); return false; }
-    if (res.data?.warning) setWarnMsg(String(res.data.warning));
-    if (res.data?.html) setGeneratedHtml(res.data.html as string);
-    if (res.data?.questions) setQuestions(res.data.questions as GeneratedQuestion[]);
-    return true;
+  /** 検算の集計 */
+  const countVerify = (list: GeneratedQuestion[], solver: string | null) => ({
+    ok: list.filter((x) => x.verify_status === "ok" || x.verify_status === "fixed").length,
+    flagged: list.filter((x) => x.verify_status === "needs_review").length,
+    unverified: list.filter((x) => !x.verify_status || x.verify_status === "unverified").length,
+    solver,
+  });
+
+  // ③直し。検算で引っかかった問題**だけ**を1問ずつ直し、直すたびに解き直して確かめる。
+  // 直っていない問題を黙って通さないために、1問ずつにしている。
+  const runRepair = async (q: GeneratedQuestion[]): Promise<GeneratedQuestion[]> => {
+    const out = [...q];
+    const targets = out
+      .map((x, i) => (x.verify_status === "needs_review" ? i : -1))
+      .filter((i) => i >= 0);
+    for (let n = 0; n < targets.length; n++) {
+      const i = targets[n];
+      setProgressText(`直し中… ${n + 1}/${targets.length}問目（直したら解き直して確かめます）`);
+      const res = await authFetch("/api/generate/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: out[i], subject, grade, title, instructions }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.question) {
+        out[i] = { ...(data.question as GeneratedQuestion), id: out[i].id };
+        setQuestions([...out]);
+        setVerifySummary((prev) => countVerify(out, prev?.solver ?? null));
+      }
+      // 直せなくても止めない。要確認のまま講師に見てもらう
+    }
+    const flagged = out.filter((x) => x.verify_status === "needs_review").length;
+    if (flagged > 0) {
+      setWarnMsg(
+        `${flagged}問は正解を確認できませんでした。「問題を直す」で中身をご確認いただくか、` +
+        `その問題だけ作り直してください。確認が済むまで配信できません。`,
+      );
+    }
+    return out;
   };
 
   // ①作成 →②推敲 →③最終チェック を1ボタンで一気通貫（手数削減）。
@@ -801,6 +943,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
     setGenerating(true);
     setErrorMsg(""); setAiError(null); setWarnMsg(""); setFailedStage(null);
+    setVerifySummary(null); setBankCount(null);
     try {
       let q = questions;
       if (startAt === "draft") {
@@ -811,13 +954,15 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         setAiStep("chatgpt");
       }
       if (startAt === "draft" || startAt === "refine") {
-        const refined = await runRefine(q);
-        if (!refined) return;
-        q = refined;
+        const verified = await runVerify(q);
+        if (!verified) return;
+        q = verified;
         setQuestions(q);
-        setAiStep("gemini");
+        setAiStep("verify");
       }
-      if (!(await runFinalize(q))) return;
+      // ③直し。用紙はブラウザ側で組むのでAIには頼まない（載せ落としが起きない）
+      q = await runRepair(q);
+      setQuestions(q);
       setAiStep("claude");
       setPhase("preview");
     } catch (e) {
@@ -838,7 +983,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   };
 
   // 上級者向け：1段ずつ実行
-  const generate = async (step: "chatgpt" | "gemini" | "claude") => {
+  const generate = async (step: "chatgpt" | "verify" | "claude") => {
     if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
     if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
     setGenerating(true);
@@ -848,11 +993,13 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         // 目標に届いていなければ続きから、届いていれば作り直し
         const drafted = await runDraft(questions.length > 0 && questions.length < count ? questions : []);
         if (drafted) setAiStep("chatgpt");
-      } else if (step === "gemini") {
-        const refined = await runRefine(questions);
-        if (refined) { setQuestions(refined); setAiStep("gemini"); }
+      } else if (step === "verify") {
+        const verified = await runVerify(questions);
+        if (verified) { setQuestions(verified); setAiStep("verify"); }
       } else {
-        if (await runFinalize(questions)) setAiStep("claude");
+        const repaired = await runRepair(questions);
+        setQuestions(repaired);
+        setAiStep("claude");
       }
     } catch (e) {
       setErrorMsg(`[${step}] エラー: ${String(e)}`);
@@ -860,6 +1007,85 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       setGenerating(false);
       setProgressText("");
     }
+  };
+
+  /**
+   * いまの問題から用紙を組む。講師が1問直すたびにAPIを叩かず、その場で組み直す
+   * （testHtml.ts はブラウザでもそのまま動く）。
+   * 配点は「合計100点」にそろえ、番号も振り直してから出す。
+   */
+  const paperHtml = (withAnswers: boolean) =>
+    renderTestHtml({
+      title, grade, subject, withAnswers,
+      questions: renumber(normalizePoints(sortByDifficulty(questions))),
+    });
+
+  const doPrint = (withAnswers: boolean) => {
+    if (questions.length === 0) { showToast("印刷する問題がありません", "info"); return; }
+    const ok = printPaper(
+      withAnswers ? `${title}（解答・解説）` : title,
+      paperHtml(withAnswers),
+    );
+    if (!ok) showToast("印刷用の画面を開けませんでした。ポップアップの許可をご確認ください", "error");
+  };
+
+  const printAnswerSheet = () => {
+    if (questions.length === 0) { showToast("印刷する問題がありません", "info"); return; }
+    printPaper(
+      `${title}（解答用紙）`,
+      renderAnswerSheetHtml({
+        title, grade, subject,
+        questions: renumber(normalizePoints(sortByDifficulty(questions))),
+      }),
+    );
+  };
+
+  /** 1問だけ作り直す。作成→検算→直しをサーバ側で通しでやって1問返ってくる */
+  const callOne = async (body: Record<string, unknown>): Promise<GeneratedQuestion | null> => {
+    const res = await authFetch("/api/generate/one", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject, grade, title, instructions, selectedUnits, ...body }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data || data.error) {
+      showToast(data?.error ?? "問題を作れませんでした", "error");
+      return null;
+    }
+    return data.question as GeneratedQuestion;
+  };
+
+  const regenerateOne = async (index: number) => {
+    const target = questions[index];
+    if (!target) return;
+    setRegenIndex(index);
+    const q = await callOne({
+      difficulty: target.difficulty,
+      points: target.points,
+      // 本文つきの設問は本文を保ったまま設問だけ作り直す
+      passage: target.passage ?? "",
+      avoidTexts: questions.filter((_, i) => i !== index).map((x) => x.text),
+    });
+    if (q) {
+      setQuestions((prev) => prev.map((x, i) => (i === index
+        ? { ...q, id: x.id, passage_id: x.passage_id, passage: x.passage ?? q.passage }
+        : x)));
+      showToast("問題を作り直しました", "success");
+    }
+    setRegenIndex(null);
+  };
+
+  const addOneQuestion = async () => {
+    setAddingOne(true);
+    const q = await callOne({
+      difficulty: difficulties[0] ?? "basic",
+      avoidTexts: questions.map((x) => x.text),
+    });
+    if (q) {
+      setQuestions((prev) => [...prev, { ...q, id: `q${prev.length + 1}` }]);
+      showToast("問題を1問足しました", "success");
+    }
+    setAddingOne(false);
   };
 
   const startAnswers = () => {
@@ -889,6 +1115,15 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
 
   const saveTest = async () => {
     if (!title || questions.length === 0) { showToast("テスト名と問題が必要です", "info"); return; }
+    // 下書き保存自体は止めない。ただし未確認のまま配信できないことは先に伝える
+    const unchecked = questions.filter((q) => !q.teacher_checked).length;
+    if (unchecked > 0 &&
+        !confirm(`${unchecked}問がまだ「確認しました」になっていません。
+
+下書きとして保存はできますが、`
+                 + `全問の確認が済むまで生徒には配信できません。このまま保存しますか？`)) {
+      return;
+    }
     setSaving(true);
     const { data: test, error } = await supabase
       .from("tests")
@@ -896,8 +1131,12 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       .select()
       .single();
     if (error || !test) { showToast("保存に失敗しました", "error"); setSaving(false); return; }
+    // difficulty / section / explanation / 本文 は以前は保存しておらず、保存したテストを
+    // 開き直すと基礎・標準・応用のまとまりも解説も復元できなかった。
+    // test-quality-setup.sql で列を足したので、作ったものをそのまま残す。
+    const toSave = renumber(normalizePoints(sortByDifficulty(questions)));
     const { error: qErr } = await supabase.from("questions").insert(
-      questions.map((q, i) => ({
+      toSave.map((q, i) => ({
         test_id: test.id,
         order_index: i,
         type: q.type === "descriptive" ? "short-answer" : q.type,
@@ -905,9 +1144,27 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         options: q.options ?? null,
         correct_answer: q.correct_answer ?? null,
         points: q.points ?? 1,
+        difficulty: q.difficulty ?? null,
+        section: q.section ?? null,
+        unit: q.unit ?? null,
+        explanation: q.explanation ?? null,
+        passage: q.passage ?? null,
+        passage_id: q.passage_id ?? null,
+        verify_status: q.verify_status ?? null,
+        verify_note: q.verify_note ?? null,
+        teacher_checked: q.teacher_checked ?? false,
       }))
     );
     if (qErr) { showToast("問題の保存に失敗しました: " + qErr.message, "error"); setSaving(false); return; }
+
+    // 検算を通った問題は問題バンクへ貯める。次のテストから拾って使える。
+    // 貯められなくてもテストの保存は成立しているので、失敗しても止めない。
+    const rows = toBankRows(toSave, { subject, grade, testId: test.id });
+    if (rows.length > 0) {
+      const { error: bankErr } = await saveToBank(supabase, rows);
+      if (bankErr) console.warn("問題バンクへの保存に失敗（非致命的）:", bankErr);
+    }
+
     setSaving(false);
     onSaved();
   };
@@ -974,16 +1231,42 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     );
   }
 
-  // ── プレビュー画面 ──
+  // ── プレビュー・編集画面 ──
+  // 以前はHTMLの塊を出すだけで、気に入らない問題が1つあっても全部作り直すしかなかった。
+  // 「問題を直す」タブで1問ずつ直し、「用紙」タブでその場で組み直した用紙を確認する。
   if (phase === "preview") {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">テストプレビュー</h2>
-          <div className="flex gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-900">テストの確認・修正</h2>
+            <div className="flex rounded-xl border border-slate-200 bg-white p-0.5 text-sm">
+              <button onClick={() => setPreviewTab("edit")}
+                className={`rounded-lg px-3 py-1.5 ${previewTab === "edit" ? "bg-indigo-600 font-semibold text-white" : "text-slate-600"}`}>
+                問題を直す
+              </button>
+              <button onClick={() => setPreviewTab("paper")}
+                className={`rounded-lg px-3 py-1.5 ${previewTab === "paper" ? "bg-indigo-600 font-semibold text-white" : "text-slate-600"}`}>
+                用紙
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => setPhase("form")}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-              編集に戻る
+              設定に戻る
+            </button>
+            <button onClick={() => doPrint(false)}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              問題用紙を印刷
+            </button>
+            <button onClick={() => doPrint(true)}
+              className="rounded-xl border border-green-300 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100">
+              解答・解説を印刷
+            </button>
+            <button onClick={printAnswerSheet}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              解答用紙を印刷
             </button>
             <button onClick={startAnswers}
               className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700">
@@ -995,21 +1278,22 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             </button>
           </div>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <style>{`
-            #test-body { font-family: sans-serif; line-height: 1.8; }
-            #test-body h1 { font-size: 1.4rem; font-weight: bold; text-align: center; border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 16px; }
-            #test-body h2 { font-size: 1.1rem; font-weight: bold; background: #f1f5f9; padding: 6px 12px; margin: 24px 0 12px; border-left: 4px solid #6366f1; }
-            #test-body .question { margin: 16px 0; }
-            #test-body ol { padding-left: 1.8rem; margin: 6px 0; }
-            #test-body .answer-hint { font-size: 0.8rem; color: #64748b; margin: 2px 0; }
-            #test-body .answer-box { border-bottom: 1px solid #94a3b8; min-height: 40px; margin: 8px 0 16px; }
-            #test-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
-            #test-body td, #test-body th { border: 1px solid #cbd5e1; padding: 6px 10px; }
-            #test-body th { background: #f8fafc; font-weight: bold; }
-          `}</style>
-          <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(generatedHtml) }} />
-        </div>
+
+        {previewTab === "edit" ? (
+          <TestQuestionEditor
+            questions={questions}
+            onChange={(next) => setQuestions(next)}
+            onRegenerate={regenerateOne}
+            onAdd={addOneQuestion}
+            busyIndex={regenIndex}
+            adding={addingOne}
+          />
+        ) : (
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <style>{TEST_PAPER_CSS}</style>
+            <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(paperHtml(false)) }} />
+          </div>
+        )}
       </div>
     );
   }
@@ -1292,20 +1576,38 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
           <h2 className="mb-3 text-xl font-semibold">追加指示（任意）</h2>
           <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={3}
             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-green-400"
-            placeholder="例：選択肢は4択にしてください。図を含む問題を2問入れてください。" />
+            placeholder="例：計算問題を多めに。文章題を2問入れてください。" />
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={useBank}
+              onChange={(e) => setUseBank(e.target.checked)}
+              className="mt-1 accent-indigo-600" />
+            <span>
+              <span className="font-medium">問題バンクを使う</span>
+              <span className="block text-xs text-slate-500">
+                これまでに作って検算を通った問題のうち、同じ学年・単元・難易度のものを先に使い、
+                足りない分だけ新しく作ります。作成が速くなり、テストをまたいだ重複も防げます。
+                外すと毎回すべて作り直します。
+              </span>
+            </span>
+          </label>
         </section>
 
         {/* AI生成フロー */}
         <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
           <h2 className="mb-2 text-xl font-semibold">AIで作成</h2>
-          <p className="mb-5 text-sm text-slate-500">ボタン1つで3段のAIが自動実行（作成 → 推敲 → 最終チェック）</p>
+          <p className="mb-5 text-sm text-slate-500">
+            ボタン1つで3段が自動実行されます（作成 → <strong>検算</strong> → 直し）。
+            検算は<strong>1問ずつ</strong>行い、正解を伏せて別のAIに実際に解かせます。
+            「正しいと言える選択肢を全部挙げさせる」ので、正解が2つある問題も見つかります。
+            食い違った問題は1問ずつ直し、直すたびにもう一度解かせて確かめます。
+          </p>
           <button onClick={generateAll}
             disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
             className="w-full rounded-2xl bg-indigo-600 px-6 py-4 text-lg font-bold text-white transition hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
             {generating
               ? (aiStep === "idle"
                   ? `① ${progressText || "作成中…"}（ChatGPT）`
-                  : aiStep === "chatgpt" ? "② 推敲中…（Gemini）" : "③ 最終チェック中…（Claude）")
+                  : aiStep === "chatgpt" ? `② ${progressText || "検算中…"}` : `③ ${progressText || "直し中…"}`)
               : failedStage ? "🔄 もう一度AIでテストを作成" : "🤖 AIでテストを作成"}
           </button>
           <details className="mt-3">
@@ -1316,15 +1618,15 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
                 disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
                 loading={generating && aiStep === "idle"}
                 onClick={() => generate("chatgpt")} />
-              <AiStepButton step="gemini" label="② Geminiで推敲" desc="誤り・答えの整合・難易度を点検して改善"
-                color="blue" done={stepDone("gemini")} num="2"
+              <AiStepButton step="verify" label="② 検算（別のAIが解く）" desc="正解を伏せて解かせ、答えが食い違う問題を洗い出す"
+                color="blue" done={stepDone("verify")} num="2"
                 disabled={generating || !stepDone("chatgpt")}
                 loading={generating && aiStep === "chatgpt"}
-                onClick={() => generate("gemini")} />
-              <AiStepButton step="claude" label="③ Claudeで最終チェック" desc="最終確認・配点調整・HTMLに仕上げ"
+                onClick={() => generate("verify")} />
+              <AiStepButton step="claude" label="③ 直し" desc="検算で引っかかった問題を1問ずつ直し、直すたびに解き直して確かめる"
                 color="purple" done={stepDone("claude")} num="3"
-                disabled={generating || !stepDone("gemini")}
-                loading={generating && aiStep === "gemini"}
+                disabled={generating || !stepDone("verify")}
+                loading={generating && aiStep === "verify"}
                 onClick={() => generate("claude")} />
             </div>
           </details>
@@ -1387,10 +1689,49 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
               {warnMsg}
             </div>
           )}
-          {generatedHtml && (
+          {!generating && bankCount && (bankCount.fromBank > 0 || bankCount.generated > 0) && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+              問題の出どころ：
+              <span className="ml-2 rounded-full bg-indigo-100 px-3 py-1 text-indigo-800">
+                問題バンクから {bankCount.fromBank}問
+              </span>
+              <span className="ml-2 rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                新しく作成 {bankCount.generated}問
+              </span>
+            </div>
+          )}
+          {!generating && verifySummary && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm">
+              <p className="font-semibold text-slate-800">
+                検算の結果{verifySummary.solver ? `（${verifySummary.solver}が解きました）` : ""}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="rounded-full bg-green-100 px-3 py-1 text-green-800">
+                  ✓ 正解を確認できた {verifySummary.ok}問
+                </span>
+                {verifySummary.flagged > 0 && (
+                  <span className="rounded-full bg-red-100 px-3 py-1 font-semibold text-red-800">
+                    🔴 要確認 {verifySummary.flagged}問
+                  </span>
+                )}
+                {verifySummary.unverified > 0 && (
+                  <span className="rounded-full bg-slate-200 px-3 py-1 text-slate-700">
+                    — 未検算 {verifySummary.unverified}問
+                  </span>
+                )}
+              </div>
+              {verifySummary.flagged > 0 && (
+                <p className="mt-2 text-red-700">
+                  要確認の問題は、正解が1つに決まらないか、検算したAIと答えが食い違ったものです。
+                  配る前に中身をご確認ください。
+                </p>
+              )}
+            </div>
+          )}
+          {!generating && questions.length > 0 && (
             <button onClick={() => setPhase("preview")}
               className="mt-5 w-full rounded-2xl bg-indigo-600 px-6 py-4 font-semibold text-white transition hover:bg-indigo-700">
-              プレビューを表示する
+              問題を1問ずつ確認する（{questions.length}問）
             </button>
           )}
         </section>
@@ -1405,8 +1746,8 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             <li className="flex gap-2"><span className="text-slate-400">2.</span>テスト名・科目・学年を入力</li>
             <li className="flex gap-2"><span className="text-slate-400">3.</span>出題単元をチェック</li>
             <li className="flex gap-2"><span className="text-slate-400">4.</span>難易度を選択</li>
-            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す（作成→推敲→最終チェックの3段）</li>
-            <li className="flex gap-2"><span className="text-slate-400">6.</span>HTMLプレビューで確認</li>
+            <li className="flex gap-2"><span className="text-slate-400">5.</span>「AIでテストを作成」を押す（作成→検算→直し）</li>
+            <li className="flex gap-2"><span className="text-slate-400">6.</span><strong>1問ずつ中身を確認して「確認しました」を付ける</strong></li>
             <li className="flex gap-2"><span className="text-slate-400">7.</span>解答を入力して分析</li>
             <li className="flex gap-2"><span className="text-slate-400">8.</span>レポートを印刷・保存</li>
           </ol>

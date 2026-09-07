@@ -3,12 +3,21 @@ import { requireTeacher } from "@/lib/apiAuth";
 
 import { generateText, extractJson } from "@/lib/ai";
 import {
-  renderTestHtml, sortByDifficulty, normalizePoints, renumber, type TestQuestion,
+  renderTestHtml, sortByDifficulty, normalizePoints, renumber, shuffleAllChoices,
+  type TestQuestion,
 } from "@/lib/testHtml";
 import { normalizeQuestionMath } from "@/lib/mathText";
 
 export const maxDuration = 60;
 
+// 一括の最終チェック＋用紙化。
+//
+// 「多層診断」ページが使っている段。検算（/api/generate/verify）を通していない問題を
+// まとめて校閲し、用紙まで組む。
+// テスト作成ページはこの段を使わない。あちらは1問ずつ検算し、引っかかった問題だけを
+// /api/generate/repair で直し、用紙はブラウザ側で組む（速さより正しさを優先するため）。
+//
+// もとの説明:
 // テスト作成AIパイプラインの第3段階「最終チェック＋用紙化」。
 //
 // 以前はHTML用紙そのものをAIに書かせていたため、問題数が増えると出力上限で途中で切れ、
@@ -84,11 +93,16 @@ ${JSON.stringify(chunk)}
     }
   }
 
-  // ── 表記そろえ → 並べ替え → 採番 → 配点を100点に正規化 → 用紙を組む ──
+  // ── 表記そろえ → 選択肢シャッフル → 並べ替え → 採番 → 配点100点 → 用紙を組む ──
   // 問題文はここから先、解答画面・生徒の受験画面でもそのまま文字として出るので、
-  // タグやLaTeXが残らないよう最後に必ず通す
+  // タグやLaTeXが残らないよう最後に必ず通す。
+  //
+  // 選択肢のシャッフルはここでしか行わない。「正解を1番目に偏らせないで」とAIに
+  // 頼んでも守られない（実際に1番目へ寄る）ので、位置の分散はコードで確定させる。
   const ordered = renumber(
-    normalizePoints(sortByDifficulty(checked.map((q) => normalizeQuestionMath(q)))),
+    normalizePoints(
+      sortByDifficulty(shuffleAllChoices(checked.map((q) => normalizeQuestionMath(q)))),
+    ),
   );
   const html = renderTestHtml({ title, grade, subject, questions: ordered });
 
