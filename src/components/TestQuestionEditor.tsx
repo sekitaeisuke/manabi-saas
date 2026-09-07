@@ -39,13 +39,23 @@ const VERIFY_BADGE: Record<VerifyStatus, { label: string; className: string; hin
   },
 };
 
+/** 作り直しでよく使う指示。毎回打たなくて済むように並べておく */
+const PRESET_ORDERS = [
+  "もっとやさしくして",
+  "もっと難しくして",
+  "数値だけ変えて、問い方は同じにして",
+  "文章題にして",
+  "計算問題にして",
+  "選択肢をもっと紛らわしくして",
+];
+
 export type EditorHandlers<T extends TestQuestion> = {
   questions: T[];
   onChange: (next: T[]) => void;
-  /** 「この1問を作り直す」。未指定ならボタンを出さない */
-  onRegenerate?: (index: number) => void | Promise<void>;
-  /** 「問題を1問足す」。未指定ならボタンを出さない */
-  onAdd?: () => void | Promise<void>;
+  /** 「この1問を作り直す」。instruction はその1問への指示（空でもよい） */
+  onRegenerate?: (index: number, instruction: string) => void | Promise<void>;
+  /** 「問題を1問足す」。instruction はその1問への指示（空でもよい） */
+  onAdd?: (instruction: string) => void | Promise<void>;
   /** 処理中の問題の番号（作り直し中のカードを止めるため） */
   busyIndex?: number | null;
   /** 追加処理中 */
@@ -59,6 +69,10 @@ export function TestQuestionEditor<T extends TestQuestion>({
   // 一覧で流し読みすると見落とすので、既定はこちらにしてある。
   const [mode, setMode] = useState<"one" | "list">("one");
   const [cursor, setCursor] = useState(0);
+  // 作り直しの指示欄を開いている問題と、その入力内容
+  const [orderOpen, setOrderOpen] = useState<number | null>(null);
+  const [orderText, setOrderText] = useState("");
+  const [addOrder, setAddOrder] = useState("");
   // 本文（国語の読解）は複数の設問で共有している。1か所で直したら全部に反映する
   const passageGroups = useMemo(() => {
     const m = new Map<string, number[]>();
@@ -246,7 +260,12 @@ export function TestQuestionEditor<T extends TestQuestion>({
                     title="下へ"
                     className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-30">↓</button>
                   {onRegenerate && (
-                    <button onClick={() => onRegenerate(i)} disabled={busy}
+                    <button
+                      onClick={() => {
+                        setOrderOpen(orderOpen === i ? null : i);
+                        setOrderText("");
+                      }}
+                      disabled={busy}
                       className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-40">
                       {busy ? "作り直し中…" : "この1問を作り直す"}
                     </button>
@@ -255,6 +274,50 @@ export function TestQuestionEditor<T extends TestQuestion>({
                     className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-40">削除</button>
                 </div>
               </div>
+
+              {/* 作り直しの指示。何も書かなければ、同じ単元・同じ難易度で別の問題を作る */}
+              {onRegenerate && orderOpen === i && !busy && (
+                <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+                  <p className="mb-2 text-xs font-semibold text-indigo-900">
+                    どう作り直しますか？（空のままでも作り直せます）
+                  </p>
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {PRESET_ORDERS.map((o) => (
+                      <button key={o}
+                        onClick={() => setOrderText((prev) => (prev ? `${prev} ${o}` : o))}
+                        className="rounded-full border border-indigo-300 bg-white px-2.5 py-1 text-xs text-indigo-700 hover:bg-indigo-100">
+                        {o}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={orderText}
+                    onChange={(e) => setOrderText(e.target.value)}
+                    rows={2}
+                    placeholder="例：分数を使った問題にして／単位を含めて答えさせて／もう少し short な文にして"
+                    className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={() => {
+                        const order = orderText;
+                        setOrderOpen(null);
+                        setOrderText("");
+                        onRegenerate(i, order);
+                      }}
+                      className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                      この指示で作り直す
+                    </button>
+                    <button onClick={() => { setOrderOpen(null); setOrderText(""); }}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50">
+                      やめる
+                    </button>
+                    <span className="self-center text-xs text-indigo-700/70">
+                      作り直した問題も、そのまま検算にかけます
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {q.verify_note && q.verify_status !== "ok" && (
                 <p className={`mb-3 rounded-xl px-3 py-2 text-xs ${
@@ -378,10 +441,17 @@ export function TestQuestionEditor<T extends TestQuestion>({
       })}
 
       {onAdd && (
-        <button onClick={onAdd} disabled={adding}
-          className="w-full rounded-2xl border-2 border-dashed border-slate-300 bg-white px-6 py-4 text-sm font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50">
-          {adding ? "作成中…" : "＋ 問題を1問足す"}
-        </button>
+        <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-4">
+          <input
+            type="text" value={addOrder} onChange={(e) => setAddOrder(e.target.value)}
+            placeholder="どんな問題を足しますか？（例：一次関数の文章題。空でもよい）"
+            className="mb-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-300"
+          />
+          <button onClick={() => { const o = addOrder; setAddOrder(""); onAdd(o); }} disabled={adding}
+            className="w-full rounded-xl px-6 py-3 text-sm font-semibold text-slate-600 transition hover:text-indigo-700 disabled:opacity-50">
+            {adding ? "作成中…" : "＋ 問題を1問足す"}
+          </button>
+        </div>
       )}
     </div>
   );

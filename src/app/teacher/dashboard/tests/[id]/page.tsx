@@ -132,7 +132,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
       }),
     );
 
-  const regenerateOne = async (index: number) => {
+  const regenerateOne = async (index: number, instruction = "") => {
     const target = questions[index];
     if (!target || !test) return;
     setRegenIndex(index);
@@ -144,6 +144,13 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
         difficulty: target.difficulty, points: target.points,
         passage: target.passage ?? "",
         avoidTexts: questions.filter((_, i) => i !== index).map((x) => x.text),
+        // 講師がこの1問に出した指示と、いま入っている問題
+        instruction,
+        basedOn: {
+          text: target.text,
+          options: target.options,
+          correct_answer: target.correct_answer,
+        },
       }),
     });
     const data = await res.json().catch(() => null);
@@ -158,7 +165,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
     showToast("問題を作り直しました", "success");
   };
 
-  const addOneQuestion = async () => {
+  const addOneQuestion = async (instruction = "") => {
     if (!test) return;
     setAddingOne(true);
     const res = await authFetch("/api/generate/one", {
@@ -168,6 +175,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
         subject: test.subject, grade: test.grade, title: test.title,
         difficulty: questions[questions.length - 1]?.difficulty ?? "basic",
         avoidTexts: questions.map((x) => x.text),
+        instruction,
       }),
     });
     const data = await res.json().catch(() => null);

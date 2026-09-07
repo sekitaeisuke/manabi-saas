@@ -1099,7 +1099,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     return data.question as GeneratedQuestion;
   };
 
-  const regenerateOne = async (index: number) => {
+  const regenerateOne = async (index: number, instruction = "") => {
     const target = questions[index];
     if (!target) return;
     setRegenIndex(index);
@@ -1109,6 +1109,14 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       // 本文つきの設問は本文を保ったまま設問だけ作り直す
       passage: target.passage ?? "",
       avoidTexts: questions.filter((_, i) => i !== index).map((x) => x.text),
+      // 講師がこの1問に出した指示と、いま入っている問題。
+      // 「数値だけ変えて」のような指示は、元の問題を渡さないと効かない
+      instruction,
+      basedOn: {
+        text: target.text,
+        options: target.options,
+        correct_answer: target.correct_answer,
+      },
     });
     if (q) {
       setQuestions((prev) => prev.map((x, i) => (i === index
@@ -1119,11 +1127,12 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     setRegenIndex(null);
   };
 
-  const addOneQuestion = async () => {
+  const addOneQuestion = async (instruction = "") => {
     setAddingOne(true);
     const q = await callOne({
       difficulty: difficulties[0] ?? "basic",
       avoidTexts: questions.map((x) => x.text),
+      instruction,
     });
     if (q) {
       setQuestions((prev) => [...prev, { ...q, id: `q${prev.length + 1}` }]);

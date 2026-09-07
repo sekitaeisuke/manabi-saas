@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
   const {
     subject, grade, title, difficulty, instructions,
     selectedUnits, avoidTexts, passage, points,
+    // 講師がこの1問に対して出した指示（例「もっとやさしく」「分数を使って」）と、
+    // いま入っている問題。「数値だけ変えて」のような指示は、元の問題が無いと効かない。
+    instruction, basedOn,
   } = await req.json();
 
   const units = (selectedUnits as { grade: string; unit: string }[] | undefined) ?? [];
@@ -46,14 +49,44 @@ export async function POST(req: NextRequest) {
     .join("\n");
 
   const passageText = String(passage ?? "").trim();
+  const order = String(instruction ?? "").trim();
+
+  // いま入っている問題。作り直しのときは、これを置き換える形で作らせる
+  const cur = basedOn as
+    | { text?: string; options?: string[] | null; correct_answer?: string }
+    | undefined;
+  const basedOnBlock = cur?.text
+    ? `
+【いまこの問題が入っています。これを置き換える1問を作ってください】
+${cur.text}` +
+      (Array.isArray(cur.options) && cur.options.length > 0
+        ? `
+　選択肢：${cur.options.join(" / ")}`
+        : "") +
+      (cur.correct_answer ? `
+　正解：${cur.correct_answer}` : "") +
+      `
+`
+    : "";
+
+  // 講師の指示はいちばん強く効かせたいので、プロンプトの先頭に置く
+  const orderBlock = order
+    ? `
+★★ 講師からのこの1問への指示（**最優先で従うこと**）★★
+${order}
+` +
+      `※この指示と下の一般的な決まりがぶつかったら、**この指示を優先**してください` +
+      `（ただし「四択にする」「正解は選択肢の中の文字列そのまま」だけは必ず守ること）。
+`
+    : "";
 
   const makePrompt = (retryNote: string) => `あなたは日本の学習塾の問題作成の専門家です。
 「${title}」（${grade}・${subject}）の確認テストに入れる問題を**1問だけ**作ってください。
-
-【難易度】${DIFF_JA(diff)}（difficulty:"${diff}"）
+${orderBlock}${basedOnBlock}
+【難易度】${DIFF_JA(diff)}（difficulty:"${diff}"）${order ? "（指示に「やさしく」「難しく」とあれば、そちらを優先）" : ""}
 【出題単元】
 ${unitList}
-【追加指示】${instructions || "なし"}
+【テスト全体への指示】${instructions || "なし"}
 ${passageText ? `\n【この本文に対する設問を作ること（本文は変えない）】\n${passageText}\n` : ""}
 ${avoid ? `\n【このテストにすでに入っている問題（重複禁止）】\n${avoid}\n※同じ設問・同じ数値・同じ言い換えにしないこと。\n` : ""}${retryNote}
 
@@ -67,6 +100,7 @@ ${avoid ? `\n【このテストにすでに入っている問題（重複禁止�
 【数式・記号の書き方（そのまま文字として表示されます）】
 - **HTMLタグ（<sup> <sub> <span> 等）もLaTeX（$…$、\\frac、^{}、_{}）も使わない**
 - 累乗は x²、a³ ／ 添字は a₁ ／ 分数は 3/4 ／ 平方根は √2 ／ 記号は ×÷±≤≥≠π°∠△
+- 分数と文字の積は **(1/2)x** のように括弧を付ける（1/2x では 1/(2x) とも読めてしまう）
 
 【出力】次の形のJSONのみ（説明文・コードフェンス不要）:
 {"text":"問題文","options":["…","…","…","…"],"correct_answer":"…","explanation":"…"}`;
