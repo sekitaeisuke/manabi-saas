@@ -25,6 +25,11 @@ export type Question = {
   correct_answer: string | null;
   order_index: number;
   points: number;
+  /** 国語の読解の本文。同じ本文を共有する設問は同じ passage_id を持つ */
+  passage?: string | null;
+  passage_id?: string | null;
+  difficulty?: string | null;
+  explanation?: string | null;
 };
 
 export type TestSession = {
