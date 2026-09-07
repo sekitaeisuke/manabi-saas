@@ -158,10 +158,51 @@ export async function pickProvider(
   throw new AiUnavailableError(msg, { kind: "no_key" });
 }
 
+/**
+ * 指定した会社の中から鍵のあるものを選ぶ。
+ * PDFのように「読めない会社がある」入力のときに使い、読めない会社へ寄せないようにする。
+ */
+export async function pickProviderAmong(
+  candidates: Provider[],
+  tenantId: string | null | undefined,
+  noKeyMessage: string,
+): Promise<ResolvedKey> {
+  for (const p of candidates) {
+    const r = await resolveKey(p, tenantId);
+    if (r) return r;
+  }
+  void logAiError({
+    feature: "", provider: null, keySource: null, kind: "no_key", message: noKeyMessage,
+  });
+  throw new AiUnavailableError(noKeyMessage, { kind: "no_key" });
+}
+
+/**
+ * 画像・PDFの添付。data は base64（"data:image/jpeg;base64," の接頭辞は付けない）。
+ * 塾のプリントや問題集を撮った写真から問題を読み取るために使う。
+ */
+export type Attachment = {
+  /** image/jpeg, image/png, image/webp, application/pdf */
+  mediaType: string;
+  data: string;
+  name?: string;
+};
+
+export const isPdfAttachment = (a: Attachment) => a.mediaType === "application/pdf";
+
+/** 画像を受け取れる形式かどうか（ここに無いものは送らない） */
+export const SUPPORTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
 export type GenerateOptions = {
   /** 使いたいプロバイダ。鍵が無ければ自動で他社に寄せる */
   provider?: Provider;
   prompt: string;
+  /**
+   * 写真・PDFの添付。
+   * PDFは OpenAI のチャット補完では受け取れないため、添付にPDFがあるときは
+   * Anthropic か Google に自動で寄せる（generateText の中で判定する）。
+   */
+  attachments?: Attachment[];
   system?: string;
   maxTokens?: number;
   temperature?: number;
@@ -184,7 +225,16 @@ export type GenerateResult = {
 
 /** 統一の生成呼び出し。失敗時は AiUnavailableError（日本語）を投げる */
 export async function generateText(opts: GenerateOptions): Promise<GenerateResult> {
-  const resolved = await pickProvider(opts.provider ?? "anthropic", opts.tenantId);
+  // PDFはOpenAIのチャット補完では読めないので、読める会社（Claude / Gemini）に寄せる。
+  // 読めない会社へ投げると意味の分からないHTTPエラーになるため、ここで先に振り分ける。
+  const hasPdf = (opts.attachments ?? []).some(isPdfAttachment);
+  const resolved = hasPdf
+    ? await pickProviderAmong(
+        ["anthropic", "google"], opts.tenantId,
+        "PDFを読み取るには Claude（Anthropic）か Gemini（Google）のAPIキーが必要です。" +
+        "ChatGPT のキーだけではPDFを読めません。写真（JPEG/PNG）でお試しいただくこともできます。",
+      )
+    : await pickProvider(opts.provider ?? "anthropic", opts.tenantId);
   const tier = opts.tier ?? "standard";
   const model = MODELS[resolved.provider][tier];
   const maxTokens = opts.maxTokens ?? 4096;
@@ -217,6 +267,8 @@ async function callProvider(
   opts: GenerateOptions,
   maxTokens: number,
 ): Promise<{ text: string; usage: TokenUsage }> {
+  const attachments = opts.attachments ?? [];
+
   if (resolved.provider === "anthropic") {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -230,7 +282,18 @@ async function callProvider(
         max_tokens: maxTokens,
         ...(opts.system ? { system: opts.system } : {}),
         ...(opts.temperature != null ? { temperature: opts.temperature } : {}),
-        messages: [{ role: "user", content: opts.prompt }],
+        messages: [{
+          role: "user",
+          // 添付が無いときは今までどおり文字列で送る（送信内容を変えないため）
+          content: attachments.length === 0 ? opts.prompt : [
+            ...attachments.map((a) =>
+              isPdfAttachment(a)
+                ? { type: "document", source: { type: "base64", media_type: a.mediaType, data: a.data } }
+                : { type: "image", source: { type: "base64", media_type: a.mediaType, data: a.data } },
+            ),
+            { type: "text", text: opts.prompt },
+          ],
+        }],
       }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 300)}`);
@@ -252,7 +315,19 @@ async function callProvider(
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
         messages: [
           ...(opts.system ? [{ role: "system", content: opts.system }] : []),
-          { role: "user", content: opts.prompt },
+          {
+            role: "user",
+            // PDFはここまで来ない（generateText が Claude / Gemini に寄せる）。念のため画像だけ載せる
+            content: attachments.length === 0 ? opts.prompt : [
+              ...attachments
+                .filter((a) => !isPdfAttachment(a))
+                .map((a) => ({
+                  type: "image_url",
+                  image_url: { url: `data:${a.mediaType};base64,${a.data}` },
+                })),
+              { type: "text", text: opts.prompt },
+            ],
+          },
         ],
       }),
     });
@@ -271,7 +346,14 @@ async function callProvider(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: opts.system ? `${opts.system}\n\n${opts.prompt}` : opts.prompt }] }],
+        contents: [{
+          parts: [
+            ...attachments.map((a) => ({
+              inline_data: { mime_type: a.mediaType, data: a.data },
+            })),
+            { text: opts.system ? `${opts.system}\n\n${opts.prompt}` : opts.prompt },
+          ],
+        }],
         generationConfig: {
           temperature: opts.temperature ?? 0.4,
           maxOutputTokens: maxTokens,

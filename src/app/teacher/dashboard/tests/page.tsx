@@ -8,6 +8,7 @@ import {
 import { TestQuestionEditor } from "@/components/TestQuestionEditor";
 import { printPaper } from "@/lib/printPaper";
 import { toBankRows, saveToBank } from "@/lib/questionBank";
+import { SourceQuestionPicker, type SourceQuestion } from "@/components/SourceQuestionPicker";
 import { mathText } from "@/lib/mathText";
 import { authFetch } from "@/lib/authFetch";
 import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
@@ -727,6 +728,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [difficulties, setDifficulties] = useState<Difficulty[]>(["basic"]);
   const [count, setCount] = useState(10);
   const [instructions, setInstructions] = useState("");
+  // 写真・PDFから読み取った原題。これがあると「類似問題を作る」経路に切り替わる
+  const [sources, setSources] = useState<SourceQuestion[]>([]);
+  const [perSource, setPerSource] = useState(2);
   // 問題バンク（過去に作って検算を通った問題）を使うか。切ると毎回すべて作り直す
   const [useBank, setUseBank] = useState(true);
   const [bankCount, setBankCount] = useState<{ fromBank: number; generated: number } | null>(null);
@@ -761,6 +765,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [aiError, setAiError] = useState<AiErrorState | null>(null);
 
   const adjacentGrades = getAdjacentGrades(grade);
+  /** 写真・PDFの原題から作るか（1問でも「使う」が付いていればそちら） */
+  const usingSources = sources.some((q) => q.use);
+  const sourceCount = sources.filter((q) => q.use).length;
 
   const toggleUnit = (g: string, unit: string) => {
     setSelectedUnits((prev) => {
@@ -820,6 +827,39 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     const ai = aiErrorFrom(data as { error?: string; aiKind?: string; aiProvider?: string; feature?: string } | null, label);
     if (ai) setAiError(ai);
     else setErrorMsg(`[${step}] ${data?.error ?? "サーバーエラー"}`);
+  };
+
+  /** 写真・PDFから読み取った原題をもとに類似問題を作る（①作成の代わり） */
+  const runSimilar = async (): Promise<GeneratedQuestion[] | null> => {
+    const use = sources.filter((q) => q.use);
+    setProgressText(`原題${use.length}問から類似問題を作成中…`);
+    const res = await authFetch("/api/generate/similar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subject, grade, title, instructions, perSource,
+        sources: use.map((q) => ({
+          text: q.text,
+          options: q.options,
+          correct_answer: q.correct_answer,
+          unit_guess: q.unit_guess,
+          difficulty_guess: q.difficulty_guess,
+        })),
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data || data.error) {
+      showFailure("draft", "similar", data, "テスト作成（類似問題）");
+      return null;
+    }
+    const got = (data.questions as GeneratedQuestion[]) ?? [];
+    if (got.length === 0) {
+      showFailure("draft", "similar", { error: "類似問題を作れませんでした" }, "テスト作成（類似問題）");
+      return null;
+    }
+    setQuestions(got);
+    setBankCount(null);
+    return got;
   };
 
   // ①作成（下書き）。指定した問題数に届くまで10問ずつ足していく。
@@ -939,8 +979,11 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   // 失敗した段からやり直せるよう startAt を受ける（できているところは作り直さない）。
   const runPipeline = async (startAt: PipeStage = "draft", carryOver: GeneratedQuestion[] = []) => {
     if (!title) { showToast("テスト名を入力してください", "info"); return; }
-    if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
-    if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
+    // 原題（写真・PDF）から作るときは、単元も難易度も原題から決まるので選ばなくてよい
+    if (!usingSources) {
+      if (selectedUnits.length === 0) { showToast("単元を1つ以上選択してください", "info"); return; }
+      if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
+    }
     setGenerating(true);
     setErrorMsg(""); setAiError(null); setWarnMsg(""); setFailedStage(null);
     setVerifySummary(null); setBankCount(null);
@@ -948,7 +991,8 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       let q = questions;
       if (startAt === "draft") {
         setAiStep("idle");
-        const drafted = await runDraft(carryOver);
+        // 写真・PDFの原題があるときは、単元から作るのでなく原題をまねて作る
+        const drafted = usingSources ? await runSimilar() : await runDraft(carryOver);
         if (!drafted) return;
         q = drafted;
         setAiStep("chatgpt");
@@ -1592,23 +1636,55 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
           </label>
         </section>
 
+        {/* 写真・PDFから作る */}
+        <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+          <h2 className="mb-2 text-xl font-semibold">写真・PDFから作る（任意）</h2>
+          <p className="mb-5 text-sm text-slate-500">
+            塾のプリントや問題集のページを撮って読み込ませると、写っている問題をもとに
+            <strong>数値や場面を変えた類似問題</strong>を作ります。
+            読み取った原題はテストには載せません（そのまま配ると複製になるため）。
+            図・グラフが要る問題は図を作れないので対象から外れます。
+          </p>
+          <SourceQuestionPicker
+            subject={subject} grade={grade}
+            sources={sources} onChange={setSources}
+          />
+          {usingSources && (
+            <label className="mt-4 flex items-center gap-2 text-sm text-slate-700">
+              1つの原題から作る問題数
+              <select value={perSource} onChange={(e) => setPerSource(Number(e.target.value))}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}問</option>)}
+              </select>
+              <span className="text-xs text-slate-500">
+                → 合計 約{sourceCount * perSource}問
+              </span>
+            </label>
+          )}
+        </section>
+
         {/* AI生成フロー */}
         <section className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
           <h2 className="mb-2 text-xl font-semibold">AIで作成</h2>
           <p className="mb-5 text-sm text-slate-500">
-            ボタン1つで3段が自動実行されます（作成 → <strong>検算</strong> → 直し）。
+            {usingSources
+              ? "読み取った原題をもとに類似問題を作り、そのまま検算・直しまで通します。"
+              : "ボタン1つで3段が自動実行されます（作成 → 検算 → 直し）。"}
+            
             検算は<strong>1問ずつ</strong>行い、正解を伏せて別のAIに実際に解かせます。
             「正しいと言える選択肢を全部挙げさせる」ので、正解が2つある問題も見つかります。
             食い違った問題は1問ずつ直し、直すたびにもう一度解かせて確かめます。
           </p>
           <button onClick={generateAll}
-            disabled={generating || !title || selectedUnits.length === 0 || difficulties.length === 0}
+            disabled={generating || !title || (!usingSources && (selectedUnits.length === 0 || difficulties.length === 0))}
             className="w-full rounded-2xl bg-indigo-600 px-6 py-4 text-lg font-bold text-white transition hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400">
             {generating
               ? (aiStep === "idle"
                   ? `① ${progressText || "作成中…"}（ChatGPT）`
                   : aiStep === "chatgpt" ? `② ${progressText || "検算中…"}` : `③ ${progressText || "直し中…"}`)
-              : failedStage ? "🔄 もう一度AIでテストを作成" : "🤖 AIでテストを作成"}
+              : failedStage ? "🔄 もう一度AIでテストを作成"
+                : usingSources ? `📷 原題${sourceCount}問から類似問題を作る（約${sourceCount * perSource}問）`
+                : "🤖 AIでテストを作成"}
           </button>
           <details className="mt-3">
             <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">1ステップずつ実行する（上級者向け）</summary>

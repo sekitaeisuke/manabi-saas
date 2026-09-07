@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireTeacher } from "@/lib/apiAuth";
 
 import { generateText, extractJson } from "@/lib/ai";
-import { CHOICE_COUNT, CHOICE_MARKS, type TestQuestion } from "@/lib/testHtml";
+import { CHOICE_COUNT, CHOICE_MARKS, shuffleChoices, type TestQuestion } from "@/lib/testHtml";
 import { verifyOne } from "@/lib/verifyQuestion";
 import { normalizeQuestionMath } from "@/lib/mathText";
 
@@ -104,7 +104,7 @@ ${opts}
     if (re.outcome.status === "ok") {
       return NextResponse.json({
         question: {
-          ...current,
+          ...shuffleChoices(current),
           verify_status: "fixed",
           verify_note: "検算の指摘を受けて直し、解き直して確認しました",
         },
@@ -116,7 +116,7 @@ ${opts}
 
   return NextResponse.json({
     question: {
-      ...current,
+      ...shuffleChoices(current),
       verify_status: "needs_review",
       verify_note: lastNote
         ? `直しましたが確認できませんでした：${lastNote}`

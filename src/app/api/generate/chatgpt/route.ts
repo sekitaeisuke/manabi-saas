@@ -3,7 +3,7 @@ import { requireTeacher } from "@/lib/apiAuth";
 
 import { generateText, extractJson, aiErrorPayload } from "@/lib/ai";
 import { mathText } from "@/lib/mathText";
-import { CHOICE_COUNT } from "@/lib/testHtml";
+import { CHOICE_COUNT, shuffleChoices, type VerifyStatus } from "@/lib/testHtml";
 import { questionKey } from "@/lib/questionCheck";
 import { pickFromBank } from "@/lib/questionBank";
 
@@ -21,8 +21,8 @@ export const maxDuration = 60;
 // 出題はすべて四択にそろえている。記述式は生徒の書く力の差がそのまま点差になり、
 // 「その単元が分かっているか」を測れないため。全問四択なら採点も機械で確定する。
 //
-// 正解の位置はここでは気にしない。「1番目に偏らせないで」と頼んでも守られないので、
-// 並べ替えは仕上げの段（claude/route.ts の shuffleAllChoices）でコードが確定させる。
+// 選択肢の並べ替えは最後にこのファイルの中で行う。「正解を1番目に偏らせないで」と
+// AIに頼んでも守られない（実測で全問が①に寄った）ので、位置の分散はコードで確定させる。
 
 const BATCH_SIZE = 10;
 const MAX_ROUNDS = 6;
@@ -42,7 +42,7 @@ type Draft = {
   passage_id?: string;
   /** どの単元の問題か。問題バンクから引き当てるために付ける */
   unit?: string;
-  verify_status?: string;
+  verify_status?: VerifyStatus;
   verify_note?: string;
 };
 
@@ -330,7 +330,9 @@ JSONのみを返してください。`;
     return NextResponse.json({ error: "問題を作成できませんでした。もう一度お試しください。" }, { status: 500 });
   }
 
-  const questions = collected.map((q, i) => ({ ...q, id: `q${i + 1}` }));
+  // 選択肢はここで並べ替える。AIに「正解を1番目に偏らせないで」と頼んでも守られず、
+  // 実測でも全問が①に寄った。位置の分散はコードで確定させる。
+  const questions = collected.map((q, i) => shuffleChoices({ ...q, id: `q${i + 1}` }));
   return NextResponse.json({
     questions,
     requested: target,
