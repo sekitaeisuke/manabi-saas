@@ -7,6 +7,7 @@ import {
 } from "@/lib/testHtml";
 import { TestQuestionEditor } from "@/components/TestQuestionEditor";
 import { printPaper } from "@/lib/printPaper";
+import { toBankRows, saveToBank } from "@/lib/questionBank";
 import { mathText } from "@/lib/mathText";
 import { authFetch } from "@/lib/authFetch";
 import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
@@ -40,6 +41,8 @@ type GeneratedQuestion = {
   points: number;
   /** なぜその答えになるかの短い説明（解答つき用紙・報告書で使う） */
   explanation?: string;
+  /** どの単元の問題か（問題バンクから引き当てるのに使う） */
+  unit?: string;
   /** 国語の読解：同じ本文にぶら下がる設問は同じ passage_id を持つ */
   passage?: string;
   passage_id?: string;
@@ -672,6 +675,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
   const [difficulties, setDifficulties] = useState<Difficulty[]>(["basic"]);
   const [count, setCount] = useState(10);
   const [instructions, setInstructions] = useState("");
+  // 問題バンク（過去に作って検算を通った問題）を使うか。切ると毎回すべて作り直す
+  const [useBank, setUseBank] = useState(true);
+  const [bankCount, setBankCount] = useState<{ fromBank: number; generated: number } | null>(null);
 
   // AI生成
   const [aiStep, setAiStep] = useState<AiStep>("idle");
@@ -774,6 +780,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       const before = q.length;
       const res = await callGen("chatgpt", {
         testType, title, subject, grade, selectedUnits, difficulties, count, instructions,
+        useBank,
         existingQuestions: q.map((x) => ({ text: x.text, difficulty: x.difficulty })),
       });
       if (!res.ok) {
@@ -783,6 +790,12 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         return null;
       }
       const got = (res.data?.questions as GeneratedQuestion[]) ?? [];
+      if (typeof res.data?.fromBank === "number") {
+        setBankCount({
+          fromBank: res.data.fromBank as number,
+          generated: (res.data.generated as number) ?? 0,
+        });
+      }
       if (got.length === 0) break;
       q = got;
       setQuestions(q);
@@ -848,7 +861,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     if (difficulties.length === 0) { showToast("難易度を1つ以上選択してください", "info"); return; }
     setGenerating(true);
     setErrorMsg(""); setAiError(null); setWarnMsg(""); setFailedStage(null);
-    setVerifySummary(null);
+    setVerifySummary(null); setBankCount(null);
     try {
       let q = questions;
       if (startAt === "draft") {
@@ -1038,6 +1051,7 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
         points: q.points ?? 1,
         difficulty: q.difficulty ?? null,
         section: q.section ?? null,
+        unit: q.unit ?? null,
         explanation: q.explanation ?? null,
         passage: q.passage ?? null,
         passage_id: q.passage_id ?? null,
@@ -1046,6 +1060,15 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       }))
     );
     if (qErr) { showToast("問題の保存に失敗しました: " + qErr.message, "error"); setSaving(false); return; }
+
+    // 検算を通った問題は問題バンクへ貯める。次のテストから拾って使える。
+    // 貯められなくてもテストの保存は成立しているので、失敗しても止めない。
+    const rows = toBankRows(toSave, { subject, grade, testId: test.id });
+    if (rows.length > 0) {
+      const { error: bankErr } = await saveToBank(supabase, rows);
+      if (bankErr) console.warn("問題バンクへの保存に失敗（非致命的）:", bankErr);
+    }
+
     setSaving(false);
     onSaved();
   };
@@ -1457,7 +1480,20 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
           <h2 className="mb-3 text-xl font-semibold">追加指示（任意）</h2>
           <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={3}
             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-green-400"
-            placeholder="例：選択肢は4択にしてください。図を含む問題を2問入れてください。" />
+            placeholder="例：計算問題を多めに。文章題を2問入れてください。" />
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={useBank}
+              onChange={(e) => setUseBank(e.target.checked)}
+              className="mt-1 accent-indigo-600" />
+            <span>
+              <span className="font-medium">問題バンクを使う</span>
+              <span className="block text-xs text-slate-500">
+                これまでに作って検算を通った問題のうち、同じ学年・単元・難易度のものを先に使い、
+                足りない分だけ新しく作ります。作成が速くなり、テストをまたいだ重複も防げます。
+                外すと毎回すべて作り直します。
+              </span>
+            </span>
+          </label>
         </section>
 
         {/* AI生成フロー */}
@@ -1553,6 +1589,17 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
           {!generating && warnMsg && (
             <div className="mt-4 rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
               {warnMsg}
+            </div>
+          )}
+          {!generating && bankCount && (bankCount.fromBank > 0 || bankCount.generated > 0) && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+              問題の出どころ：
+              <span className="ml-2 rounded-full bg-indigo-100 px-3 py-1 text-indigo-800">
+                問題バンクから {bankCount.fromBank}問
+              </span>
+              <span className="ml-2 rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                新しく作成 {bankCount.generated}問
+              </span>
             </div>
           )}
           {!generating && verifySummary && (

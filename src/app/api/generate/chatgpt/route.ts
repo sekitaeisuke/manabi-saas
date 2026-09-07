@@ -5,6 +5,7 @@ import { generateText, extractJson, aiErrorPayload } from "@/lib/ai";
 import { mathText } from "@/lib/mathText";
 import { CHOICE_COUNT } from "@/lib/testHtml";
 import { questionKey } from "@/lib/questionCheck";
+import { pickFromBank } from "@/lib/questionBank";
 
 export const maxDuration = 60;
 
@@ -39,6 +40,10 @@ type Draft = {
   explanation?: string;
   passage?: string;
   passage_id?: string;
+  /** どの単元の問題か。問題バンクから引き当てるために付ける */
+  unit?: string;
+  verify_status?: string;
+  verify_note?: string;
 };
 
 const DIFF_GUIDE: Record<string, string> = {
@@ -85,7 +90,8 @@ const FORMAT_RULES = `【数式・記号の書き方（そのまま画面に文�
 - correct_answer には options の中の文字列を**一字一句そのまま**入れる
 - 誤答の選択肢は「ありそうな間違い」にする（計算ミス・符号の取り違え・語の混同など）。
   明らかに的外れな選択肢で埋めない
-- explanation に「なぜその答えになるか」を1〜2文で書く`;
+- explanation に「なぜその答えになるか」を1〜2文で書く
+- unit に、その問題がどの単元のものかを**下の「出題単元」に挙げた名前のまま**入れる`;
 
 export async function POST(req: NextRequest) {
   const auth = await requireTeacher(req);
@@ -95,6 +101,7 @@ export async function POST(req: NextRequest) {
     selectedUnits, difficulties, count,
     instructions,
     existingQuestions,
+    useBank,
   } = await req.json();
 
   const typeLabel = testType === "diagnostic"
@@ -123,6 +130,46 @@ export async function POST(req: NextRequest) {
   );
 
   const quota = quotaByDifficulty(useDiffs, target);
+
+  // ── まず問題バンクから使えるものを拾う ────────────────
+  // 毎回ゼロから作ると時間も費用もかかり、テストをまたいだ重複も防げない。
+  // 貯めてあるのは検算を通った問題だけなので、拾ったものはそのまま使える。
+  let fromBank = 0;
+  if (useBank !== false && collected.length < target) {
+    const remaining: Record<string, number> = {};
+    for (const d of useDiffs) {
+      remaining[d] = quota[d] - collected.filter((q) => q.difficulty === d).length;
+    }
+    try {
+      const pick = await pickFromBank({
+        subject, grade,
+        units: units.map((u) => u.unit).filter(Boolean),
+        quota: remaining,
+        excludeKeys: seen,
+      });
+      for (const q of pick.questions) {
+        if (collected.length >= target) break;
+        collected.push({
+          difficulty: q.difficulty,
+          section: "",
+          text: q.text,
+          type: "multiple-choice",
+          options: q.options ?? null,
+          correct_answer: q.correct_answer ?? "",
+          explanation: q.explanation ?? "",
+          unit: q.unit,
+          ...(q.passage ? { passage: q.passage, passage_id: q.passage_id } : {}),
+          points: 5,
+          verify_status: q.verify_status,
+          verify_note: q.verify_note,
+        });
+        fromBank++;
+      }
+    } catch {
+      // バンクが引けなくても作成は止めない（全部AIで作る）
+    }
+  }
+
   const startedAt = Date.now();
   let rounds = 0;
   let passageSeq = usedPassages.size;
@@ -209,6 +256,7 @@ ${FORMAT_RULES}
       "options": ["選択肢1","選択肢2","選択肢3","選択肢4"],
       "correct_answer": "選択肢1",
       "explanation": "なぜその答えになるかを1〜2文で",
+      "unit": "出題単元に挙げた名前のいずれか",
       "points": 5${reading ? `,\n      "passage_id": "p1",\n      "passage": "本文の全文（8行程度）"` : ""}
     }
   ]
@@ -265,6 +313,8 @@ JSONのみを返してください。`;
         options: Array.isArray(q.options) && q.options.length > 0 ? q.options.map((o) => mathText(o)) : null,
         correct_answer: mathText(q.correct_answer ?? ""),
         explanation: mathText(q.explanation ?? ""),
+        // 単元名は選んだものに限る（AIが勝手な名前を書いてもバンクで引けなくなるだけなので落とす）
+        unit: units.some((u) => u.unit === q.unit) ? q.unit : units[0]?.unit,
         ...(passage ? { passage, passage_id: passageId } : {}),
         points: Number(q.points) > 0 ? Number(q.points) : 5,
       });
@@ -284,6 +334,8 @@ JSONのみを返してください。`;
   return NextResponse.json({
     questions,
     requested: target,
+    fromBank,
+    generated: questions.length - fromBank,
     complete: questions.length >= target,
   });
 }

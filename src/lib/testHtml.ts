@@ -24,6 +24,8 @@ export type TestQuestion = {
   points?: number;
   /** なぜその答えになるかの短い説明。解答つき用紙と報告書で使う */
   explanation?: string;
+  /** どの単元の問題か。問題バンクから引き当てるときに使う */
+  unit?: string;
   /** 国語の読解: 同じ本文を共有する設問は同じ passage_id を持つ */
   passage?: string;
   passage_id?: string;

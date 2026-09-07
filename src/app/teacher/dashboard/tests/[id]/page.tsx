@@ -11,6 +11,7 @@ import { authFetch } from "@/lib/authFetch";
 import { TEST_PAPER_CSS } from "@/lib/testPaperStyle";
 import { printPaper } from "@/lib/printPaper";
 import { TestQuestionEditor } from "@/components/TestQuestionEditor";
+import { toBankRows, saveToBank } from "@/lib/questionBank";
 import {
   renderTestHtml, renderAnswerSheetHtml,
   normalizePoints, renumber, sortByDifficulty, type TestQuestion,
@@ -34,6 +35,7 @@ type Row = {
   points: number | null;
   difficulty: string | null;
   section: string | null;
+  unit: string | null;
   explanation: string | null;
   passage: string | null;
   passage_id: string | null;
@@ -73,6 +75,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
         points: r.points ?? 1,
         difficulty: r.difficulty ?? "basic",
         section: r.section ?? "",
+        unit: r.unit ?? undefined,
         explanation: r.explanation ?? "",
         passage: r.passage ?? undefined,
         passage_id: r.passage_id ?? undefined,
@@ -203,6 +206,7 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
       points: q.points ?? 1,
       difficulty: q.difficulty ?? null,
       section: q.section ?? null,
+      unit: q.unit ?? null,
       explanation: q.explanation ?? null,
       passage: q.passage ?? null,
       passage_id: q.passage_id ?? null,
@@ -219,6 +223,15 @@ export default function SavedTestPage({ params }: { params: Promise<{ id: string
       } else {
         const { error } = await supabase.from("questions").insert(payload(q, i));
         if (error) failed = error.message;
+      }
+    }
+
+    // 検算を通った問題は問題バンクへ貯める（失敗しても保存自体は成立している）
+    if (test) {
+      const bankRows = toBankRows(rows, { subject: test.subject, grade: test.grade, testId });
+      if (bankRows.length > 0) {
+        const { error: bankErr } = await saveToBank(supabase, bankRows);
+        if (bankErr) console.warn("問題バンクへの保存に失敗（非致命的）:", bankErr);
       }
     }
 

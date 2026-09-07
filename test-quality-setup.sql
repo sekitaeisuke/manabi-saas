@@ -24,6 +24,8 @@ $$;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS difficulty   text;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS section      text;
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS explanation  text;
+-- どの単元の問題か。問題バンクから単元で引き当てるために持たせる
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS unit         text;
 -- 国語の読解: 同じ本文にぶら下がる設問は同じ passage_id を持つ。
 -- 本文そのものは各行に持たせる（設問だけを別テストへ持ち出しても本文が付いてくる）。
 ALTER TABLE questions ADD COLUMN IF NOT EXISTS passage      text;
@@ -67,7 +69,6 @@ CREATE TABLE IF NOT EXISTS question_bank (
   verify_note     text,
   verified_by     text,
 
-  times_used      integer NOT NULL DEFAULT 0,
   last_used_at    timestamptz,
   source_test_id  uuid,
   created_by      text,
@@ -80,6 +81,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_question_bank_key
   ON question_bank (subject, grade, text_key);
 
 -- 「この科目・学年・単元・難易度で、検算済みの、しばらく使っていないもの」を引くための索引
+-- （last_used_at が古いものから使う。同じ問題が続けて出ないようにするため）
 CREATE INDEX IF NOT EXISTS idx_question_bank_pick
   ON question_bank (subject, grade, difficulty, verify_status, last_used_at);
 CREATE INDEX IF NOT EXISTS idx_question_bank_unit
