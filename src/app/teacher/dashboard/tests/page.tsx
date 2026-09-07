@@ -1,7 +1,12 @@
 "use client";
 import { sanitizeHtml } from "@/lib/sanitize";
 import { TEST_PAPER_CSS } from "@/lib/testPaperStyle";
-import type { VerifyStatus } from "@/lib/testHtml";
+import {
+  renderTestHtml, renderAnswerSheetHtml, normalizePoints, renumber, sortByDifficulty,
+  type VerifyStatus,
+} from "@/lib/testHtml";
+import { TestQuestionEditor } from "@/components/TestQuestionEditor";
+import { printPaper } from "@/lib/printPaper";
 import { mathText } from "@/lib/mathText";
 import { authFetch } from "@/lib/authFetch";
 import { AiErrorNotice, aiErrorFrom, type AiErrorState } from "@/components/AiErrorNotice";
@@ -506,6 +511,10 @@ function TestList({ tests, loading, onDelete, onRefresh }: {
                                       )}
                                     </div>
                                     <div className="flex gap-1.5 flex-wrap justify-end shrink-0">
+                                      <Link href={`/teacher/dashboard/tests/${test.id}`}
+                                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                                        開く・印刷
+                                      </Link>
                                       <button onClick={() => { setStartModal(test); setSelectedStudent(""); setAssignSuccess(null); }}
                                         className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
                                         生徒に割り当てる
@@ -677,6 +686,11 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     { ok: number; flagged: number; unverified: number; solver: string | null } | null
   >(null);
   const [warnMsg, setWarnMsg] = useState("");
+
+  // プレビュー（問題を直す／用紙を見る）
+  const [previewTab, setPreviewTab] = useState<"edit" | "paper">("edit");
+  const [regenIndex, setRegenIndex] = useState<number | null>(null);
+  const [addingOne, setAddingOne] = useState(false);
 
   // 解答・分析
   const [phase, setPhase] = useState<"form" | "preview" | "answers" | "report">("form");
@@ -896,6 +910,85 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     }
   };
 
+  /**
+   * いまの問題から用紙を組む。講師が1問直すたびにAPIを叩かず、その場で組み直す
+   * （testHtml.ts はブラウザでもそのまま動く）。
+   * 配点は「合計100点」にそろえ、番号も振り直してから出す。
+   */
+  const paperHtml = (withAnswers: boolean) =>
+    renderTestHtml({
+      title, grade, subject, withAnswers,
+      questions: renumber(normalizePoints(sortByDifficulty(questions))),
+    });
+
+  const doPrint = (withAnswers: boolean) => {
+    if (questions.length === 0) { showToast("印刷する問題がありません", "info"); return; }
+    const ok = printPaper(
+      withAnswers ? `${title}（解答・解説）` : title,
+      paperHtml(withAnswers),
+    );
+    if (!ok) showToast("印刷用の画面を開けませんでした。ポップアップの許可をご確認ください", "error");
+  };
+
+  const printAnswerSheet = () => {
+    if (questions.length === 0) { showToast("印刷する問題がありません", "info"); return; }
+    printPaper(
+      `${title}（解答用紙）`,
+      renderAnswerSheetHtml({
+        title, grade, subject,
+        questions: renumber(normalizePoints(sortByDifficulty(questions))),
+      }),
+    );
+  };
+
+  /** 1問だけ作り直す。作成→検算→直しをサーバ側で通しでやって1問返ってくる */
+  const callOne = async (body: Record<string, unknown>): Promise<GeneratedQuestion | null> => {
+    const res = await authFetch("/api/generate/one", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject, grade, title, instructions, selectedUnits, ...body }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data || data.error) {
+      showToast(data?.error ?? "問題を作れませんでした", "error");
+      return null;
+    }
+    return data.question as GeneratedQuestion;
+  };
+
+  const regenerateOne = async (index: number) => {
+    const target = questions[index];
+    if (!target) return;
+    setRegenIndex(index);
+    const q = await callOne({
+      difficulty: target.difficulty,
+      points: target.points,
+      // 本文つきの設問は本文を保ったまま設問だけ作り直す
+      passage: target.passage ?? "",
+      avoidTexts: questions.filter((_, i) => i !== index).map((x) => x.text),
+    });
+    if (q) {
+      setQuestions((prev) => prev.map((x, i) => (i === index
+        ? { ...q, id: x.id, passage_id: x.passage_id, passage: x.passage ?? q.passage }
+        : x)));
+      showToast("問題を作り直しました", "success");
+    }
+    setRegenIndex(null);
+  };
+
+  const addOneQuestion = async () => {
+    setAddingOne(true);
+    const q = await callOne({
+      difficulty: difficulties[0] ?? "basic",
+      avoidTexts: questions.map((x) => x.text),
+    });
+    if (q) {
+      setQuestions((prev) => [...prev, { ...q, id: `q${prev.length + 1}` }]);
+      showToast("問題を1問足しました", "success");
+    }
+    setAddingOne(false);
+  };
+
   const startAnswers = () => {
     const init: Record<string, string> = {};
     questions.forEach((q) => { init[q.id] = ""; });
@@ -933,8 +1026,9 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     // difficulty / section / explanation / 本文 は以前は保存しておらず、保存したテストを
     // 開き直すと基礎・標準・応用のまとまりも解説も復元できなかった。
     // test-quality-setup.sql で列を足したので、作ったものをそのまま残す。
+    const toSave = renumber(normalizePoints(sortByDifficulty(questions)));
     const { error: qErr } = await supabase.from("questions").insert(
-      questions.map((q, i) => ({
+      toSave.map((q, i) => ({
         test_id: test.id,
         order_index: i,
         type: q.type === "descriptive" ? "short-answer" : q.type,
@@ -1018,16 +1112,42 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
     );
   }
 
-  // ── プレビュー画面 ──
+  // ── プレビュー・編集画面 ──
+  // 以前はHTMLの塊を出すだけで、気に入らない問題が1つあっても全部作り直すしかなかった。
+  // 「問題を直す」タブで1問ずつ直し、「用紙」タブでその場で組み直した用紙を確認する。
   if (phase === "preview") {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-900">テストプレビュー</h2>
-          <div className="flex gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-900">テストの確認・修正</h2>
+            <div className="flex rounded-xl border border-slate-200 bg-white p-0.5 text-sm">
+              <button onClick={() => setPreviewTab("edit")}
+                className={`rounded-lg px-3 py-1.5 ${previewTab === "edit" ? "bg-indigo-600 font-semibold text-white" : "text-slate-600"}`}>
+                問題を直す
+              </button>
+              <button onClick={() => setPreviewTab("paper")}
+                className={`rounded-lg px-3 py-1.5 ${previewTab === "paper" ? "bg-indigo-600 font-semibold text-white" : "text-slate-600"}`}>
+                用紙
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => setPhase("form")}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-              編集に戻る
+              設定に戻る
+            </button>
+            <button onClick={() => doPrint(false)}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              問題用紙を印刷
+            </button>
+            <button onClick={() => doPrint(true)}
+              className="rounded-xl border border-green-300 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100">
+              解答・解説を印刷
+            </button>
+            <button onClick={printAnswerSheet}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+              解答用紙を印刷
             </button>
             <button onClick={startAnswers}
               className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700">
@@ -1039,10 +1159,22 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
             </button>
           </div>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <style>{TEST_PAPER_CSS}</style>
-          <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(generatedHtml) }} />
-        </div>
+
+        {previewTab === "edit" ? (
+          <TestQuestionEditor
+            questions={questions}
+            onChange={(next) => setQuestions(next)}
+            onRegenerate={regenerateOne}
+            onAdd={addOneQuestion}
+            busyIndex={regenIndex}
+            adding={addingOne}
+          />
+        ) : (
+          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+            <style>{TEST_PAPER_CSS}</style>
+            <div dangerouslySetInnerHTML={{ __html: sanitizeHtml(paperHtml(false)) }} />
+          </div>
+        )}
       </div>
     );
   }
