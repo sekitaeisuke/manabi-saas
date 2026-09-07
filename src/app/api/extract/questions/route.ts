@@ -124,6 +124,11 @@ export async function POST(req: NextRequest) {
     const res = await generateText({
       prompt, attachments, maxTokens: 8192, temperature: 0, json: true,
       feature: "test_extract",
+      // 写真の読み取りだけ別のモデルにしたいときは、環境変数 AI_EXTRACT_MODEL に
+      // モデル名を入れる（例 claude-opus-5）。他の機能のモデルは変わらない。
+      // 未設定なら通常のモデルを使う。手元の検証では、傾き・影のあるプリントでも
+      // 通常のモデルで読み取れている（新しいモデルにしても結果は同じだった）。
+      model: process.env.AI_EXTRACT_MODEL || undefined,
     });
     raw = res.text;
     solver = res.provider;

@@ -31,6 +31,13 @@ const MODELS: Record<Provider, Record<ModelTier, string>> = {
   google:    { standard: "gemini-2.5-flash",  fast: "gemini-2.5-flash" },
 };
 
+/** モデル名がその会社のものか（名指し上書きの取り違えを防ぐ） */
+function matchesProvider(model: string, provider: Provider): boolean {
+  if (provider === "anthropic") return model.startsWith("claude");
+  if (provider === "openai") return model.startsWith("gpt") || model.startsWith("o");
+  return model.startsWith("gemini");
+}
+
 const ENV_KEY: Record<Provider, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
@@ -207,6 +214,11 @@ export type GenerateOptions = {
   maxTokens?: number;
   temperature?: number;
   tier?: ModelTier;
+  /**
+   * モデルを名指しで上書きする。機能ごとに別のモデルを使いたいときだけ指定する。
+   * 例：写真の読み取りだけ賢いモデルにする。指定が無ければ tier のモデルを使う。
+   */
+  model?: string;
   /** JSONで返させる（対応プロバイダのみ機械的に指定。他はプロンプト任せ） */
   json?: boolean;
   /** 呼び出し元の機能名。使用量記録・障害調査用 */
@@ -236,7 +248,11 @@ export async function generateText(opts: GenerateOptions): Promise<GenerateResul
       )
     : await pickProvider(opts.provider ?? "anthropic", opts.tenantId);
   const tier = opts.tier ?? "standard";
-  const model = MODELS[resolved.provider][tier];
+  // 名指しの上書きは、その会社のモデルを指定しているときだけ効かせる。
+  // 鍵が無くて別の会社に寄った場合に、他社のモデル名を投げてしまわないようにする。
+  const model = opts.model && matchesProvider(opts.model, resolved.provider)
+    ? opts.model
+    : MODELS[resolved.provider][tier];
   const maxTokens = opts.maxTokens ?? 4096;
 
   try {
