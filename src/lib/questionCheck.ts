@@ -12,6 +12,7 @@
 
 import { mathText } from "@/lib/mathText";
 import { CHOICE_COUNT, type TestQuestion } from "@/lib/testHtml";
+import { needsMissingPassage } from "@/lib/passages";
 
 /** 比較用のゆるい正規化。全角→半角・空白除去・小文字化 */
 export function looseKey(s: unknown): string {
@@ -82,9 +83,12 @@ export function checkQuestion(input: TestQuestion): CheckResult {
   if (TAG_RE.test(all)) issues.push("HTMLタグが残っています");
   if (LATEX_RE.test(all)) issues.push("LaTeX記法が残っています");
 
-  // 本文つき（国語の読解）は、本文が実際に付いているか
+  // 本文つき（読解）は、本文が実際に付いているか
   if (input.passage_id && !String(input.passage ?? "").trim()) {
     issues.push("本文つきの設問ですが、本文がありません");
+  } else if (needsMissingPassage({ text, passage: input.passage })) {
+    // 「本文中で」「筆者が」と書いてあるのに本文が無い。生徒は解けない
+    issues.push("本文を読んで答える設問ですが、本文が付いていません");
   }
 
   return {

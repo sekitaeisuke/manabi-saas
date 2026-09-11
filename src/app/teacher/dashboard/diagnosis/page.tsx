@@ -833,7 +833,11 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
       const d3 = await r3.json();
       if (d3.error) { const ai = aiErrorFrom(d3, "多層診断（仕上げ）"); if (ai) { setAiError(ai); setStep("idle"); return; } throw new Error(`[Step3] ${d3.error}`); }
 
-      const finalQuestions: { type: string; text: string; options: string[] | null; correct_answer: string; points: number }[] = d3.questions ?? d2.questions ?? d1.questions;
+      const finalQuestions: {
+        type: string; text: string; options: string[] | null; correct_answer: string; points: number;
+        difficulty?: string; section?: string; unit?: string; explanation?: string;
+        passage?: string; passage_id?: string;
+      }[] = d3.questions ?? d2.questions ?? d1.questions;
 
       // Supabaseに保存
       setStep("saving");
@@ -852,6 +856,13 @@ function IssueTestView({ onBack }: { onBack: () => void }) {
           options: q.options ?? null,
           correct_answer: q.correct_answer ?? null,
           points: q.points ?? 1,
+          // 本文を保存していなかったため、国語の読解が「本文中で…」だけの設問として配られていた
+          passage: q.passage ?? null,
+          passage_id: q.passage_id ?? null,
+          difficulty: q.difficulty ?? null,
+          section: q.section ?? null,
+          unit: q.unit ?? null,
+          explanation: q.explanation ?? null,
         }))
       );
       if (qErr) throw new Error("問題の保存に失敗しました: " + qErr.message);

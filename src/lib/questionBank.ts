@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { questionKey } from "@/lib/questionCheck";
+import { needsMissingPassage, newPassagePrefix, passageKey } from "@/lib/passages";
 import type { TestQuestion } from "@/lib/testHtml";
 
 // 問題バンク。
@@ -38,6 +39,8 @@ export function isBankable(q: TestQuestion): boolean {
   if (!q.text?.trim()) return false;
   if (!Array.isArray(q.options) || q.options.length < 2) return false;
   if (!q.correct_answer || !q.options.includes(q.correct_answer)) return false;
+  // 本文を読む設問なのに本文が無いものは、使い回すと壊れた問題が広がる
+  if (needsMissingPassage(q)) return false;
   return true;
 }
 
@@ -139,6 +142,7 @@ export async function pickFromBank(opts: {
 
   const picked: TestQuestion[] = [];
   const usedIds: string[] = [];
+  const pidOfPassage = new Map<string, string>();
 
   for (const [difficulty, needRaw] of Object.entries(opts.quota)) {
     let need = needRaw;
@@ -159,13 +163,16 @@ export async function pickFromBank(opts: {
     const { data } = await q;
     const rows = (data ?? []) as PickedRow[];
 
-    // 本文つきはかたまりにまとめる
+    // 本文つきはかたまりにまとめる。
+    // まとめるのは passage_id でなく**本文の中身**で。以前の id は "r1_p1" のように
+    // テストをまたいで同じ値だったので、id でまとめると別々の本文が1かたまりに混ざった。
     const groups = new Map<string, PickedRow[]>();
     const singles: PickedRow[] = [];
     for (const r of rows) {
       if (opts.excludeKeys.has(r.text_key)) continue;
-      if (r.passage_id) {
-        const k = r.passage_id;
+      if (needsMissingPassage(r)) continue; // 本文が抜けた設問は出さない
+      if (r.passage) {
+        const k = passageKey(r.passage);
         if (!groups.has(k)) groups.set(k, []);
         groups.get(k)!.push(r);
       } else {
@@ -173,7 +180,7 @@ export async function pickFromBank(opts: {
       }
     }
 
-    const take = (r: PickedRow) => {
+    const take = (r: PickedRow, passageId?: string) => {
       picked.push({
         id: r.id,
         difficulty: r.difficulty,
@@ -183,8 +190,8 @@ export async function pickFromBank(opts: {
         options: r.options,
         correct_answer: r.correct_answer ?? "",
         explanation: r.explanation ?? "",
-        passage: r.passage ?? undefined,
-        passage_id: r.passage_id ?? undefined,
+        passage: passageId ? r.passage ?? undefined : undefined,
+        passage_id: passageId,
         points: 5,
         verify_status: (r.verify_status as TestQuestion["verify_status"]) ?? "ok",
         verify_note: "問題バンクから",
@@ -196,7 +203,12 @@ export async function pickFromBank(opts: {
     // 本文のかたまりを先に（収まるものだけ）
     for (const [, members] of groups) {
       if (members.length > need) continue;
-      members.forEach(take);
+      // このテストの中で一意な id を振り直す（作成中の本文とかたまりが混ざらないように）。
+      // 難易度ごとに引くので、同じ本文が別の難易度の回にも出てきたら同じ id にそろえる
+      const key = passageKey(members[0].passage);
+      const pid = pidOfPassage.get(key) ?? newPassagePrefix("b");
+      pidOfPassage.set(key, pid);
+      members.forEach((r) => take(r, pid));
       need -= members.length;
       if (need <= 0) break;
     }

@@ -82,7 +82,11 @@ ${JSON.stringify(chunk)}
       const parsed = extractJson<{ questions?: TestQuestion[] }>(text);
       const fixed = parsed?.questions;
       if (Array.isArray(fixed) && fixed.length === chunk.length) {
-        checked.push(...fixed.map((q, i) => ({ ...chunk[i], ...q })));
+        // 本文は直させない。AIは長い本文を縮めたり空にしたりして返すことがあり、
+        // そのまま重ねると本文が抜け落ちる。本文と本文の id は必ず元のものを使う
+        checked.push(...fixed.map((q, i) => ({
+          ...chunk[i], ...q, passage: chunk[i].passage, passage_id: chunk[i].passage_id,
+        })));
       } else {
         checked.push(...chunk);
         skipped += chunk.length;

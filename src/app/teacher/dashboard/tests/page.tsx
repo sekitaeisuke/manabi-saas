@@ -872,7 +872,10 @@ function CreateTestFlow({ onSaved }: { onSaved: () => void }) {
       const res = await callGen("chatgpt", {
         testType, title, subject, grade, selectedUnits, difficulties, count, instructions,
         useBank,
-        existingQuestions: q.map((x) => ({ text: x.text, difficulty: x.difficulty })),
+        // サーバは受け取った問題をそのまま返し、その後ろに続きを足す。
+        // 以前は問題文と難易度だけを送っていたので、続きを頼むたびに前の回の本文・選択肢・
+        // 正解が消えていた（国語の読解で本文が抜け落ちる原因の1つ）。丸ごと送る
+        existingQuestions: q,
       });
       if (!res.ok) {
         // 途中まで作れていれば、その分は残したうえで失敗を知らせる（再チャレンジで続きから）

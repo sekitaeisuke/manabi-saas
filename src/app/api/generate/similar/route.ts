@@ -5,6 +5,7 @@ import { generateText, extractJson, aiErrorPayload } from "@/lib/ai";
 import { mathText } from "@/lib/mathText";
 import { CHOICE_COUNT, shuffleChoices } from "@/lib/testHtml";
 import { questionKey } from "@/lib/questionCheck";
+import { attachPassages, needsMissingPassage, newPassagePrefix, passageLength } from "@/lib/passages";
 
 export const maxDuration = 60;
 
@@ -53,7 +54,8 @@ export async function POST(req: NextRequest) {
   }
 
   const n = Math.max(1, Math.min(Number(perSource) || 1, 5));
-  const isKokugoReading = subject === "国語" && list.some((s) => s.text.includes("（本文つき）"));
+  // 読み取りの段は、本文にぶら下がる原題に「（本文つき）」と印を付けてくる
+  const isReading = (subject === "国語" || subject === "英語") && list.some((s) => s.text.includes("（本文つき）"));
 
   const collected: (Draft & { difficulty: string; unit?: string })[] = [];
   const seen = new Set<string>();
@@ -75,15 +77,21 @@ export async function POST(req: NextRequest) {
 
     const already = collected.slice(-30).map((q, k) => `${k + 1}. ${String(q.text).slice(0, 50)}`).join("\n");
 
-    const readingBlock = isKokugoReading
+    const readingBlock = isReading
       ? `
-【本文つきの原題があります（国語の読解）】
+【本文つきの原題があります（読解）】
 - **原題の本文は手元にありません。また、あっても使いません**（そのまま配ると複製になるため）
 - 同じ題材の方向・同じくらいの長さで、**本文をあなたが新しく書いて**ください
-- 本文は8行程度（240〜320字）。1つの本文に設問3〜4問をぶら下げる
-- 同じ本文の設問には同じ passage_id（"s1" など）を付け、passage に本文の全文を各設問に入れる
+- 本文は${passageLength(subject, grade)}。1つの本文に設問3〜4問をぶら下げる
+- 本文は "passages" に1本ずつ入れる（id は "s1" "s2" …）。**本文の全文は passages にだけ書く**
+- 設問の側には "passage_id" で、どの本文の設問かを書く（同じ本文の設問は同じ id）
+- **「次の文章を読んで」「本文中」「筆者」などと書く設問には、必ず passage_id を付ける**
 `
-      : "";
+      : `
+【本文を読ませる設問は作らない】
+- 「次の文章を読んで」「本文中」「筆者」のような、別の本文を前提にした設問は作らない
+- 例文・会話が要る設問は、その例文・会話を問題文の中に全部書く
+`;
 
     const prompt = `あなたは日本の学習塾の問題作成の専門家です。
 下に、ある教材に載っていた問題（原題）を書き出しました。
@@ -115,8 +123,8 @@ ${already ? `\n【すでに作った問題（重複禁止）】\n${already}\n` :
 ${body}
 
 【出力】次の形のJSONのみ（説明文・コードフェンス不要）:
-{"questions": [
-  {"from": 1, "text":"…","options":["…","…","…","…"],"correct_answer":"…","explanation":"…"${isKokugoReading ? ',"passage_id":"s1","passage":"本文の全文"' : ""}}
+{${isReading ? `"passages": [{"id":"s1","text":"本文の全文"}],\n` : ""}"questions": [
+  {"from": 1, "text":"…","options":["…","…","…","…"],"correct_answer":"…","explanation":"…"${isReading ? ',"passage_id":"s1"' : ""}}
 ]}
 from は上の [n] の番号（どの原題をまねたか）です。`;
 
@@ -132,18 +140,22 @@ from は上の [n] の番号（どの原題をまねたか）です。`;
       break;
     }
 
-    const parsed = extractJson<{ questions?: (Draft & { from?: number })[] }>(raw);
-    const got = Array.isArray(parsed?.questions) ? parsed!.questions! : [];
+    const parsed = extractJson<{ questions?: (Draft & { from?: number })[]; passages?: unknown }>(raw);
+    const rawGot = Array.isArray(parsed?.questions) ? parsed!.questions!.filter(Boolean) : [];
+    // 本文をひも付ける。id は束をまたいでも一意にする（束ごとに "s1" から振るとかたまりが混ざる）
+    const got = attachPassages(rawGot, parsed?.passages, newPassagePrefix("s"), (s) => mathText(s));
 
     for (const q of got) {
       const text = mathText(q?.text ?? "");
       if (!text.trim()) continue;
+      const passage = q.passage ?? "";
+      // 本文を読む前提なのに本文が無い設問は、生徒が解けないので入れない
+      if (needsMissingPassage({ text, passage })) continue;
       const key = questionKey(text);
       if (seen.has(key)) continue;
       seen.add(key);
 
       const src = chunk[Math.max(0, Math.min(chunk.length - 1, Number(q?.from ?? 1) - 1))];
-      const passage = mathText(q?.passage ?? "");
 
       collected.push({
         difficulty: ["basic", "standard", "advanced"].includes(src?.difficulty_guess ?? "")
@@ -154,7 +166,7 @@ from は上の [n] の番号（どの原題をまねたか）です。`;
         options: Array.isArray(q?.options) ? q.options.map((o) => mathText(o)) : undefined,
         correct_answer: mathText(q?.correct_answer ?? ""),
         explanation: mathText(q?.explanation ?? ""),
-        ...(passage ? { passage, passage_id: `s${i}_${q?.passage_id ?? "1"}` } : {}),
+        ...(passage ? { passage, passage_id: q.passage_id } : {}),
       });
     }
   }

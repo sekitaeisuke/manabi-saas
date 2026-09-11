@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { mathText } from "@/lib/mathText";
 import { CHOICE_MARKS, type TestQuestion, type VerifyStatus } from "@/lib/testHtml";
+import { needsMissingPassage, newPassagePrefix } from "@/lib/passages";
 
 // テストの問題を1問ずつ直すための編集画面。
 //
@@ -274,6 +275,33 @@ export function TestQuestionEditor<T extends TestQuestion>({
                     className="rounded-lg border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-40">削除</button>
                 </div>
               </div>
+
+              {/* 「本文中で」「筆者が」と書いてあるのに本文が無い設問。生徒は解けないので、ここで手当てできるようにする */}
+              {!pid && needsMissingPassage(q) && (
+                <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  <p className="font-semibold">この設問は本文を読んで答える形ですが、本文が付いていません。</p>
+                  <p className="mt-1">本文を貼り付けるか、「この1問を作り直す」で本文なしで解ける設問にしてください。</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => patch(i, { passage: "", passage_id: newPassagePrefix("m") })}
+                      disabled={busy}
+                      className="rounded-lg border border-red-300 bg-white px-2.5 py-1 font-medium text-red-700 hover:bg-red-100 disabled:opacity-40">
+                      本文を付ける
+                    </button>
+                    {i > 0 && questions[i - 1].passage_id && (
+                      <button
+                        onClick={() => patch(i, {
+                          passage: questions[i - 1].passage ?? "",
+                          passage_id: questions[i - 1].passage_id,
+                        })}
+                        disabled={busy}
+                        className="rounded-lg border border-red-300 bg-white px-2.5 py-1 font-medium text-red-700 hover:bg-red-100 disabled:opacity-40">
+                        前の問（問{i}）と同じ本文にする
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 作り直しの指示。何も書かなければ、同じ単元・同じ難易度で別の問題を作る */}
               {onRegenerate && orderOpen === i && !busy && (

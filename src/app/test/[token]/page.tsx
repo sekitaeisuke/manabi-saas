@@ -1,6 +1,7 @@
 "use client";
 import { showToast } from "@/lib/toast";
 import { mathText } from "@/lib/mathText";
+import { passageLead } from "@/lib/passages";
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
@@ -266,7 +267,7 @@ export default function StudentTestPage({ params }: { params: Promise<{ token: s
               {showPassage && (
                 <div className="mb-3 rounded-3xl border border-indigo-200 bg-indigo-50/60 p-6">
                   <p className="mb-2 text-sm font-bold text-indigo-900">
-                    次の文章を読んで、あとの{groupSize}問に答えなさい。
+                    {passageLead(test.subject)}、あとの{groupSize}問に答えなさい。
                   </p>
                   <p className="whitespace-pre-line leading-8 text-slate-800">{q.passage}</p>
                 </div>

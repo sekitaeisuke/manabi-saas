@@ -6,6 +6,9 @@ import { mathText } from "@/lib/mathText";
 import { CHOICE_COUNT, shuffleChoices, type VerifyStatus } from "@/lib/testHtml";
 import { questionKey } from "@/lib/questionCheck";
 import { pickFromBank } from "@/lib/questionBank";
+import {
+  attachPassages, isReadingUnit, needsMissingPassage, newPassagePrefix, passageLength, readingMode,
+} from "@/lib/passages";
 
 export const maxDuration = 60;
 
@@ -51,14 +54,6 @@ const DIFF_GUIDE: Record<string, string> = {
   standard: "【標準】基礎問題70%＋利用問題・英作文など30%を混在させる",
   advanced: "【応用】すべて利用問題・思考力問題（記述はさせず、四択で考えさせる）",
 };
-
-/** 読解の単元かどうか。国語でこれに当たるときは本文を創作して設問をぶら下げる */
-const READING_UNIT_RE = /読解|説明文|論説|評論|物語|小説|随筆|文脈/;
-
-function isReadingTest(subject: string, units: { grade: string; unit: string }[]): boolean {
-  if (subject !== "国語") return false;
-  return units.some((u) => READING_UNIT_RE.test(u.unit ?? ""));
-}
 
 /** 難易度ごとの必要数を目標問題数から割り振る */
 function quotaByDifficulty(difficulties: string[], target: number): Record<string, number> {
@@ -118,7 +113,8 @@ export async function POST(req: NextRequest) {
   const difficultyGuide = useDiffs.map((d) => DIFF_GUIDE[d]).join("\n");
 
   const target = Math.max(1, Math.min(Number(count) || 10, 60));
-  const reading = isReadingTest(subject, units);
+  const reading = readingMode(subject, units, instructions);
+  const readingUnits = units.filter((u) => isReadingUnit(subject, u.unit ?? "")).map((u) => u.unit);
 
   // すでに作られている問題（続きを頼まれた場合）
   const collected: Draft[] = Array.isArray(existingQuestions)
@@ -173,7 +169,8 @@ export async function POST(req: NextRequest) {
 
   const startedAt = Date.now();
   let rounds = 0;
-  let passageSeq = usedPassages.size;
+  /** 本文を付け忘れた設問として落とした数（講師への注意書きに使う） */
+  let droppedNoPassage = 0;
 
   while (collected.length < target && rounds < MAX_ROUNDS) {
     if (rounds > 0 && Date.now() - startedAt > DEADLINE_MS) break;
@@ -203,25 +200,40 @@ export async function POST(req: NextRequest) {
 
     const already = collected.slice(-40).map((q, i) => `${i + 1}. ${q.text.slice(0, 50)}`).join("\n");
 
-    // 国語の読解は、本文を作ってそこに設問をぶら下げる。
-    // 1本文につき3〜4問。8行程度（240〜320字）の読み切りにする。
-    const readingBlock = reading
+    // 読解は、本文を作ってそこに設問をぶら下げる。1本文につき3〜4問。
+    // 本文は passages に1本ずつ書かせ、設問は passage_id で指す。
+    // 「各設問に本文の全文を入れて」と頼んでいた頃は、2問目以降の本文を空にされて抜け落ちていた。
+    const lang = subject === "英語" ? "英文" : "文章";
+    const usedNote = usedPassages.size > 0
+      ? `\n- すでに次の本文を使っています。**同じ題材・同じ書き出しにしない**:\n${[...usedPassages].map((p) => `　「${p}…」`).join("\n")}`
+      : "";
+    const passageHowTo = `- 本文は "passages" に1本ずつ入れる（id は "p1" "p2" …）。**本文の全文は passages にだけ書く**
+- 設問の側には "passage_id" で、どの本文の設問かを書く（同じ本文の設問は同じ id）
+- **text に「次の${lang}を読んで」「本文中」「筆者」などと書く設問には、必ず passage_id を付ける。**
+  本文の付いていない設問に、本文があるかのような書き方をしない（生徒は本文が無いと解けない）`;
+    const readingBlock = reading === "required"
       ? `
-【本文つきで作ること（国語の読解）】
-- 読解用の本文を**あなたが創作**し、その本文に設問をぶら下げてください
-- 本文は**8行程度（240〜320字）**。${grade}の生徒が読み切れる長さ・語彙にする
-- **1つの本文につき設問は3〜4問**。今回の${batchTotal}問はこの単位で組み立てる
-- 同じ本文にぶら下がる設問には、**同じ passage_id**（"p1" "p2" のような短い文字列）を付け、
-  **passage には本文の全文を各設問に同じ内容で入れる**
-- passage_id は今回 "p${passageSeq + 1}" から順に使う${
-          usedPassages.size > 0
-            ? `\n- すでに次の本文を使っています。**同じ題材・同じ書き出しにしない**:\n${[...usedPassages].map((p) => `　「${p}…」`).join("\n")}`
-            : ""
-        }
+【本文つきの設問（読解）】
+- 読解の単元（${readingUnits.join("・") || "追加指示のとおり"}）の設問は、本文を**あなたが創作**し、その本文に設問をぶら下げる
+- 本文は**${passageLength(subject, grade)}**。${grade}の生徒が読み切れる長さ・語彙にする
+- 詩・短歌・俳句の単元は作品そのものを本文にする。古文・漢文は、有名な作品の**確実に正確に書ける一節**だけを使う（うろ覚えの本文を書かない）
+- **1つの本文につき設問は3〜4問**
+${passageHowTo}${usedNote}
 - 設問は「指示語の指す内容」「筆者の主張」「気持ちの変化」「理由」「語句の意味」など、
   **本文を読まないと答えられないもの**にする。一般常識で解けるものにしない
+- 読解でない単元（漢字・文法・語彙など）の設問は passage_id を付けず、問題文だけで完結させる
 `
-      : "";
+      : reading === "allowed"
+        ? `
+【読解の設問を入れる場合】
+- 本文を**あなたが創作**して passages に入れ、1つの本文に設問3〜4問をぶら下げる（本文は${passageLength(subject, grade)}）
+${passageHowTo}${usedNote}
+`
+        : `
+【本文を読ませる設問は作らない】
+- 「次の文章を読んで」「本文中」「筆者」「次の英文を読んで」のような、別の本文を前提にした設問は作らない
+- 例文・会話が要る設問は、**その例文・会話を問題文の中に全部書く**
+`;
 
     const prompt = `あなたは日本の学習塾の問題作成の専門家です。
 「${typeLabel}」の問題を作成してください。
@@ -247,7 +259,7 @@ ${readingBlock}${already ? `\n【すでに作成済みの問題（重複禁止�
 ${FORMAT_RULES}
 
 以下のJSON形式のみで返してください（説明文・HTMLは不要）:
-{
+{${reading !== "none" ? `\n  "passages": [\n    { "id": "p1", "text": "本文の全文（本文を使う設問が無ければ passages は空の配列）" }\n  ],` : ""}
   "questions": [
     {
       "difficulty": "basic",
@@ -258,7 +270,7 @@ ${FORMAT_RULES}
       "correct_answer": "選択肢1",
       "explanation": "なぜその答えになるかを1〜2文で",
       "unit": "出題単元に挙げた名前のいずれか",
-      "points": 5${reading ? `,\n      "passage_id": "p1",\n      "passage": "本文の全文（8行程度）"` : ""}
+      "points": 5${reading !== "none" ? `,\n      "passage_id": "p1"` : ""}
     }
   ]
 }
@@ -278,9 +290,11 @@ JSONのみを返してください。`;
       break;
     }
 
-    const parsed = extractJson<{ questions?: Draft[] }>(content);
-    const got = Array.isArray(parsed?.questions) ? parsed!.questions! : [];
-    if (got.length === 0) {
+    const parsed = extractJson<{ questions?: Draft[]; passages?: unknown }>(content);
+    const rawGot = Array.isArray(parsed?.questions)
+      ? parsed!.questions!.filter((q) => q && typeof q.text === "string" && q.text.trim())
+      : [];
+    if (rawGot.length === 0) {
       if (collected.length === 0 && rounds >= 1) {
         return NextResponse.json({ error: "生成結果のJSON解析に失敗しました" }, { status: 500 });
       }
@@ -288,20 +302,28 @@ JSONのみを返してください。`;
       continue;
     }
 
-    // 同じバッチ内で passage_id がぶつからないよう、回ごとに接頭辞を付け替える
-    const pidPrefix = `r${rounds + 1}`;
+    // 本文を設問にひも付ける。id はリクエストをまたいでも一意にする
+    // （"r1_p1" を毎回使っていた頃は、続きの作成やバンクの本文とかたまりが混ざった）
+    const got = attachPassages(rawGot, parsed?.passages, newPassagePrefix(), (s) => mathText(s));
+
     let added = 0;
+    let dropped = 0;
     for (const q of got) {
-      if (!q || typeof q.text !== "string" || !q.text.trim()) continue;
       // 指示してもタグやLaTeXが混ざることがあるので、ここで読める表記にそろえる
       const text = mathText(q.text);
       if (!text) continue;
+      const passage = q.passage ?? "";
+      const passageId = q.passage_id;
+      // 「本文中で」「筆者が」と書いてあるのに本文が無い設問は、生徒が解けないので入れない。
+      // 足りない分は次の回で作り直す
+      if (needsMissingPassage({ text, passage })) {
+        dropped++;
+        continue;
+      }
       const k = questionKey(text);
       if (seen.has(k)) continue;
       seen.add(k);
 
-      const passage = mathText(q.passage ?? "");
-      const passageId = passage && q.passage_id ? `${pidPrefix}_${q.passage_id}` : undefined;
       if (passage) usedPassages.add(passage.slice(0, 40));
 
       collected.push({
@@ -322,9 +344,10 @@ JSONのみを返してください。`;
       added++;
       if (collected.length >= target) break;
     }
-    passageSeq = usedPassages.size;
+    droppedNoPassage += dropped;
     rounds++;
-    if (added === 0) break; // 重複ばかりで増えないなら打ち切る
+    // 重複ばかりで増えないなら打ち切る。本文の付け忘れで落としただけなら、もう一度作らせる
+    if (added === 0 && dropped === 0) break;
   }
 
   if (collected.length === 0) {
@@ -340,5 +363,6 @@ JSONのみを返してください。`;
     fromBank,
     generated: questions.length - fromBank,
     complete: questions.length >= target,
+    ...(droppedNoPassage > 0 ? { droppedNoPassage } : {}),
   });
 }

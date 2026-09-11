@@ -85,7 +85,11 @@ ${JSON.stringify(chunk)}
       const improved = parsed?.questions;
       // 数が合わない＝どこかが欠けている。そのときは元をそのまま使う
       if (Array.isArray(improved) && improved.length === chunk.length) {
-        result.push(...improved.map((q, i) => normalizeQuestionMath({ ...chunk[i], ...q })));
+        // 本文は推敲させない。AIは長い本文を縮めたり空にしたりして返すことがあり、
+        // そのまま重ねると本文が抜け落ちる。本文と本文の id は必ず元のものを使う
+        result.push(...improved.map((q, i) => normalizeQuestionMath({
+          ...chunk[i], ...q, passage: chunk[i].passage, passage_id: chunk[i].passage_id,
+        })));
         refined += chunk.length;
       } else {
         result.push(...chunk);

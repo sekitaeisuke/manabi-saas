@@ -9,6 +9,7 @@
 // 講師が問題を1問直すたびにAPIを叩かず、その場で用紙を組み直すため。
 
 import { mathText } from "@/lib/mathText";
+import { passageLead } from "@/lib/passages";
 
 /** 検算（別のAIに正解を伏せて解かせる工程）の結果 */
 export type VerifyStatus = "ok" | "fixed" | "needs_review" | "unverified";
@@ -289,7 +290,7 @@ export function renderTestHtml(opts: {
 
       if (g.passage) {
         parts.push(
-          `<div class="passage"><p class="passage-label">次の文章を読んで、あとの問いに答えなさい。</p>` +
+          `<div class="passage"><p class="passage-label">${passageLead(subject)}、あとの問いに答えなさい。</p>` +
             `<p class="passage-body">${escText(g.passage)}</p></div>`,
         );
       }
